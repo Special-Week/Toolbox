@@ -1,0 +1,27 @@
+# Rust 编译缓存、调试符号和本地发布包；发布包通过 Release 附件分发。
+/target/
+/dist/
+
+# 本地另存网页、截图和参考脚本，不参与程序构建。
+/source/
+
+# 本地分析、覆盖率和临时检查报告。
+/test-results/
+/coverage/
+/tarpaulin-report.html
+*.profraw
+*.profdata
+
+# Python 开发脚本缓存与本地环境。
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# 编辑器临时文件与系统缓存；不忽略用户导出的 CSV 或校准数据。
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini

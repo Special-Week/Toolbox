@@ -1,0 +1,21 @@
+//! 计算页面与纯数值模型；模型层不依赖 UI，供各工具页面复用。
+mod axis;
+mod calibration;
+pub(crate) mod common;
+mod division_table;
+mod errors;
+pub(crate) mod explanations;
+mod humidity;
+mod its90;
+mod math;
+mod numerics;
+pub(crate) mod pressure;
+mod radiation;
+mod range_method;
+mod rtd;
+pub(crate) mod spline;
+mod sprt;
+mod thermistor;
+mod thermocouple;
+mod transmitter;
+mod uncertainty;

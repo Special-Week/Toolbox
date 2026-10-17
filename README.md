@@ -2,6 +2,8 @@
 
 **Toolbox** 功能参考Const工具箱，使用 Rust + egui 编写的离线桌面计算工具，包含 **6 个分类、42 个工具**
 
+项目另提供 **C++ 版本**，源码与构建说明见 [cpp_version](cpp_version/README.md)。
+
 ## 功能分类
 
 ### 单位换算 · 22 个工具

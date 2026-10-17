@@ -1,0 +1,51 @@
+-std=c++17
+-Wall -Wextra -Wpedantic
+-finput-charset=UTF-8 -fexec-charset=UTF-8
+-fno-fast-math -ffp-contract=off
+-DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601 -DWINVER=0x0601
+-Iinclude -Ithird_party
+
+src/main.cpp
+src/core/catalog_data.cpp
+src/core/sensor_data.cpp
+src/core/explanations.cpp
+src/core/numerics.cpp
+src/core/number_text.cpp
+src/core/math.cpp
+src/models/thermocouple.cpp
+src/models/rtd.cpp
+src/models/calibrated.cpp
+src/models/pressure.cpp
+src/models/humidity.cpp
+src/models/radiation.cpp
+src/models/uncertainty.cpp
+src/models/spline.cpp
+src/gui/window.cpp
+src/gui/scene.cpp
+src/gui/text_layout.cpp
+src/gui/navigation.cpp
+src/gui/export.cpp
+src/gui/licenses.cpp
+src/pages/router.cpp
+src/pages/sensors.cpp
+src/pages/standard_couple.cpp
+src/pages/sprt.cpp
+src/pages/thermistor.cpp
+src/pages/pressure.cpp
+src/pages/humidity.cpp
+src/pages/errors.cpp
+src/pages/other.cpp
+
+third_party/double-conversion/bignum.cc
+third_party/double-conversion/bignum-dtoa.cc
+third_party/double-conversion/cached-powers.cc
+third_party/double-conversion/double-to-string.cc
+third_party/double-conversion/fast-dtoa.cc
+third_party/double-conversion/fixed-dtoa.cc
+third_party/double-conversion/string-to-double.cc
+third_party/double-conversion/strtod.cc
+build/Toolbox.res.o
+
+-municode -mwindows -static -static-libgcc
+-lstdc++ -ld2d1 -ldwrite -lcomctl32 -lcomdlg32 -lole32 -lgdi32 -luuid
+-Wl,--major-subsystem-version,6,--minor-subsystem-version,1

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Toolbox ???</title>
+  <desc>?????????????????????????????</desc>
+  <defs>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1">
+      <stop stop-color="#287CEF"/>
+      <stop offset="1" stop-color="#1655CB"/>
+    </linearGradient>
+  </defs>
+  <rect x="24" y="24" width="464" height="464" rx="104" fill="url(#blue)"/>
+  <rect x="208" y="136" width="96" height="72" rx="18" fill="none" stroke="white" stroke-width="18"/>
+  <rect x="112" y="184" width="288" height="200" rx="28" fill="white"/>
+  <path d="M112 246H400" stroke="#2169DA" stroke-width="10"/>
+  <rect x="238" y="232" width="36" height="38" rx="8" fill="white"/>
+  <path d="M160 340L218 306L270 324L348 282" fill="none" stroke="#2169DA" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+  <g fill="#2169DA">
+    <circle cx="160" cy="340" r="10"/>
+    <circle cx="218" cy="306" r="10"/>
+    <circle cx="270" cy="324" r="10"/>
+    <circle cx="348" cy="282" r="10"/>
+  </g>
+</svg>

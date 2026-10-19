@@ -96,7 +96,8 @@ enum class Kind {
     ErrorAnalysis,
     Uncertainty,
     Transmitter,
-    BSplineInterpolation
+    BSplineInterpolation,
+    CalibrationCurveFit
 };
 struct Tool {
     std::string id;

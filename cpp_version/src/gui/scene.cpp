@@ -55,6 +55,13 @@ void Scene::button(Rect r, const std::wstring &t, std::function<void()> action, 
     text(r, t, 13, selected ? White : Blue, false, true);
     hits.push_back({r, clip, std::move(action)});
 }
+void Scene::icon(Rect r) {
+    Draw d;
+    d.kind = 4;
+    d.rect = r;
+    d.clip = clip;
+    draws.push_back(d);
+}
 void Scene::input(const std::string &key, Rect r, const std::wstring &value) {
     fill(r, White, 4);
     border(r);

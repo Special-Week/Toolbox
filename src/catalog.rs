@@ -94,6 +94,7 @@ pub(crate) enum ToolKind {
     Uncertainty,
     Transmitter,
     BSplineInterpolation,
+    CalibrationCurveFit,
 }
 
 pub(crate) struct ToolDef {
@@ -454,5 +455,13 @@ pub(crate) const TOOLS: &[ToolDef] = &[
         ToolKind::BSplineInterpolation,
         "B3",
         "按自然端点条件拟合 Q 型值点，支持区间内插与端点外推。"
+    ),
+    tool!(
+        "calibration_curve_fit",
+        "校准曲线拟合",
+        Other,
+        ToolKind::CalibrationCurveFit,
+        "Fit",
+        "根据成对数据拟合方程，计算系数、相关系数、拟合优度与残差。"
     ),
 ];

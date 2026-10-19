@@ -77,6 +77,8 @@ const std::vector<Tool> &tools() {
          L"压力、温度和湿度变送器量程换算；压力支持线性与开方输出。"},
         {"bspline_interpolation", L"三次均匀 B 样条插值", Group::Other, Kind::BSplineInterpolation, L"B3",
          L"按自然端点条件拟合 Q 型值点，支持区间内插与端点外推。"},
+        {"calibration_curve_fit", L"校准曲线拟合", Group::Other, Kind::CalibrationCurveFit, L"Fit",
+         L"根据成对数据拟合方程，计算系数、相关系数、拟合优度与残差。"},
     };
     return data;
 }

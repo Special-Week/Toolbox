@@ -70,6 +70,7 @@ struct Scene {
     void text(Rect r, const std::wstring &text, float size = 13, Color color = Ink, bool bold = false,
               bool center = false, bool paragraph = false);
     void line(float x1, float y1, float x2, float y2, Color color, float thickness = 1);
+    void icon(Rect r);
     void button(Rect r, const std::wstring &text, std::function<void()> action, bool selected = false);
     void input(const std::string &key, Rect r, const std::wstring &value);
     void combo(const std::string &key, Rect r, const std::vector<std::wstring> &options, int selection);
@@ -129,6 +130,7 @@ class App {
     ID2D1Factory *factory_ = nullptr;
     IDWriteFactory *textFactory_ = nullptr;
     ID2D1HwndRenderTarget *target_ = nullptr;
+    ID2D1Bitmap *iconBitmap_ = nullptr;
     std::map<std::string, Native> native_;
     std::map<HWND, std::string> nativeKeys_;
     bool synchronizing_ = false;
@@ -136,6 +138,7 @@ class App {
     void synchronizeControls();
     void paint();
     void releaseTarget();
+    void loadIconBitmap();
     void rebuild();
     LRESULT message(UINT message, WPARAM w, LPARAM l);
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
@@ -157,6 +160,7 @@ class App {
     void homepage();
     void navigation();
     float paragraphHeight(const std::wstring &text, float width, float size = 13) const;
+    float textWidth(const std::wstring &text, float size = 12) const;
     void exportCsv(const std::wstring &defaultName, const std::string &header, std::size_t count,
                    std::function<std::string(std::size_t)> row);
     HWND handle() const {
@@ -169,5 +173,6 @@ void renderPressure(Page &page);
 void renderHumidity(Page &page);
 void renderErrors(Page &page);
 void renderOther(Page &page);
+void renderCurveFit(Page &page);
 void showLicenses(HWND owner, float dpi);
 } // namespace toolbox

@@ -2,6 +2,10 @@
 #include "toolbox/gui.hpp"
 namespace toolbox {
 void renderOther(Page &p) {
+    if (p.tool.kind == Kind::CalibrationCurveFit) {
+        renderCurveFit(p);
+        return;
+    }
     if (p.tool.kind == Kind::Transmitter) {
         p.heading(L"变送器量程换算");
         int quantity = p.select("quantity", L"被测量类型", {L"压力", L"温度", L"湿度"});

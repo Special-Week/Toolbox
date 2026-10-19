@@ -3,6 +3,7 @@
 #include <windows.h>
 #include "../include/toolbox/resource_ids.h"
 // 资源文件路径相对于 cpp_version；许可文本随源码保存，无需构建时生成。
+TOOLBOX_ICON ICON "resources/toolbox.ico"
 TOOLBOX_LICENSE_TEXT RCDATA "licenses/third-party-licenses.txt"
 1 RT_MANIFEST "resources/Toolbox.manifest"
 1 VERSIONINFO

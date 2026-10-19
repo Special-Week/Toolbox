@@ -1,6 +1,6 @@
 # 工具箱
 
-**Toolbox** 功能参考Const工具箱，使用 Rust + egui 编写的离线桌面计算工具，包含 **6 个分类、42 个工具**
+**Toolbox** 功能参考Const工具箱，使用 Rust + egui 编写的离线桌面计算工具，包含 **6 个分类、43 个工具**
 
 项目另提供 **C++ 版本**，源码与构建说明见 [cpp_version](cpp_version/README.md)。
 
@@ -74,12 +74,13 @@
 
 测量值与分量均使用可增减的独立输入框。
 
-### 其他工具 · 2 个工具
+### 其他工具 · 3 个工具
 
 | 工具 | 功能 |
 |---|---|
 | 变送器 | 压力、温度、相对湿度、露点和绝对湿度的量程与信号双向换算；支持线性/开方特性，以及 mA/V/mV 输出配置。 |
 | 三次均匀 B 样条插值 | 动态 Q 型值点、自然端点插值、端点外推、采样范围与步进、分页预览、曲线悬停取值、完整 CSV 导出及后台任务取消。 |
+| 校准曲线拟合 | 通用 x/y 成对数据，一次、过原点一次、二次与三次最小二乘拟合；输出原单位方程系数、相关系数 r、决定系数 R²、RMSE、残差标准差、曲线及逐点残差，支持复制完整结果。 |
 
 ## 构建与运行
 
@@ -116,6 +117,7 @@ New-Item -ItemType Directory -Path 'dist' -Force | Out-Null
 Copy-Item -LiteralPath 'target/release/Toolbox.exe' -Destination 'dist/Toolbox.exe' -Force
 Copy-Item -LiteralPath 'README.md' -Destination 'dist/README.md' -Force
 Copy-Item -LiteralPath 'licenses/PsychroLib-LICENSE.txt' -Destination 'dist/PsychroLib-LICENSE.txt' -Force
+Copy-Item -LiteralPath 'LICENSE' -Destination 'dist/LICENSE' -Force
 
 Compress-Archive -LiteralPath @(
     'dist/Toolbox.exe',
@@ -142,8 +144,11 @@ dist/
 Toolbox/
 ├── Cargo.toml                 # 项目信息、可执行目标与运行依赖
 ├── Cargo.lock                 # 锁定依赖版本
+├── build.rs                   # 将图标与版本信息嵌入 Windows EXE
+├── LICENSE                    # 项目自有代码的 MIT 许可证
 ├── README.md
 ├── .gitignore
+├── assets/                    # 原创 SVG 图标及 PNG、ICO，供两个版本共用
 ├── data/
 │   └── thermocouple/           # 八型 NIST 热电偶正向参考函数系数
 ├── licenses/                  # 第三方声明
@@ -151,9 +156,10 @@ Toolbox/
     ├── main.rs                # 程序入口、窗口和主题
     ├── app.rs                 # 应用状态、表单输入与页面分派
     ├── app/dashboard.rs       # 首页、筛选和自适应卡片
-    ├── catalog.rs             # 六大分类及 42 个工具的目录
+    ├── catalog.rs             # 六大分类及 43 个工具的目录
     ├── navigation.rs          # 侧栏分类、折叠与选中状态
     ├── fonts.rs               # 中文、数学和符号字体回退
+    ├── icon.rs                # 内嵌窗口图标与页眉图片
     ├── units/
     │   ├── mod.rs             # 单位定义、换算与输入范围检查
     │   ├── data.rs            # 256 项单位的名称、符号及系数
@@ -164,6 +170,8 @@ Toolbox/
         ├── explanations.rs    # 工具内显示的计算说明
         ├── numerics.rs        # 稳定统计、平方和根及有限值检查
         ├── calibration.rs     # 多项式、区间反算和 QR 拟合
+        ├── curve_fit.rs       # 通用校准曲线拟合页面
+        ├── curve_fit/         # 曲线拟合模型、统计量和图表
         ├── math.rs            # CVD 基函数、线性方程及标准大气
         ├── axis.rs            # 曲线坐标轴、刻度和标签
         ├── division_table.rs  # 分度表、分页、特性曲线和 CSV
@@ -234,6 +242,15 @@ Toolbox/
 - 扩展不确定度为 `U=k·uc`，k 必须大于零。修约按 uc、U 的较大值和所选有效位确定小数位，当前最低修约到整数位；修约后 U 由修约后的 uc 乘 k 得到。没有自动计算有效自由度、相关系数或置信水平。
 - 变送器输入限定在所设量程内，范围上限必须大于下限；开方使用非负量程比例，不做负区或超量程外推。mA/V/mV 及过程量范围由用户按仪表配置填写，切换信号名称不代表自动换算仪表配置。
 
+### 校准曲线拟合
+
+- Rust 与 C++ 版均提供，位于“其他工具”。使用通用输入量 x、响应量 y，可自定义名称和单位；每列单位须自行统一，名称与单位仅用于标注。
+- 支持 2～200 组数据，输入及残差列表每页 10 组。允许重复 x 和无序输入，但须具有足够的不同 x 值，以独立确定所选模型的参数；空白、非有限值和退化数据会提示错误。
+- 采用等权最小二乘法；一次模型估计 K0、K1，过原点一次固定 K0=0，二次及三次模型分别估计 3、4 个参数。使用归一化坐标及 QR 求解，报告系数恢复到原始单位；未自动进行加权、空白扣除或异常值剔除。
+- r 是原始 x、y 的 Pearson 线性相关系数。R² 使用中心化定义 `1−Σ残差²/Σ(y−均值 y)²`；带截距的一次拟合在相关系数有定义时满足 R²=r²，其他模型不能直接以 r² 代替 R²；过原点模型的 R² 允许为负。响应量无变化时，r 和 R² 均未定义。
+- 残差为实测 y 减拟合 y，`RMSE=√(Σ残差²/n)`，残差标准差为 `√[Σ残差²/(n−p)]`。p 为实际估计参数数，n=p 时残差标准差未定义；高相关性或零残差不自动代表校准合格。
+- 图表展示数据范围内的拟合曲线，并提供残差图。复制结果包含完整精度系数及全部数据点，显示舍入不参与计算；默认六组数据仅作示例。
+
 ### 分度表与 B 样条
 
 - 分度表最多 50,000 行，按显示温标的步长采样并包含终点，预览每页 10 行；表中变化率为有限差分，页面模型提供的解析导数则按对应算法计算。
@@ -241,3 +258,7 @@ Toolbox/
 - 自然端点条件施加在参数曲线上，端点 x/y 的二阶参数导数均为零。外推延用端点三次式，仅在 x 的单调分支内有效。
 - 样条采样最多 5,000,000 点，范围末端始终包含最大 x，步进须能被当前数值精度分辨。预览只显示前 100 行、每页 10 行，CSV 导出全部采样点。
 - 分度表 CSV 使用带 BOM 的 UTF-8，样条 CSV 使用 `x,y` 表头及数值；大规模样条导出在后台进行，可取消，写入失败或取消时不会覆盖已有目标文件。
+
+## 许可证
+
+本项目自有代码（Rust 与 C++ 版本）采用 [MIT 许可证](LICENSE)。第三方组件遵循各自的许可证，相关声明见 [licenses/](licenses/) 和 [C++ 版第三方组件说明](cpp_version/THIRD-PARTY-NOTICES.md)。

@@ -2,6 +2,7 @@
 mod axis;
 mod calibration;
 pub(crate) mod common;
+mod curve_fit;
 mod division_table;
 mod errors;
 pub(crate) mod explanations;

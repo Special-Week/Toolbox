@@ -20,7 +20,9 @@ src/models/humidity.cpp
 src/models/radiation.cpp
 src/models/uncertainty.cpp
 src/models/spline.cpp
+src/models/curve_fit.cpp
 src/gui/window.cpp
+src/gui/icon.cpp
 src/gui/scene.cpp
 src/gui/text_layout.cpp
 src/gui/navigation.cpp
@@ -35,6 +37,8 @@ src/pages/pressure.cpp
 src/pages/humidity.cpp
 src/pages/errors.cpp
 src/pages/other.cpp
+src/pages/curve_fit.cpp
+src/pages/curve_fit_chart.cpp
 
 third_party/double-conversion/bignum.cc
 third_party/double-conversion/bignum-dtoa.cc
@@ -47,5 +51,5 @@ third_party/double-conversion/strtod.cc
 build/Toolbox.res.o
 
 -municode -mwindows -static -static-libgcc
--lstdc++ -ld2d1 -ldwrite -lcomctl32 -lcomdlg32 -lole32 -lgdi32 -luuid
+-lstdc++ -ld2d1 -ldwrite -lwindowscodecs -lcomctl32 -lcomdlg32 -lole32 -lgdi32 -luuid
 -Wl,--major-subsystem-version,6,--minor-subsystem-version,1

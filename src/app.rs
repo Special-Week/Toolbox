@@ -22,6 +22,8 @@ pub(crate) struct ToolboxApp {
     collapsed_groups: HashSet<Group>,
     spline_export: Option<ExportJob>,
     spline_export_message: Option<String>,
+    // 页眉纹理由 egui 持有，保持高分辨率源图以适应窗口 DPI 缩放。
+    brand_icon: Option<egui::TextureHandle>,
 }
 
 impl Default for ToolboxApp {
@@ -35,6 +37,7 @@ impl Default for ToolboxApp {
             collapsed_groups: Group::ALL.into_iter().collect(),
             spline_export: None,
             spline_export_message: None,
+            brand_icon: None,
         }
     }
 }
@@ -136,17 +139,19 @@ impl ToolboxApp {
     }
 
     fn render_header(&mut self, ui: &mut egui::Ui) {
+        let icon = self.brand_icon.get_or_insert_with(|| {
+            let data = crate::icon::data();
+            ui.ctx().load_texture(
+                "toolbox-brand",
+                egui::ColorImage::from_rgba_unmultiplied(
+                    [data.width as usize, data.height as usize],
+                    &data.rgba,
+                ),
+                egui::TextureOptions::LINEAR,
+            )
+        });
         ui.horizontal(|ui| {
-            ui.add_sized(
-                [42.0, 42.0],
-                egui::Button::new(
-                    RichText::new("工")
-                        .size(21.0)
-                        .strong()
-                        .color(Color32::WHITE),
-                )
-                .fill(BLUE),
-            );
+            ui.image((icon.id(), Vec2::splat(42.0)));
             ui.label(RichText::new("工具箱").size(17.0).strong().color(INK));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                 ui.label(RichText::new("● 本地计算").size(12.0).color(GREEN));
@@ -619,6 +624,7 @@ impl ToolboxApp {
             ToolKind::Uncertainty => self.render_uncertainty(ui, tool),
             ToolKind::Transmitter => self.render_transmitter(ui, tool),
             ToolKind::BSplineInterpolation => self.render_bspline(ui, tool),
+            ToolKind::CalibrationCurveFit => self.render_curve_fit(ui, tool),
             ToolKind::Unit(_) => {}
         }
     }

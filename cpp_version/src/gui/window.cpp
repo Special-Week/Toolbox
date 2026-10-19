@@ -21,6 +21,17 @@ static LRESULT CALLBACK editProcedure(HWND window, UINT msg, WPARAM w, LPARAM l,
     }
     return DefSubclassProc(window, msg, w, l);
 }
+static LRESULT CALLBACK comboProcedure(HWND window, UINT msg, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR) {
+    // 下拉框收起时，滚轮只滚动页面，避免误改分度号、单位等计算参数。
+    // 展开列表后仍保留原生滚动、点击与键盘选择行为。
+    if (msg == WM_MOUSEWHEEL && !SendMessageW(window, CB_GETDROPPEDSTATE, 0, 0)) {
+        return SendMessageW(GetParent(window), msg, w, l);
+    }
+    if (msg == WM_NCDESTROY) {
+        RemoveWindowSubclass(window, comboProcedure, 1);
+    }
+    return DefSubclassProc(window, msg, w, l);
+}
 template <class T> static void release(T *&object) {
     if (object) {
         object->Release();
@@ -50,6 +61,7 @@ App::~App() {
     }
 }
 void App::releaseTarget() {
+    release(iconBitmap_);
     release(target_);
 }
 void App::refresh() {
@@ -82,7 +94,11 @@ int App::run(HINSTANCE instance, int show) {
     wc.hInstance = instance;
     wc.lpszClassName = L"ToolboxCppWindow";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(1));
+    wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(TOOLBOX_ICON));
+    // 标题栏使用 ICO 中专门绘制的小尺寸图像，避免直接缩小大图导致细节模糊。
+    wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(TOOLBOX_ICON), IMAGE_ICON,
+                                               GetSystemMetrics(SM_CXSMICON),
+                                               GetSystemMetrics(SM_CYSMICON), LR_SHARED));
     RegisterClassExW(&wc);
     HRESULT result = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &factory_);
     if (FAILED(result) || FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
@@ -322,9 +338,7 @@ void App::synchronizeControls() {
                                        0, 0, 0, 0, window_, nullptr, GetModuleHandleW(nullptr), nullptr);
             require(n.window != nullptr, "无法创建输入控件");
             nativeKeys_[n.window] = c.key;
-            if (!combo) {
-                SetWindowSubclass(n.window, editProcedure, 1, 0);
-            }
+            SetWindowSubclass(n.window, combo ? comboProcedure : editProcedure, 1, 0);
         }
         n.seen = true;
         SendMessageW(n.window, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
@@ -392,10 +406,10 @@ void App::rebuild() {
     scene.fill({0, 0, width, height}, Background);
     scene.fill({0, 0, width, 68}, White);
     scene.line(0, 68, width, 68, Border);
-    scene.fill({23, 14, 42, 42}, Blue, 3);
-    scene.text({23, 14, 42, 42}, L"工", 25, White, false, true);
+    scene.icon({23, 14, 42, 42});
     scene.text({74, 14, 240, 42}, L"工具箱", 19, Ink, true);
-    scene.text({width - 182, 20, 165, 30}, L"42 项工具  ● 本地计算", 12, Green, false, true);
+    scene.text({width - 182, 20, 165, 30}, std::to_wstring(tools().size()) + L" 项工具  ● 本地计算",
+               12, Green, false, true);
     navigation();
     float left = width >= 880 ? (collapsed ? 92.f : 245.f) : 0;
     float top = width >= 880 ? 82.f : 126.f;
@@ -405,7 +419,9 @@ void App::rebuild() {
     } else {
         const auto &tool = tools().at(std::size_t(selected));
         float x = left + 24,
-              w = std::min(width - left - 48, tool.kind == Kind::BSplineInterpolation ? 960.f : 820.f),
+              w = std::min(width - left - 48,
+                           tool.kind == Kind::BSplineInterpolation || tool.kind == Kind::CalibrationCurveFit
+                               ? 960.f : 820.f),
               y = top + 10 - scroll;
         scene.button({x, y, 86, 28}, L"← 工具箱", [this] { open(-1); });
         scene.text({x + 96, y, w - 96, 28}, L"/ " + groupName(tool.group) + L" / " + tool.name, 12, Muted);
@@ -460,6 +476,7 @@ void App::paint() {
         }
     }
     if (target_) {
+        loadIconBitmap();
         target_->BeginDraw();
         target_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
         target_->Clear(D2D1::ColorF(1, 1, 1));
@@ -485,6 +502,10 @@ void App::paint() {
                     target_->DrawLine(D2D1::Point2F(d.rect.x, d.rect.y),
                                       D2D1::Point2F(d.rect.x + d.rect.w, d.rect.y + d.rect.h), brush,
                                       d.stroke);
+                } else if (d.kind == 4) {
+                    if (iconBitmap_) {
+                        target_->DrawBitmap(iconBitmap_, r, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                    }
                 } else {
                     IDWriteTextFormat *format = nullptr;
                     textFactory_->CreateTextFormat(

@@ -240,6 +240,6 @@ impl ToolboxApp {
                 |t| model.emf(t).map(|e| e - cold),
             );
         }
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 }

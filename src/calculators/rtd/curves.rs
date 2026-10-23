@@ -2,7 +2,7 @@
 //! 返回 R/R₀ 及其对摄氏温度的解析导数，避免把不同型号混为同一组 CVD 参数。
 
 #[derive(Clone, Copy, Debug)]
-pub(super) enum Curve {
+pub(crate) enum Curve {
     Cvd([f64; 3]),
     Pt3916,
     Cu428,
@@ -13,7 +13,7 @@ pub(super) enum Curve {
     Ni1000,
 }
 
-pub(super) const PT385: [f64; 3] = [3.9083e-3, -5.775e-7, -4.183e-12];
+pub(crate) const PT385: [f64; 3] = [3.9083e-3, -5.775e-7, -4.183e-12];
 
 /// Returns R(t)/R0 and its analytic derivative with respect to degrees Celsius.
 /// Horner evaluation calculates both using the same polynomial coefficients.
@@ -28,7 +28,7 @@ fn polynomial(coefficients: &[f64], t: f64) -> (f64, f64) {
 }
 
 impl Curve {
-    pub(super) fn evaluate(self, t: f64) -> (f64, f64) {
+    pub(crate) fn evaluate(self, t: f64) -> (f64, f64) {
         match self {
             Self::Cvd([a, b, c]) => {
                 if t < 0.0 {
@@ -84,7 +84,7 @@ impl Curve {
 
     /// CVD inversion needs a strictly increasing, positive characteristic over
     /// the entire supported range. Check the extrema of dR/dt analytically.
-    pub(super) fn validate(self, min: f64, max: f64) -> Result<(), String> {
+    pub(crate) fn validate(self, min: f64, max: f64) -> Result<(), String> {
         if let Self::Cvd([a, b, c]) = self {
             if ![a, b, c].iter().all(|v| v.is_finite()) {
                 return Err("CVD 系数必须是有限数字".to_owned());

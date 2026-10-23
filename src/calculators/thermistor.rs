@@ -1,6 +1,9 @@
 //! β 热敏电阻模型；内部温度为 K，对外温度参数和返回值为 °C，电阻为 Ω。
 use super::numerics::finite;
+#[cfg(feature = "desktop-ui")]
+#[path = "thermistor/page.rs"]
 mod page;
+#[path = "thermistor/polynomial.rs"]
 pub(crate) mod polynomial;
 
 pub(crate) struct BetaThermistor {

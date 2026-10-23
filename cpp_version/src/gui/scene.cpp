@@ -1,9 +1,7 @@
 // 声明式界面场景。控件键值稳定，计算结果刷新不会重建正在输入的编辑框。
 #include "toolbox/gui.hpp"
 namespace toolbox {
-bool Rect::contains(float px, float py) const {
-    return px >= x && py >= y && px < x + w && py < y + h;
-}
+bool Rect::contains(float px, float py) const { return px >= x && py >= y && px < x + w && py < y + h; }
 std::wstring &State::value(const std::string &key, const std::wstring &initial) {
     return values.emplace(key, initial).first->second;
 }
@@ -72,9 +70,7 @@ void Scene::combo(const std::string &key, Rect r, const std::vector<std::wstring
 }
 Page::Page(App &owner, Scene &scene, const Tool &definition, float left, float top, float width)
     : app(owner), ui(scene), state(owner.state), tool(definition), x(left), y(top), w(width) {}
-std::string Page::key(const std::string &f) const {
-    return tool.id + "." + f;
-}
+std::string Page::key(const std::string &f) const { return tool.id + "." + f; }
 void Page::heading(const std::wstring &t) {
     y += 12;
     ui.text({x, y, w, 26}, t, 15, Ink, true);
@@ -86,6 +82,7 @@ void Page::note(const std::wstring &t, Color c) {
     y += h + 6;
 }
 void Page::explain() {
+    // 说明只读取当前选择，公式默认折叠，不改变计算参数。
     int variant = 0;
     if (tool.kind == Kind::ResultantError) {
         variant = state.choice(key("mode"), 0);
@@ -93,32 +90,42 @@ void Page::explain() {
         variant = state.choice(key("budget.mode"), 0);
     } else if (tool.kind == Kind::Thermistor) {
         variant = state.choice(key("family"), 0);
+    } else if (tool.kind == Kind::StandardThermocouple) {
+        variant = state.choice(key("calibration"), 0);
+    } else if (tool.kind == Kind::PressureReference) {
+        variant = state.choice(key("reference_type"), 0);
+    } else if (tool.kind == Kind::TransmitterReference) {
+        variant = state.choice(key("model"), 0);
+    } else if (tool.kind == Kind::EarBlackbody) {
+        variant = state.choice(key("ear.model"), 0);
     } else if (tool.kind == Kind::StandardPlatinumResistor) {
         variant = state.choice(key("model"), 0);
+        if (variant == 0 && state.choice(key("deviation"), 0) == 1) {
+            variant = 2;
+        }
     } else if (tool.kind == Kind::BlackbodyError || tool.kind == Kind::RadiationCorrection) {
         variant = state.choice(key("radiation.model"), 0);
     }
-    auto sections = calculationNotes(tool, variant);
-    const float padding = 16, innerWidth = w - 2 * padding;
-    std::vector<float> heights;
-    float height = padding + 36;
-    for (const auto &section : sections) {
-        float h = app.paragraphHeight(section.second, innerWidth);
-        heights.push_back(h);
-        height += 24 + h + 14;
+    const auto sections = calculationNotes(tool, variant);
+    if (sections.empty()) {
+        return;
     }
+    const float padding = 16, innerWidth = w - 2 * padding;
+    const float textHeight = app.paragraphHeight(sections.front().second, innerWidth);
+    const float height = 2 * padding + 32 + textHeight;
     ui.fill({x, y, w, height}, White, 8);
     ui.border({x, y, w, height}, Border, 8);
     ui.fill({x, y + 16, 3, 22}, Blue, 1);
     ui.text({x + padding, y + padding, innerWidth, 24}, L"计算说明", 15, Ink, true);
-    float row = y + padding + 36;
-    for (std::size_t i = 0; i < sections.size(); ++i) {
-        ui.text({x + padding, row, innerWidth, 22}, sections[i].first, 13, Blue, true);
-        row += 24;
-        ui.text({x + padding, row, innerWidth, heights[i]}, sections[i].second, 13, Ink, false, false, true);
-        row += heights[i] + 14;
+    ui.text({x + padding, y + padding + 32, innerWidth, textHeight}, sections.front().second, 13, Ink, false,
+            false, true);
+    y += height + 8;
+    if (sections.size() > 1 &&
+        collapse("calculation.formula." + std::to_string(variant), L"详细公式与取值")) {
+        for (std::size_t i = 1; i < sections.size(); ++i) {
+            note(sections[i].second, Ink);
+        }
     }
-    y += height + 12;
 }
 std::wstring Page::textInput(const std::string &f, const std::wstring &label, const std::wstring &initial) {
     auto &value = state.value(key(f), initial);
@@ -262,9 +269,7 @@ std::vector<std::pair<double, double>> Page::pairs(const std::string &f, const s
     }
     return values;
 }
-void Page::check() const {
-    require(inputError.empty(), utf8(inputError).c_str());
-}
+void Page::check() const { require(inputError.empty(), utf8(inputError).c_str()); }
 void Page::metrics(const std::wstring &title, const Metrics &entries) {
     check();
     heading(title);

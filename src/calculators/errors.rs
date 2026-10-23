@@ -13,15 +13,8 @@ impl ToolboxApp {
             ui.set_max_width(820.0);
             let defaults = ["10.02", "10.01", "10.03", "10.02", "10.01"];
             let count = self.dynamic_count(ui, tool, "samples", "测量值", 5, 2, 50);
-            let values = self.dynamic_values(
-                ui,
-                tool,
-                "samples.value",
-                count,
-                "测量值",
-                &defaults,
-                "输入一个测量结果",
-            );
+            let values =
+                self.dynamic_values(ui, tool, "samples.value", count, "测量值", &defaults, "");
             let result = (|| {
                 let values = values?;
                 let stats = statistics(&values)?;
@@ -53,7 +46,7 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "统计结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     pub(crate) fn render_range_method(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -93,7 +86,7 @@ impl ToolboxApp {
                     count,
                     "测量值",
                     &defaults,
-                    "输入一个测量结果",
+                    "",
                 )
             } else {
                 Ok(Vec::new())
@@ -127,7 +120,7 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "极差法结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     pub(crate) fn render_resultant_error(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -192,7 +185,7 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "合成结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     pub(crate) fn render_error_analysis(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -244,7 +237,7 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "误差结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     pub(crate) fn render_simple_uncertainty(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -260,20 +253,25 @@ impl ToolboxApp {
                 a_count,
                 "测量值",
                 &["10.02", "10.01", "10.03", "10.02", "10.01"],
-                "输入一个测量结果",
+                "",
             );
-            self.input(ui, tool, "a_sensitivity", "A 类灵敏系数", "1", "默认 1");
+            self.input(ui, tool, "a_sensitivity", "A 类灵敏系数", "1", "");
             ui.add_space(7.0);
             ui.label(RichText::new("B 类评定数据").size(14.0).strong().color(INK));
-            let b_count = self.dynamic_count(ui, tool, "b_widths", "B 类半宽", 2, 0, 50);
+            let b_count = self.dynamic_count(ui, tool, "b_widths", "B 类分量", 2, 0, 50);
+            let normal = matches!(self.value(tool, "distribution", "0").as_str(), "2" | "3");
             let b_widths = self.dynamic_values(
                 ui,
                 tool,
                 "b_widths.value",
                 b_count,
-                "半宽",
+                if normal {
+                    "扩展不确定度 U"
+                } else {
+                    "半宽"
+                },
                 &["0.02", "0.03"],
-                "输入该 B 类分量的半宽",
+                "",
             );
             let distribution = self.select_index(
                 ui,
@@ -298,7 +296,7 @@ impl ToolboxApp {
                 "1",
                 "当前统一应用于 B 类分量",
             );
-            self.input(ui, tool, "coverage", "包含因子 k", "2", "常用值为 2");
+            self.input(ui, tool, "coverage", "包含因子 k", "2", "");
             let result = (|| {
                 let data = a_values?;
                 let u_a = if data.is_empty() {
@@ -345,6 +343,6 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "不确定度结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 }

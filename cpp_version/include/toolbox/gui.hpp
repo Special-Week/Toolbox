@@ -122,6 +122,8 @@ class App {
         HWND window = nullptr;
         bool combo = false, seen = false;
         std::string key;
+        int optionTextWidth = 0;
+        float optionDpi = 0;
     };
     HWND window_ = nullptr;
     float dpi_ = 96;
@@ -150,7 +152,7 @@ class App {
     Scene scene;
     int selected = -1, filter = -1;
     bool collapsed = false;
-    std::array<bool, 6> expanded{};
+    std::array<bool, groupCount> expanded{};
     float scroll = 0, sideScroll = 0, width = 1220, height = 820;
     ExportJob exportJob;
     ~App();
@@ -174,5 +176,6 @@ void renderHumidity(Page &page);
 void renderErrors(Page &page);
 void renderOther(Page &page);
 void renderCurveFit(Page &page);
+void renderGauges(Page &page);
 void showLicenses(HWND owner, float dpi);
 } // namespace toolbox

@@ -28,55 +28,7 @@ pub(crate) fn input_row(ui: &mut egui::Ui, label: &str, value: &mut String, hint
     }
 }
 
-/// 输入阶段拒绝 NaN 和无穷大，避免非有限值进入计算或坐标映射。
-pub(crate) fn parse_number(text: &str) -> Result<f64, String> {
-    let text = text.trim();
-    if text.is_empty() {
-        return Err("请填写数值".to_owned());
-    }
-    let value = text
-        .parse::<f64>()
-        .map_err(|_| "请输入有效数字".to_owned())?;
-    if !value.is_finite() {
-        return Err("数值必须为有限数字".to_owned());
-    }
-    Ok(value)
-}
-
-/// 通用结果使用普通小数；极小值按有效数字展开，不因固定小数位被显示成零。
-/// 该函数只控制显示精度，文件导出直接写入未经过显示修约的 f64。
-pub(crate) fn format_number(value: f64) -> String {
-    if !value.is_finite() {
-        return "—".to_owned();
-    }
-    if value == 0.0 {
-        return "0".to_owned();
-    }
-    if value.abs() >= 1.0e10 || value.abs() < 1.0e-4 {
-        // Retain the previous eleven significant digits. Display expands the
-        // rounded value as a plain decimal, including very small coefficients.
-        let rounded = format!("{value:.10e}").parse::<f64>().unwrap_or(value);
-        // Rounding a value near f64::MAX can overflow; keep that finite value.
-        return if rounded.is_finite() { rounded } else { value }.to_string();
-    }
-    format!("{value:.8}")
-        .trim_end_matches('0')
-        .trim_end_matches('.')
-        .to_owned()
-}
-
-pub(crate) fn format_unit(value: f64) -> String {
-    if !value.is_finite() {
-        return "—".to_owned();
-    }
-    if value == 0.0 {
-        return "0.0000000".to_owned();
-    }
-    if value.abs() >= 1.0e9 || (value != 0.0 && value.abs() < 1.0e-4) {
-        return format_number(value);
-    }
-    format!("{value:.7}")
-}
+pub(crate) use super::format::{format_number, format_unit, parse_number};
 
 pub(crate) fn show_result_or_error(ui: &mut egui::Ui, title: &str, result: Results) {
     match result {
@@ -123,6 +75,15 @@ pub(crate) fn render_error_message(ui: &mut egui::Ui, message: &str) {
 }
 
 pub(crate) fn info_note(ui: &mut egui::Ui, kind: ToolKind) {
+    info_note_mode(ui, kind, 0);
+}
+
+/// 默认显示专业使用条件，较长公式按当前模型折叠查看。
+pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
+    let (summary, formula) = super::explanations::selected(kind, mode);
+    if summary.is_empty() && formula.is_empty() {
+        return;
+    }
     ui.add_space(10.0);
     egui::Frame::new()
         .fill(BLUE_SOFT)
@@ -130,13 +91,45 @@ pub(crate) fn info_note(ui: &mut egui::Ui, kind: ToolKind) {
         .inner_margin(12.0)
         .show(ui, |ui| {
             ui.label(RichText::new("计算说明").size(12.5).strong().color(BLUE));
-            ui.add(
-                egui::Label::new(
-                    RichText::new(super::explanations::for_tool(kind))
-                        .size(12.0)
-                        .color(INK),
-                )
-                .wrap(),
-            );
+            ui.add(egui::Label::new(RichText::new(summary).size(12.0).color(INK)).wrap());
+            if !formula.is_empty() {
+                egui::CollapsingHeader::new("详细公式与取值")
+                    .id_salt((summary, mode, "formula"))
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::Label::new(RichText::new(formula).size(12.0).color(INK)).wrap(),
+                        );
+                    });
+            }
         });
+}
+
+impl crate::app::ToolboxApp {
+    /// 读取现有选择以匹配说明，不修改模型参数。
+    pub(crate) fn calculation_note(&mut self, ui: &mut egui::Ui, tool: &crate::catalog::ToolDef) {
+        let key = match tool.kind {
+            ToolKind::StandardThermocouple => "stc.calibration",
+            ToolKind::StandardPlatinumResistor => "sprt.model",
+            ToolKind::Thermistor => "ntc.model",
+            ToolKind::PressureReference => "selection.reference_type",
+            ToolKind::TransmitterReference => "selection.model",
+            ToolKind::EarBlackbody => "ear.model",
+            ToolKind::BlackbodyError | ToolKind::RadiationCorrection => "model",
+            ToolKind::ResultantError => "components.mode",
+            ToolKind::Uncertainty => "budget.mode",
+            _ => "",
+        };
+        let mut mode = if key.is_empty() {
+            0
+        } else {
+            self.value(tool, key, "0").parse().unwrap_or(0)
+        };
+        if matches!(tool.kind, ToolKind::StandardPlatinumResistor)
+            && mode == 0
+            && self.value(tool, "sprt.deviation", "0") == "1"
+        {
+            mode = 2;
+        }
+        info_note_mode(ui, tool.kind, mode);
+    }
 }

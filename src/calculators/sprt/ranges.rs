@@ -1,12 +1,12 @@
 //! 页面低温分区；换算区间与确定偏差系数所需的校准固定点分别保存。
-pub(super) struct LowRange {
+pub(crate) struct LowRange {
     pub label: &'static str,
     pub minimum: f64,
     pub coefficients: Option<[&'static str; 2]>,
     pub fixed_points: &'static [f64],
 }
 
-pub(super) const LOW_RANGES: [LowRange; 3] = [
+pub(crate) const LOW_RANGES: [LowRange; 3] = [
     LowRange {
         label: "a4, b4（−189.344～0 °C）",
         minimum: -189.344,

@@ -50,7 +50,8 @@ struct TemperatureUnit {
     double display(double celsius) const;
     double span() const;
 };
-enum class Group { Units, Its90, Pressure, Humidity, Errors, Other };
+enum class Group { Units, Its90, Pressure, Humidity, Errors, Gauges, Other };
+constexpr int groupCount = 7;
 enum class Dimension {
     Pressure,
     Temperature,
@@ -97,7 +98,13 @@ enum class Kind {
     Uncertainty,
     Transmitter,
     BSplineInterpolation,
-    CalibrationCurveFit
+    CalibrationCurveFit,
+    GaugeMetric,
+    GaugeTrapezoidal,
+    GaugeUnified,
+    GaugePipe,
+    GaugeRebar,
+    GaugeSmooth
 };
 struct Tool {
     std::string id;

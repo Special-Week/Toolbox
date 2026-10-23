@@ -3,7 +3,7 @@ use super::curves::{Curve, PT385};
 use crate::calculators::common::format_number;
 
 #[derive(Clone, Copy, PartialEq)]
-pub(super) enum ToleranceKind {
+pub(crate) enum ToleranceKind {
     Platinum,
     // 非 385 特性或自定义 CVD：允许展示公式参考值，不声称符合 IEC 标准特性。
     PlatinumReference,
@@ -11,7 +11,7 @@ pub(super) enum ToleranceKind {
     None,
 }
 
-pub(super) struct Graduation {
+pub(crate) struct Graduation {
     pub key: &'static str,
     pub name: &'static str,
     pub r0: f64,
@@ -23,11 +23,11 @@ pub(super) struct Graduation {
 
 impl Graduation {
     /// 稳定标识与显示名称分离，修改标签不会混用不同分度号的数值。
-    pub(super) fn field_key(&self, field: &str) -> String {
+    pub(crate) fn field_key(&self, field: &str) -> String {
         format!("rtd.{}.{field}", self.key)
     }
 
-    pub(super) fn custom(&self) -> bool {
+    pub(crate) fn custom(&self) -> bool {
         self.key == "cvd"
     }
 }
@@ -46,7 +46,7 @@ macro_rules! rtd {
     };
 }
 
-pub(super) const GRADUATIONS: [Graduation; 22] = [
+pub(crate) const GRADUATIONS: [Graduation; 22] = [
     rtd!(
         "pt100_385",
         "Pt100 (385)",
@@ -247,14 +247,14 @@ pub(super) const GRADUATIONS: [Graduation; 22] = [
     ),
 ];
 
-pub(super) struct RtdModel {
+pub(crate) struct RtdModel {
     pub graduation: &'static Graduation,
     pub r0: f64,
     curve: Curve,
 }
 
 impl RtdModel {
-    pub(super) fn new(
+    pub(crate) fn new(
         graduation: &'static Graduation,
         r0: f64,
         custom_coefficients: Option<[f64; 3]>,
@@ -278,7 +278,7 @@ impl RtdModel {
         Ok(model)
     }
 
-    pub(super) fn resistance(&self, temperature: f64) -> Result<f64, String> {
+    pub(crate) fn resistance(&self, temperature: f64) -> Result<f64, String> {
         if !temperature.is_finite()
             || !(self.graduation.min..=self.graduation.max).contains(&temperature)
         {
@@ -296,7 +296,7 @@ impl RtdModel {
         Ok(resistance)
     }
 
-    pub(super) fn temperature(&self, resistance: f64) -> Result<f64, String> {
+    pub(crate) fn temperature(&self, resistance: f64) -> Result<f64, String> {
         let mut low = self.graduation.min;
         let mut high = self.graduation.max;
         let low_r = self.resistance(low)?;
@@ -329,7 +329,7 @@ impl RtdModel {
         Ok(low + (high - low) * 0.5)
     }
 
-    pub(super) fn slope(&self, temperature: f64) -> Result<f64, String> {
+    pub(crate) fn slope(&self, temperature: f64) -> Result<f64, String> {
         self.resistance(temperature)?;
         let slope = self.r0 * self.curve.evaluate(temperature).1;
         if !slope.is_finite() || slope <= 0.0 {
@@ -340,14 +340,14 @@ impl RtdModel {
 }
 
 #[derive(Clone, Copy)]
-pub(super) enum TemperatureUnit {
+pub(crate) enum TemperatureUnit {
     Celsius,
     Fahrenheit,
     Kelvin,
 }
 
 impl TemperatureUnit {
-    pub(super) fn symbol(self) -> &'static str {
+    pub(crate) fn symbol(self) -> &'static str {
         match self {
             Self::Celsius => "°C",
             Self::Fahrenheit => "°F",
@@ -355,7 +355,7 @@ impl TemperatureUnit {
         }
     }
 
-    pub(super) fn display_temperature(self, t: f64) -> f64 {
+    pub(crate) fn display_temperature(self, t: f64) -> f64 {
         match self {
             Self::Celsius => t,
             Self::Fahrenheit => t * 1.8 + 32.0,
@@ -363,7 +363,7 @@ impl TemperatureUnit {
         }
     }
 
-    pub(super) fn to_celsius(self, t: f64) -> f64 {
+    pub(crate) fn to_celsius(self, t: f64) -> f64 {
         match self {
             Self::Celsius => t,
             Self::Fahrenheit => (t - 32.0) / 1.8,
@@ -371,7 +371,7 @@ impl TemperatureUnit {
         }
     }
 
-    pub(super) fn span_factor(self) -> f64 {
+    pub(crate) fn span_factor(self) -> f64 {
         match self {
             Self::Fahrenheit => 1.8,
             _ => 1.0,

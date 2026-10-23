@@ -18,7 +18,6 @@ pub(crate) const BLUE_SOFT: Color32 = Color32::from_rgb(234, 242, 255);
 pub(crate) const INK: Color32 = Color32::from_rgb(35, 48, 67);
 pub(crate) const MUTED: Color32 = Color32::from_rgb(111, 126, 146);
 pub(crate) const PAGE: Color32 = Color32::from_rgb(246, 248, 251);
-pub(crate) const GREEN: Color32 = Color32::from_rgb(29, 139, 97);
 pub(crate) const RED: Color32 = Color32::from_rgb(183, 72, 70);
 
 fn main() -> eframe::Result<()> {

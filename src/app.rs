@@ -4,7 +4,7 @@ use crate::calculators::common::*;
 use crate::calculators::spline::ExportJob;
 use crate::catalog::{Dimension, Group, TOOLS, ToolDef, ToolKind, units_for};
 use crate::navigation;
-use crate::{BLUE, BLUE_SOFT, GREEN, INK, MUTED, PAGE};
+use crate::{BLUE, BLUE_SOFT, INK, MUTED, PAGE};
 use eframe::egui::{self, Align, Color32, Layout, RichText, ScrollArea, TextEdit, Vec2};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
@@ -154,7 +154,6 @@ impl ToolboxApp {
             ui.image((icon.id(), Vec2::splat(42.0)));
             ui.label(RichText::new("工具箱").size(17.0).strong().color(INK));
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new("● 本地计算").size(12.0).color(GREEN));
                 ui.label(
                     RichText::new(format!("{} 项工具", TOOLS.len()))
                         .size(12.0)
@@ -604,6 +603,7 @@ impl ToolboxApp {
 
     fn render_calculator(&mut self, ui: &mut egui::Ui, tool: &ToolDef, kind: ToolKind) {
         match kind {
+            ToolKind::Gauge(kind) => self.render_gauge(ui, tool, kind),
             ToolKind::WorkingThermocouple => self.render_thermocouple(ui, tool, false),
             ToolKind::StandardThermocouple => self.render_thermocouple(ui, tool, true),
             ToolKind::IndustrialResistance => self.render_industrial_rtd(ui, tool),

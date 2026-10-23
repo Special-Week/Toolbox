@@ -18,7 +18,9 @@ static Component component(Page &p, const std::string &key, int depth) {
         c.values = p.values(key + ".sample", L"测量值", count, sampleDefaults);
     } else if (c.kind == 1) {
         c.distribution = p.select(key + ".distribution", L"分布类型", distributions);
-        c.halfWidth = p.number(key + ".width", L"区间半宽", .02);
+        c.halfWidth =
+            p.number(key + ".width",
+                     c.distribution == 2 || c.distribution == 3 ? L"证书扩展不确定度 U" : L"区间半宽", .02);
     } else {
         c.maximum = p.select(key + ".method", L"合成方法", {L"平方和根", L"最大绝对贡献"}) == 1;
         int n = p.count(key + ".children", L"子分量", 2, 1, 12);
@@ -53,8 +55,11 @@ static void uncertainty(Page &p) {
         auto av = p.values("quick.a.value", L"测量值", an, sampleDefaults);
         double ac = p.number("quick.a.c", L"A 类灵敏系数", 1);
         p.heading(L"B 类评定数据");
-        int bn = p.count("quick.b.count", L"B 类半宽", 2, 0, 50);
-        auto bv = p.values("quick.b.value", L"半宽", bn, {.02, .03});
+        int bn = p.count("quick.b.count", L"B 类分量", 2, 0, 50);
+        const int storedDistribution = p.state.choice(p.key("quick.distribution"), 0);
+        auto bv = p.values("quick.b.value",
+                           storedDistribution == 2 || storedDistribution == 3 ? L"扩展不确定度 U" : L"半宽",
+                           bn, {.02, .03});
         int distribution = p.select("quick.distribution", L"B 类分布", distributions);
         double bc = p.number("quick.b.c", L"B 类灵敏系数", 1), k = p.number("quick.k", L"包含因子 k", 2);
         p.check();

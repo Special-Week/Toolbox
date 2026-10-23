@@ -5,6 +5,8 @@
 // 资源文件路径相对于 cpp_version；许可文本随源码保存，无需构建时生成。
 TOOLBOX_ICON ICON "resources/toolbox.ico"
 TOOLBOX_LICENSE_TEXT RCDATA "licenses/third-party-licenses.txt"
+TOOLBOX_GAUGE_TABLES RCDATA "resources/gauges/tables.json"
+TOOLBOX_GAUGE_UNIFIED RCDATA "resources/gauges/unified.json"
 1 RT_MANIFEST "resources/Toolbox.manifest"
 1 VERSIONINFO
  FILEVERSION 0,1,0,0

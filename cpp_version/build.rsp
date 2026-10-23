@@ -21,6 +21,16 @@ src/models/radiation.cpp
 src/models/uncertainty.cpp
 src/models/spline.cpp
 src/models/curve_fit.cpp
+src/models/gauges/data.cpp
+src/models/gauges/report.cpp
+src/models/gauges/lookup.cpp
+src/models/gauges/thread.cpp
+src/models/gauges/unified.cpp
+src/models/gauges/smooth.cpp
+src/models/gauges/pipe.cpp
+src/models/gauges/form.cpp
+src/models/gauges/notes.cpp
+
 src/gui/window.cpp
 src/gui/icon.cpp
 src/gui/scene.cpp
@@ -29,6 +39,7 @@ src/gui/navigation.cpp
 src/gui/export.cpp
 src/gui/licenses.cpp
 src/pages/router.cpp
+src/pages/gauges.cpp
 src/pages/sensors.cpp
 src/pages/standard_couple.cpp
 src/pages/sprt.cpp

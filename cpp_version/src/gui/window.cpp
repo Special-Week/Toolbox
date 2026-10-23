@@ -38,9 +38,7 @@ template <class T> static void release(T *&object) {
         object = nullptr;
     }
 }
-static D2D1_RECT_F rectangle(Rect r) {
-    return D2D1::RectF(r.x, r.y, r.x + r.w, r.y + r.h);
-}
+static D2D1_RECT_F rectangle(Rect r) { return D2D1::RectF(r.x, r.y, r.x + r.w, r.y + r.h); }
 App::~App() {
     // 窗口正常退出和初始化中途失败都由同一所有者回收资源。
     exportJob.cancel = true;
@@ -97,8 +95,8 @@ int App::run(HINSTANCE instance, int show) {
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(TOOLBOX_ICON));
     // 标题栏使用 ICO 中专门绘制的小尺寸图像，避免直接缩小大图导致细节模糊。
     wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(TOOLBOX_ICON), IMAGE_ICON,
-                                               GetSystemMetrics(SM_CXSMICON),
-                                               GetSystemMetrics(SM_CYSMICON), LR_SHARED));
+                                               GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
+                                               LR_SHARED));
     RegisterClassExW(&wc);
     HRESULT result = D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &factory_);
     if (FAILED(result) || FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory),
@@ -362,6 +360,41 @@ void App::synchronizeControls() {
                     SendMessageW(n.window, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(o.c_str()));
                 }
             }
+            // 收起按钮可以很窄，展开列表须按当前字体测量最长选项，避免截断规格及单位备注。
+            // 仅在选项或 DPI 改变时重新测宽，滚动页面时复用缓存。
+            if (changed || n.optionDpi != dpi_) {
+                n.optionTextWidth = 0;
+                HDC dc = GetDC(n.window);
+                if (dc) {
+                    HGDIOBJ previousFont = SelectObject(dc, font_);
+                    for (const auto &option : c.options) {
+                        SIZE extent{};
+                        if (GetTextExtentPoint32W(dc, option.c_str(), int(option.size()), &extent)) {
+                            n.optionTextWidth = std::max(n.optionTextWidth, int(extent.cx));
+                        }
+                    }
+                    SelectObject(dc, previousFont);
+                    ReleaseDC(n.window, dc);
+                } else {
+                    for (const auto &option : c.options) {
+                        n.optionTextWidth =
+                            std::max(n.optionTextWidth, int(std::ceil(textWidth(option, 14) * dpi_ / 96)));
+                    }
+                }
+                n.optionDpi = dpi_;
+            }
+            const float comboScale = dpi_ / 96;
+            MONITORINFO monitor{};
+            monitor.cbSize = sizeof(monitor);
+            int availableWidth = GetSystemMetrics(SM_CXSCREEN);
+            if (GetMonitorInfoW(MonitorFromWindow(window_, MONITOR_DEFAULTTONEAREST), &monitor)) {
+                availableWidth = monitor.rcWork.right - monitor.rcWork.left;
+            }
+            const int padding = int(std::ceil(44 * comboScale));
+            const int popupWidth = std::max(int(c.rect.w * comboScale), n.optionTextWidth + padding);
+            const int screenLimit = std::max(1, availableWidth - int(std::ceil(16 * comboScale)));
+            SendMessageW(n.window, CB_SETDROPPEDWIDTH, WPARAM(std::min(popupWidth, screenLimit)), 0);
+            SendMessageW(n.window, CB_SETITEMHEIGHT, 0, LPARAM(std::ceil(32 * comboScale)));
             SendMessageW(n.window, CB_SETCURSEL, c.selection, 0);
             SendMessageW(n.window, CB_SETITEMHEIGHT, WPARAM(-1), LPARAM(28 * dpi_ / 96));
         } else if (GetFocus() != n.window) {
@@ -379,7 +412,7 @@ void App::synchronizeControls() {
         }
         float scale = dpi_ / 96;
         int px = int(c.rect.x * scale) + 1, py = int(c.rect.y * scale) + 2, pw = int(c.rect.w * scale) - 2,
-            ph = int((combo ? 320 : c.rect.h - 4) * scale);
+            ph = int((combo ? 380 : c.rect.h - 4) * scale);
         SetWindowPos(n.window, HWND_TOP, px, py, pw, ph, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         // 裁去离开视口的部分；编辑框不截获滚轮，主窗口负责纵向滚动。
         int clipTop = std::max(0, int(top * scale) - py), clipBottom = std::min(ph, int(bottom * scale) - py);
@@ -408,8 +441,8 @@ void App::rebuild() {
     scene.line(0, 68, width, 68, Border);
     scene.icon({23, 14, 42, 42});
     scene.text({74, 14, 240, 42}, L"工具箱", 19, Ink, true);
-    scene.text({width - 182, 20, 165, 30}, std::to_wstring(tools().size()) + L" 项工具  ● 本地计算",
-               12, Green, false, true);
+    scene.text({width - 182, 20, 165, 30}, std::to_wstring(tools().size()) + L" 项工具  ● 本地计算", 12,
+               Green, false, true);
     navigation();
     float left = width >= 880 ? (collapsed ? 92.f : 245.f) : 0;
     float top = width >= 880 ? 82.f : 126.f;
@@ -419,9 +452,11 @@ void App::rebuild() {
     } else {
         const auto &tool = tools().at(std::size_t(selected));
         float x = left + 24,
-              w = std::min(width - left - 48,
-                           tool.kind == Kind::BSplineInterpolation || tool.kind == Kind::CalibrationCurveFit
-                               ? 960.f : 820.f),
+              w = std::min(width - left - 48, tool.group == Group::Gauges ||
+                                                      tool.kind == Kind::BSplineInterpolation ||
+                                                      tool.kind == Kind::CalibrationCurveFit
+                                                  ? 960.f
+                                                  : 820.f),
               y = top + 10 - scroll;
         scene.button({x, y, 86, 28}, L"← 工具箱", [this] { open(-1); });
         scene.text({x + 96, y, w - 96, 28}, L"/ " + groupName(tool.group) + L" / " + tool.name, 12, Muted);

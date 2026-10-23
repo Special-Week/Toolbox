@@ -189,7 +189,7 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "选型结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     pub(crate) fn render_height_correction(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -344,7 +344,7 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "修正结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     pub(crate) fn render_altitude_pressure(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -407,6 +407,6 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "换算结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 }

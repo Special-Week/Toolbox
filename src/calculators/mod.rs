@@ -6,6 +6,8 @@ mod curve_fit;
 mod division_table;
 mod errors;
 pub(crate) mod explanations;
+mod format;
+mod gauges;
 mod humidity;
 mod its90;
 mod math;

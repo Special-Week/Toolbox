@@ -5,8 +5,8 @@ void App::navigation() {
     auto &ui = scene;
     ui.clip = {0, 68, width, height - 68};
     if (width < 880) {
-        float cell = width / 6;
-        for (int i = 0; i < 6; ++i) {
+        float cell = width / groupCount;
+        for (int i = 0; i < groupCount; ++i) {
             ui.button(
                 {i * cell + 4, 78, cell - 8, 36}, shortGroupName(Group(i)),
                 [this, i] {
@@ -37,7 +37,7 @@ void App::navigation() {
         y += 50;
     }
     auto search = state.value("navigation.search", L"");
-    for (int g = 0; g < 6; ++g) {
+    for (int g = 0; g < groupCount; ++g) {
         int count = 0;
         for (auto &tool : tools()) {
             if (int(tool.group) == g) {
@@ -106,7 +106,7 @@ void App::homepage() {
                true);
     y += 58;
     std::vector<std::wstring> categories{L"全部工具"};
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < groupCount; ++i) {
         int n = 0;
         for (auto &t : tools()) {
             if (int(t.group) == i) {
@@ -116,7 +116,7 @@ void App::homepage() {
         categories.push_back(groupName(Group(i)) + L" " + std::to_wstring(n));
     }
     float bx = x;
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < int(categories.size()); ++i) {
         float bw = std::max(76.f, float(categories[i].size()) * 12 + 14);
         if (bx + bw > x + w) {
             y += 38;

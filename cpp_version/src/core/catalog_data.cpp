@@ -73,6 +73,18 @@ const std::vector<Tool> &tools() {
          L"计算绝对误差、相对误差和引用误差。"},
         {"uncertainty_calculation", L"不确定度计算", Group::Errors, Kind::Uncertainty, L"u",
          L"合成 A 类和 B 类标准不确定度并求扩展不确定度。"},
+        {"gauge_metric", L"公制普通螺纹 M", Group::Gauges, Kind::GaugeMetric, L"M",
+         L"内外螺纹工作量规、校对塞规、中径公差、磨损极限与长度。"},
+        {"gauge_trapezoidal", L"梯形螺纹 Tr", Group::Gauges, Kind::GaugeTrapezoidal, L"Tr",
+         L"30° 梯形螺纹，多线修正、工作塞规、环规和校对规。"},
+        {"gauge_unified", L"美制统一螺纹 UN", Group::Gauges, Kind::GaugeUnified, L"UN",
+         L"按 1A～3A、1B～3B 自动计算工件中径极限及对应量规，支持系列与 TPI 联动。"},
+        {"gauge_pipe", L"管螺纹", Group::Gauges, Kind::GaugePipe, L"R/NPT",
+         L"R、NPT 密封锥管螺纹尺寸、量规公差及生产尺寸查询。"},
+        {"gauge_rebar", L"钢筋直螺纹", Group::Gauges, Kind::GaugeRebar, L"钢筋",
+         L"60°、70°、75° 钢筋直螺纹，套筒与丝头量规参考计算。"},
+        {"gauge_smooth", L"光滑量规", Group::Gauges, Kind::GaugeSmooth, L"IT",
+         L"孔用塞规、轴用环规与卡规，IT6～IT16 公差带查询。"},
         {"transmitter", L"变送器", Group::Other, Kind::Transmitter, L"I/O",
          L"压力、温度和湿度变送器量程换算；压力支持线性与开方输出。"},
         {"bspline_interpolation", L"三次均匀 B 样条插值", Group::Other, Kind::BSplineInterpolation, L"B3",
@@ -470,112 +482,61 @@ const std::vector<Unit> &units(Dimension dimension) {
     throw std::runtime_error("未知单位类别");
 }
 std::wstring groupName(Group group) {
-    static const wchar_t *names[] = {L"单位换算",   L"ITS90 温标换算", L"压力工具",
-                                     L"温湿度工具", L"误差工具",       L"其他工具"};
+    static const wchar_t *names[] = {L"单位换算", L"ITS90 温标换算", L"压力工具", L"温湿度工具",
+                                     L"误差工具", L"量规计算",       L"其他工具"};
     return names[static_cast<int>(group)];
 }
 std::wstring shortGroupName(Group group) {
-    static const wchar_t *names[] = {L"单位", L"温标", L"压力", L"温湿度", L"误差", L"其他"};
+    static const wchar_t *names[] = {L"单位", L"温标", L"压力", L"温湿度", L"误差", L"量规", L"其他"};
     return names[static_cast<int>(group)];
 }
 std::wstring unitNotes(Dimension dimension) {
-    if (dimension == Dimension::Temperature) {
-        return L"本页换算绝对温度值：K = °C + 273.15，°F = 1.8×°C + 32，°R = 1.8×K，°Re = "
-               L"0.8×°C（列氏温标）；例如 0 °C = 273.15 K = 32 °F。输入不能低于 0 "
-               L"K；温差换算不能套用温度值的零点偏移。";
-    }
-    if (dimension == Dimension::Pressure) {
-        return L"以 Pa 为基准换算。液柱按标注温度及标准重力计算，水柱为 4 °C、汞柱为 0 °C；1 in = 25.4 mm，1 "
-               L"torr = 1 "
-               L"atm/"
-               L"760。换算保留输入压力的参考基准，只改变数值单位；液柱结果使用约定系数，未按现场介质密度或当"
-               L"地重力调整。";
-    }
-    if (dimension == Dimension::MassFlow) {
-        return L"按质量与时间倍率换算，1 t = 1000 kg，1 d = 24 h，1 lb = 0.45359237 kg。t/a 按每年 8000 "
-               L"运行小时计算：1 kg/s = 28800 t/a。";
-    }
-    if (dimension == Dimension::VolumeFlow) {
-        return L"按体积与时间倍率换算。CFM、CFH 分别为立方英尺/分钟和立方英尺/小时；gal/s "
-               L"为美制液量加仑/秒，ImpGal/s 为英制加仑/秒；bbl/s 按 42 美制加仑的石油桶计算。";
-    }
-    if (dimension == Dimension::Velocity) {
-        return L"各速度单位按长度与时间倍率换算。1 mile = 1609.344 m；国际海里为 1852 m，knots 与 n mile/h "
-               L"等值。UK knot 按历史英制海里 6080 ft/h 换算。";
-    }
-    if (dimension == Dimension::Force) {
-        return L"目标数值 = 输入数值 × 输入单位的 SI 倍率 / 目标单位的 SI 倍率。kgf 与 tf 按标准重力加速度 "
-               L"9.80665 m/s² 定义，1 kgf = 9.80665 N，1 tf = 1000 kgf。";
-    }
-    if (dimension == Dimension::Torque) {
-        return L"力矩按力与力臂长度倍率换算，以 N·m 为基准。kgf 按标准重力加速度 9.80665 m/s² 定义；lbf·ft "
-               L"与 lbf·in 分别计入英尺和英寸的长度倍率。1 lbf·ft = 12 lbf·in，1 lbf·in = 16 ozf·in。";
-    }
-    if (dimension == Dimension::Energy) {
-        return L"热量采用国际蒸汽表定义，1 cal = 4.1868 J，1 kcal = 4186.8 J，1 Btu = 1055.05585262 J。Hp·h "
-               L"采用公制马力，UKHp·h 采用英制机械马力；1 kWh = 3600000 J。";
-    }
-    if (dimension == Dimension::Power) {
-        return L"功率按能量/时间换算，1 W = 1 J/s。hp 表示公制马力（735.49875 W），UKHp "
-               L"表示英制机械马力（550 ft·lbf/s）。cal、kcal 与 Btu 均采用国际蒸汽表定义，1 kcal/h = "
-               L"4186.8/3600 W。";
-    }
-    if (dimension == Dimension::HeatTransferCoefficient) {
-        return L"按能量、时间、面积及温差的倍率换算。分母中的温度单位表示温差，1 °C 温差 = 1 K，1 °F 温差 = "
-               L"5/9 K；cal、kcal、Btu 统一采用国际蒸汽表定义（1 cal = 4.1868 J）。";
-    }
-    if (dimension == Dimension::ThermalConductivity) {
-        return L"按能量、时间、长度及温差的倍率换算，1 °C 温差 = 1 K，1 °F 温差 = 5/9 K；cal、kcal、Btu "
-               L"统一采用国际蒸汽表定义（1 cal = 4.1868 J）。kcal/(m·s·°C) 按符号中的米计算，1 kcal/(m·s·°C) "
-               L"= 4186.8 W/(m·K)。";
-    }
-    if (dimension == Dimension::HeatTransferRate) {
-        return L"本页“传热速度”指热流密度，按功率/面积换算。1 W/cm² = 10 kW/m²。cal、kcal 与 Btu "
-               L"采用国际蒸汽表定义（1 cal = 4.1868 J，1 Btu = 1055.05585262 J）；面积及时间倍率同时计入。";
-    }
-    if (dimension == Dimension::Volume) {
-        return L"按体积单位倍率换算，1 L = 0.001 m³，1 kL = 1 m³。ImpGal 为英制加仑（4.54609 L），gallon "
-               L"为美制液量加仑（3.785411784 L）。USbbl 按 42 美制加仑，UKbbl 按 35 英制加仑计算。";
-    }
-    if (dimension == Dimension::Density) {
-        return L"按质量/体积的单位倍率换算，1 g/cm³ = 1000 kg/m³，1 kg/L = 1000 kg/m³。英吨取 2240 "
-               L"lb，英制与美制加仑分别计算。工程密度单位为 kgf·s²/m⁴，1 kgf·s²/m⁴ = 9.80665 kg/m³。";
-    }
-    if (dimension == Dimension::DynamicViscosity) {
-        return L"动力粘度以 Pa·s 为基准，1 P = 0.1 Pa·s，1 cP = 1 mPa·s。dyn·s/cm² 与 P 等值；reyn 与 "
-               L"lbf·s/in² 等值。力、质量、面积和小时/秒的倍率分别计入，lb 为质量，lbf 为力。";
-    }
-    if (dimension == Dimension::SurfaceTension) {
-        return L"表面张力按力/长度换算，以 N/m 为基准。kgf/m、gf/cm、lbf/ft、lbf/inch 中的分子均表示力；1 "
-               L"kgf/m = 9.80665 N/m，1 dyn/cm = 1 mN/m。";
-    }
-    if (dimension == Dimension::Concentration) {
-        return L"ppm、ppb、ppt 分别表示百万、十亿、万亿分之一；1 ppm = 1000 ppb = 1000000 ppt。滴的约定为 20 "
-               L"滴/mL。\n质量比与体积比按等密度基准列示；slug/体积按溶液及溶质密度均为 1000 kg/m³ "
-               L"折算，因此 1 ppm 对应 1 mg/kg、1 mL/m³、0.001 "
-               L"kg/m³。真实物质的质量比、体积比、质量浓度互换需要实际密度，不能直接套用此基准。";
-    }
-    if (dimension == Dimension::Mass) {
-        return L"公制质量以 kg 为基准。1 市担 = 50 kg，1 市斤 = 0.5 kg；lb 为常衡磅（0.45359237 kg），1 oz = "
-               L"1/16 lb，1 dr = 1/256 lb，1 gr = 1/7000 lb。英吨、英担分别为 2240 lb、112 "
-               L"lb，美吨、美担分别为 2000 lb、100 lb。";
-    }
-    if (dimension == Dimension::Length) {
-        return L"按长度倍率换算：1 in = 0.0254 m，1 ft = 0.3048 m，1 yd = 0.9144 m，1 mile = 1609.344 m，1 n "
-               L"mile = 1852 m。1 市尺 = 1/3 m；1 mil（密耳）= 0.001 in = 0.0254 mm；um 表示微米。";
-    }
-    if (dimension == Dimension::Area) {
-        return L"面积倍率按长度倍率的平方计算：1 ft² = 0.09290304 m²。1 ha = 10000 m²，1 市亩 = 2000/3 m²，1 "
-               L"坪 = 400/121 m²。本页 acre 按 43560 平方国际英尺计算，等于 4046.8564224 m²。";
-    }
-    if (dimension == Dimension::KinematicViscosity) {
-        return L"运动粘度量纲为面积/时间，按长度倍率的平方及时间倍率换算：1 St = 1 cm²/s = 0.0001 m²/s，1 "
-               L"cSt = 1 mm²/s = 0.000001 m²/s。1 m²/h = 1/3600 "
-               L"m²/s；平方英尺、平方英寸分别计入长度倍率的平方。";
-    }
-    if (dimension == Dimension::DiffusionCoefficient) {
-        return L"扩散系数量纲为面积/时间，按长度倍率的平方及时间倍率换算：1 cm²/s = 0.0001 m²/s，1 m²/h = "
-               L"1/3600 m²/s，1 in²/s = 0.00064516 m²/s。1 ft = 0.3048 m，平方英尺单位按该长度的平方计算。";
+    switch (dimension) {
+    case Dimension::Temperature:
+        return LR"COPY(温度值换算，不适用于温差。输入不得低于绝对零度。)COPY";
+    case Dimension::Pressure:
+        return LR"COPY(仅换算单位，表压或绝压基准不变。液柱按标准重力及标注温度换算（水 4 °C、汞 0 °C），不作现场密度、重力修正。)COPY";
+    case Dimension::MassFlow:
+        return LR"COPY(t/a 按每年 8000 运行小时计算。)COPY";
+    case Dimension::VolumeFlow:
+        return LR"COPY(gal 为美制液量加仑，ImpGal 为英制加仑；石油桶 bbl 按 42 美制加仑计算。)COPY";
+    case Dimension::Velocity:
+        return LR"COPY(海里采用国际海里；UK knot 按历史英制海里 6080 ft/h 计算。)COPY";
+    case Dimension::Force:
+        return LR"COPY(kgf、tf 按标准重力加速度 9.80665 m/s² 定义。)COPY";
+    case Dimension::Torque:
+        return LR"COPY(kgf 按标准重力定义；lb、lbf 分别表示质量磅与磅力。)COPY";
+    case Dimension::Energy:
+        return LR"COPY(cal、kcal、Btu 采用国际蒸汽表定义（1 cal=4.1868 J）。Hp·h 为公制马力时，UKHp·h 为英制机械马力时。)COPY";
+    case Dimension::Power:
+        return LR"COPY(hp 为公制马力，UKHp 为英制机械马力；cal、kcal、Btu 采用国际蒸汽表定义。)COPY";
+    case Dimension::HeatTransferCoefficient:
+        return LR"COPY(分母温度表示温差（1 °F 温差=5/9 K）。cal、kcal、Btu 采用国际蒸汽表定义。)COPY";
+    case Dimension::ThermalConductivity:
+        return LR"COPY(分母温度表示温差（1 °F 温差=5/9 K）。cal、kcal、Btu 采用国际蒸汽表定义；kcal/(m·s·°C) 中长度为米。)COPY";
+    case Dimension::HeatTransferRate:
+        return LR"COPY(本页“传热速度”指热流密度。cal、kcal、Btu 采用国际蒸汽表定义。)COPY";
+    case Dimension::Volume:
+        return LR"COPY(ImpGal 为英制加仑，gallon 为美制液量加仑；USbbl、UKbbl 分别按 42 美制、35 英制加仑计算。)COPY";
+    case Dimension::Density:
+        return LR"COPY(英吨按 2240 lb；英美加仑分别换算。工程密度单位 kgf·s²/m⁴ 按标准重力定义。)COPY";
+    case Dimension::DynamicViscosity:
+        return LR"COPY(reyn 与 lbf·s/in² 等值；lb 表示质量磅，lbf 表示磅力。)COPY";
+    case Dimension::SurfaceTension:
+        return LR"COPY(kgf、gf 按标准重力定义；lbf 表示磅力。)COPY";
+    case Dimension::Concentration:
+        return LR"COPY(ppm、ppb、ppt 分别表示 10⁻⁶、10⁻⁹、10⁻¹²；滴按 20 滴/mL。
+质量比、体积比及质量浓度按等密度基准列示，溶液与溶质密度均取 1000 kg/m³。实际物质互换须使用实际密度。)COPY";
+    case Dimension::Mass:
+        return LR"COPY(市担=50 kg，市斤=0.5 kg；lb 为常衡磅。英吨/英担为 2240/112 lb，美吨/美担为 2000/100 lb。)COPY";
+    case Dimension::Length:
+        return LR"COPY(市尺=1/3 m；mil（密耳）=0.001 in，um 表示微米；海里采用国际海里。)COPY";
+    case Dimension::Area:
+        return LR"COPY(市亩=2000/3 m²，坪=400/121 m²；acre 按 43560 平方国际英尺计算。)COPY";
+    case Dimension::KinematicViscosity:
+        return LR"COPY(cSt 与 mm²/s 等值。)COPY";
+    case Dimension::DiffusionCoefficient:
+        return LR"COPY()COPY";
     }
     return L"";
 }

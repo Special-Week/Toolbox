@@ -2,7 +2,7 @@
 //! 此处返回摄氏温差，电阻界限由页面按当前曲线的 R(t±Δt) 计算。
 use super::model::ToleranceKind;
 
-pub(super) struct Tolerance {
+pub(crate) struct Tolerance {
     pub name: &'static str,
     pub formula: &'static str,
     pub min: f64,
@@ -10,7 +10,7 @@ pub(super) struct Tolerance {
     pub value: Option<f64>,
 }
 
-pub(super) fn tolerances(kind: ToleranceKind, t: f64, film: bool) -> Vec<Tolerance> {
+pub(crate) fn tolerances(kind: ToleranceKind, t: f64, film: bool) -> Vec<Tolerance> {
     let definitions: &[(&str, &str, f64, f64, f64, f64)] = match kind {
         ToleranceKind::Platinum | ToleranceKind::PlatinumReference if film => &[
             ("AA 级", "±(0.10 + 0.0017|t|) °C", 0.0, 150.0, 0.10, 0.0017),

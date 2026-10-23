@@ -2,10 +2,10 @@
 use super::super::calibration::least_squares;
 use super::super::numerics::{finite, rss};
 
-pub(super) const MAX_POINTS: usize = 200;
+pub(crate) const MAX_POINTS: usize = 200;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum FitKind {
+pub(crate) enum FitKind {
     Linear,
     ThroughOrigin,
     Quadratic,
@@ -13,7 +13,7 @@ pub(super) enum FitKind {
 }
 
 impl FitKind {
-    pub(super) fn from_index(index: usize) -> Self {
+    pub(crate) fn from_index(index: usize) -> Self {
         match index {
             1 => Self::ThroughOrigin,
             2 => Self::Quadratic,
@@ -22,7 +22,7 @@ impl FitKind {
         }
     }
 
-    pub(super) fn degree(self) -> usize {
+    pub(crate) fn degree(self) -> usize {
         match self {
             Self::Quadratic => 2,
             Self::Cubic => 3,
@@ -30,7 +30,7 @@ impl FitKind {
         }
     }
 
-    pub(super) fn parameter_count(self) -> usize {
+    pub(crate) fn parameter_count(self) -> usize {
         if self == Self::ThroughOrigin {
             1
         } else {
@@ -40,18 +40,18 @@ impl FitKind {
 }
 
 /// 系数按 K0、K1……升幂保存；预测始终使用归一化模型，避免展开式抵消。
-pub(super) struct CurveFit {
-    pub(super) kind: FitKind,
-    pub(super) coefficients: Vec<f64>,
-    pub(super) fitted: Vec<f64>,
-    pub(super) residuals: Vec<f64>,
-    pub(super) correlation: Option<f64>,
-    pub(super) r_squared: Option<f64>,
-    pub(super) rmse: f64,
-    pub(super) residual_sd: Option<f64>,
-    pub(super) maximum_residual: f64,
-    pub(super) minimum_x: f64,
-    pub(super) maximum_x: f64,
+pub(crate) struct CurveFit {
+    pub(crate) kind: FitKind,
+    pub(crate) coefficients: Vec<f64>,
+    pub(crate) fitted: Vec<f64>,
+    pub(crate) residuals: Vec<f64>,
+    pub(crate) correlation: Option<f64>,
+    pub(crate) r_squared: Option<f64>,
+    pub(crate) rmse: f64,
+    pub(crate) residual_sd: Option<f64>,
+    pub(crate) maximum_residual: f64,
+    pub(crate) minimum_x: f64,
+    pub(crate) maximum_x: f64,
     x: Normalization,
     y: Normalization,
     normalized_coefficients: Vec<f64>,
@@ -145,7 +145,7 @@ fn original_coefficients(
 }
 
 impl CurveFit {
-    pub(super) fn calculate(points: &[(f64, f64)], kind: FitKind) -> Result<Self, String> {
+    pub(crate) fn calculate(points: &[(f64, f64)], kind: FitKind) -> Result<Self, String> {
         if !(2..=MAX_POINTS).contains(&points.len()) {
             return Err(format!("校准数据须为 2～{MAX_POINTS} 组"));
         }
@@ -260,7 +260,7 @@ impl CurveFit {
         })
     }
 
-    pub(super) fn predict(&self, input: f64) -> Result<f64, String> {
+    pub(crate) fn predict(&self, input: f64) -> Result<f64, String> {
         finite(&[input])?;
         let value = evaluate(&self.normalized_coefficients, self.x.normalize(input))
             .mul_add(self.y.scale, self.y.origin);

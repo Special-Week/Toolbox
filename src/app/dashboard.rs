@@ -41,11 +41,9 @@ impl ToolboxApp {
                             ui.add_space(2.0);
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(
-                                        "按工具分类快速查找。计算在本机完成，结果随参数即时更新。",
-                                    )
-                                    .size(13.0)
-                                    .color(MUTED),
+                                    RichText::new("按工具分类快速查找。")
+                                        .size(13.0)
+                                        .color(MUTED),
                                 )
                                 .wrap()
                                 .halign(Align::Center),

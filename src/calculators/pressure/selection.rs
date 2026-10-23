@@ -319,6 +319,6 @@ impl ToolboxApp {
             Ok(vec![("满足条件的量程 / 准确度组合", count.to_string())])
         })();
         show_result_or_error(ui, "选型结果", result);
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 }

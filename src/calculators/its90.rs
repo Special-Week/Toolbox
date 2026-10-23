@@ -207,7 +207,7 @@ impl ToolboxApp {
                 });
             }
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     pub(crate) fn render_cvd_fit(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -280,7 +280,7 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "拟合结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     pub(crate) fn render_beta_thermistor(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -350,6 +350,6 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "计算结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 }

@@ -40,6 +40,9 @@ void renderPage(Page &p) {
     case Group::Other:
         renderOther(p);
         break;
+    case Group::Gauges:
+        renderGauges(p);
+        break;
     default:
         break;
     }

@@ -136,6 +136,12 @@ fn copy_report(fit: &CurveFit, points: &[(f64, f64)], x_label: &str, y_label: &s
             fit.residuals[index]
         ));
     }
+    let kind = crate::catalog::ToolKind::CalibrationCurveFit;
+    report.push_str(&format!(
+        "\n计算说明\n{}\n\n详细公式与取值\n{}\n",
+        super::explanations::for_tool(kind),
+        super::explanations::formula(kind)
+    ));
     report
 }
 
@@ -211,11 +217,6 @@ fn render_results(
                 )
                 .wrap(),
             );
-            ui.label(
-                RichText::new("系数对应输入数据的原始单位；复制结果包含完整精度系数和全部数据点。")
-                    .size(11.5)
-                    .color(MUTED),
-            );
         });
     let coefficients: Vec<_> = fit
         .coefficients
@@ -249,12 +250,9 @@ fn render_results(
             ),
         ],
     );
-    if fit.kind.degree() > 1 || fit.kind == FitKind::ThroughOrigin {
-        ui.label(RichText::new("r 表示原始 x、y 的线性相关性；R² 评价当前拟合模型。过原点拟合的 R² 可为负，且不一定等于 r²。").size(12.0).color(MUTED));
-    }
     if fit.residual_sd.is_none() {
         ui.label(
-            RichText::new("数据组数等于待估参数个数，没有剩余自由度；零残差不能用于证明曲线有效。")
+            RichText::new("无剩余自由度，残差标准差不计算。")
                 .size(12.0)
                 .color(MUTED),
         );
@@ -355,7 +353,7 @@ fn render_input(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) -> Curv
     let count = app.dynamic_count(ui, tool, "points", "校准数据", 6, 2, MAX_POINTS);
     ui.add(
         egui::Label::new(
-            RichText::new("每行填写一对 x/y；采用等权最小二乘法，允许重复 x，不要求按大小排序。默认数据仅作示例。")
+            RichText::new("每行一组 x、y，各列单位保持一致。")
                 .size(12.0)
                 .color(MUTED),
         )

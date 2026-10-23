@@ -309,6 +309,6 @@ impl ToolboxApp {
                 |t| m.resistance_branch(t, hr != 6 && t >= 0.0),
             );
         }
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 }

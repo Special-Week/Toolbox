@@ -111,7 +111,12 @@ impl ToolboxApp {
                     0,
                 );
                 let hk = format!("{key}.half_width");
-                self.input(ui, tool, &hk, "区间半宽", "0.02", "须非负");
+                let label = if matches!(distribution, 2 | 3) {
+                    "证书扩展不确定度 U"
+                } else {
+                    "区间半宽"
+                };
+                self.input(ui, tool, &hk, label, "0.02", "须非负");
                 Kind::TypeB {
                     half_width: self.number(tool, &hk, "0.02")?,
                     distribution,
@@ -271,6 +276,6 @@ impl ToolboxApp {
             ])
         })();
         show_result_or_error(ui, "不确定度结果", result);
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 }

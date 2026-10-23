@@ -217,6 +217,6 @@ impl ToolboxApp {
             })();
             show_result_or_error(ui, "计算结果", result);
         });
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 }

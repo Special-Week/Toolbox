@@ -1,9 +1,14 @@
 //! NIST Monograph 175 / SRD 60 forward reference functions, in °C and mV.
 //! 只嵌入高精度正向函数系数，不使用三位小数表或近似逆函数参与计算。
 use std::sync::OnceLock;
+#[path = "thermocouple/extra.rs"]
 mod extra;
+#[path = "thermocouple/standard.rs"]
 pub(crate) mod standard;
+#[cfg(feature = "desktop-ui")]
+#[path = "thermocouple/standard_page.rs"]
 mod standard_page;
+#[path = "thermocouple/tolerance.rs"]
 pub(crate) mod tolerance;
 
 pub(crate) fn slope(kind: &str, t: f64) -> Result<f64, String> {

@@ -8,16 +8,18 @@ pub(crate) enum Group {
     Pressure,
     Humidity,
     Errors,
+    Gauges,
     Other,
 }
 
 impl Group {
-    pub(crate) const ALL: [Group; 6] = [
+    pub(crate) const ALL: [Group; 7] = [
         Group::Units,
         Group::Its90,
         Group::Pressure,
         Group::Humidity,
         Group::Errors,
+        Group::Gauges,
         Group::Other,
     ];
 
@@ -28,6 +30,7 @@ impl Group {
             Group::Pressure => "压力工具",
             Group::Humidity => "温湿度工具",
             Group::Errors => "误差工具",
+            Group::Gauges => "量规计算",
             Group::Other => "其他工具",
         }
     }
@@ -40,6 +43,7 @@ impl Group {
             Group::Pressure => "压力",
             Group::Humidity => "温湿度",
             Group::Errors => "误差",
+            Group::Gauges => "量规",
             Group::Other => "其他",
         }
     }
@@ -73,6 +77,7 @@ pub(crate) enum Dimension {
 
 #[derive(Clone, Copy)]
 pub(crate) enum ToolKind {
+    Gauge(GaugeKind),
     Unit(Dimension),
     WorkingThermocouple,
     IndustrialResistance,
@@ -106,6 +111,17 @@ pub(crate) struct ToolDef {
     pub(crate) description: &'static str,
 }
 
+/// 六种量规工具独立编号，各自保存输入参数。
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum GaugeKind {
+    Metric,
+    Trapezoidal,
+    Unified,
+    Pipe,
+    Rebar,
+    Smooth,
+}
+
 macro_rules! tool {
     ($id:literal, $name:literal, $group:ident, $kind:expr, $icon:literal, $desc:literal) => {
         ToolDef {
@@ -126,7 +142,7 @@ pub(crate) const TOOLS: &[ToolDef] = &[
         Units,
         ToolKind::Unit(Dimension::Pressure),
         "P",
-        "压力单位互换，参考页面列出帕、千帕、psi、毫米汞柱等常用单位。"
+        "压力单位互换，包含帕、千帕、psi、毫米汞柱等常用单位。"
     ),
     tool!(
         "unit_temperature",
@@ -439,6 +455,54 @@ pub(crate) const TOOLS: &[ToolDef] = &[
         ToolKind::Uncertainty,
         "u",
         "合成 A 类和 B 类标准不确定度并求扩展不确定度。"
+    ),
+    tool!(
+        "gauge_metric",
+        "公制普通螺纹 M",
+        Gauges,
+        ToolKind::Gauge(GaugeKind::Metric),
+        "M",
+        "内外螺纹工作量规、校对塞规、中径公差、磨损极限与长度。"
+    ),
+    tool!(
+        "gauge_trapezoidal",
+        "梯形螺纹 Tr",
+        Gauges,
+        ToolKind::Gauge(GaugeKind::Trapezoidal),
+        "Tr",
+        "30° 梯形螺纹，多线修正、工作塞规、环规和校对规。"
+    ),
+    tool!(
+        "gauge_unified",
+        "美制统一螺纹 UN",
+        Gauges,
+        ToolKind::Gauge(GaugeKind::Unified),
+        "UN",
+        "按 1A～3A、1B～3B 自动计算工件中径极限及对应量规，支持系列与 TPI 联动。"
+    ),
+    tool!(
+        "gauge_pipe",
+        "管螺纹",
+        Gauges,
+        ToolKind::Gauge(GaugeKind::Pipe),
+        "R/NPT",
+        "R、NPT 密封锥管螺纹尺寸、量规公差及生产尺寸查询。"
+    ),
+    tool!(
+        "gauge_rebar",
+        "钢筋直螺纹",
+        Gauges,
+        ToolKind::Gauge(GaugeKind::Rebar),
+        "钢筋",
+        "60°、70°、75° 钢筋直螺纹，套筒与丝头量规参考计算。"
+    ),
+    tool!(
+        "gauge_smooth",
+        "光滑量规",
+        Gauges,
+        ToolKind::Gauge(GaugeKind::Smooth),
+        "IT",
+        "孔用塞规、轴用环规与卡规，IT6～IT16 公差带查询。"
     ),
     tool!(
         "transmitter",

@@ -209,7 +209,7 @@ impl ToolboxApp {
         if let Some((m, u, min, max)) = table {
             self.render_division_table(ui, tool, "ntc", (min, max), u, "Ω", |t| m.resistance(t));
         }
-        info_note(ui, tool.kind);
+        self.calculation_note(ui, tool);
     }
 
     /// 编辑器是否展开只影响绘制，所有生效系数始终从状态中读取。

@@ -4,18 +4,18 @@
 
 ## 数据文件
 
-| 文件 | 内容与来源 |
+| 文件 | 内容 |
 |---|---|
-| `tables.json` | 公差、基本偏差、量规尺寸、长度与规格表，提取自用户提供的 KIBOKO 量规设计查询系统 V8.0 离线页面（<https://www.kiboko.cn/query.html>） |
-| `unified.json` | UN 系列及中径制造公差 U，提取自《美制螺纹规模板.xlsx》Sheet2!B34:M104、A3:G30；公差原始单位为 inch |
+| `tables.json` | 公差、基本偏差、量规尺寸、长度与规格表 |
+| `unified.json` | UN 系列及中径制造公差 U，公差原始单位为 inch |
 
-Rust 桌面版与 Web 共用本目录；C++ 副本位于 `cpp_version/resources/gauges/`。计算代码位于 `src/calculators/gauges/`。
+Rust 计算代码位于 `src/calculators/gauges/`，C++ 数据副本位于 `cpp_version/resources/gauges/`。
 
 ## 取值约定
 
 - `99999`、`-100000` 和空值表示缺失，不能作为尺寸或零公差；负偏差保留符号。
 - 尺寸计算保留双精度，最终显示五位小数；公差与长度取档以页面提示为准。
-- UN 工件及工作量规中径采用 Excel 模型，计算过程不作中间修约。塞规与环规共用制造公差 U；**16 TPI、8＜D≤12 inch 的 U 取 0.0006 inch**。
+- UN 工件及工作量规中径计算不作中间修约。塞规与环规共用制造公差 U；**16 TPI、8＜D≤12 inch 的 U 取 0.0006 inch**。
 
 ## 数据范围与限制
 
@@ -26,8 +26,4 @@ Rust 桌面版与 Web 共用本目录；C++ 副本位于 `cpp_version/resources/
 - **光滑量规**：不计算需要等级相关 Δ 修正的 P～ZC 6、7 级孔公差带。四处孔偏差在 `lookup.rs` 修正（μm）：0～3 mm F=6；24～30 mm D=65；65～80 mm D=100；100～120 mm D=120。
 - **管螺纹**：按现有 R/NPT 规格表查询；NPT 6 inch 环规原表中径存疑，暂不输出。
 
-数据与模型不覆盖标准的全部条款，制造与判定须结合执行标准和图纸；既有数据权利归属不因移植而改变。
-
-## 维护
-
-修改数据后，在仓库根目录运行 `python cpp_version/scripts/sync-gauges.py` 同步 C++ 副本。Web 引用共享模型，重新构建即可。
+数据与模型不覆盖标准的全部条款，制造与判定须结合执行标准和图纸。

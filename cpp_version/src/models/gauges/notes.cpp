@@ -1,4 +1,4 @@
-// 从 Rust 的量规说明同步生成；更新请运行 scripts/sync-gauges.py。
+// 量规计算说明与各类型的技术口径。
 #include "toolbox/gauges.hpp"
 namespace toolbox::gauges {
 std::string explanation(Type type) {

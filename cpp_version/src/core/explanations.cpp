@@ -1,4 +1,4 @@
-// 从 Rust 同步的专业用户说明。更新请运行 scripts/sync-copy.py。
+// 各工具的计算说明、详细公式和单位约定。
 #include "toolbox/core.hpp"
 #include "toolbox/gauges.hpp"
 namespace toolbox {

@@ -4,6 +4,7 @@
 
 - **Rust 桌面版**：本目录，使用 egui 构建界面。
 - **[C++ 桌面版](cpp_version/README.md)**：Windows 单文件程序，支持 x64、x86 构建。
+- **[网页版](web_version/README.md)**：使用 Vue 3 与 Rust/WebAssembly，适配电脑和手机，可部署为静态网站。
 
 ## 功能分类
 
@@ -43,7 +44,7 @@ Copy-Item target/release/Toolbox.exe, README.md, LICENSE, licenses/PsychroLib-LI
 Compress-Archive -Path dist/Toolbox.exe, dist/README.md, dist/LICENSE, dist/PsychroLib-LICENSE.txt -DestinationPath dist/Toolbox-windows.zip -Force
 ```
 
-发布 `dist/Toolbox-windows.zip` 即可。C++ 版的构建步骤见 [C++ 版 README](cpp_version/README.md)。
+发布 `dist/Toolbox-windows.zip` 即可。其他版本的构建与部署见 [C++ 版 README](cpp_version/README.md) 和 [网页版 README](web_version/README.md)。
 
 ## 项目结构
 
@@ -110,20 +111,26 @@ Toolbox/
 │   └── gauges/
 │       ├── tables.json       # 量规尺寸、公差、偏差和长度表
 │       ├── unified.json      # UN 系列及中径制造公差 U
-│       └── README.md         # 数据来源、取值约定及适用范围
+│       └── README.md         # 数据用途、取值约定及适用范围
 ├── assets/                   # SVG 原图与 PNG、ICO 程序图标
 ├── licenses/                 # 第三方许可证原文
-└── cpp_version/
-    ├── build.cmd / build.rsp # MinGW 构建入口、源码清单与链接参数
-    ├── include/toolbox/      # 公共接口与数据结构
-    ├── src/core/            # 基础数值工具、目录和内置数据
-    ├── src/models/          # 各工具的计算模型
-    ├── src/pages/           # 参数输入、结果展示及图表
-    ├── src/gui/             # 窗口、排版、绘图、导航和导出
-    ├── resources/           # 图标、程序清单和内嵌量规数据
-    ├── scripts/             # 与 Rust 版同步数据及说明
-    ├── third_party/         # 随源码编译的第三方组件
-    └── licenses/            # 第三方许可及程序内许可汇总
+├── cpp_version/
+│   ├── build.cmd / build.rsp # MinGW 构建入口、源码清单与链接参数
+│   ├── include/toolbox/      # 公共接口与数据结构
+│   ├── src/core/            # 基础数值工具、目录和内置数据
+│   ├── src/models/          # 各工具的计算模型
+│   ├── src/pages/           # 参数输入、结果展示及图表
+│   ├── src/gui/             # 窗口、排版、绘图、导航和导出
+│   ├── resources/           # 图标、程序清单和内嵌量规数据
+│   ├── third_party/         # 随源码编译的第三方组件
+│   └── licenses/            # 第三方许可及程序内许可汇总
+└── web_version/
+    ├── package.json         # 开发与发布构建命令
+    ├── core/                # Rust/Wasm 接口与共享模型适配
+    ├── src/                 # Vue 页面、输入控件、图表及计算 Worker
+    ├── public/              # 图标、应用清单与许可文件
+    ├── scripts/             # Wasm 构建、离线缓存和许可汇总
+    └── deploy/              # 静态网站部署模板
 ```
 
 `名称.rs / 名称/` 表示同名入口文件与实现目录：入口组织页面或对外接口，子目录拆分模型、曲线和允差等实现。共用数值工具集中在 `calculators/`，单位及量规基础数据分别集中维护。

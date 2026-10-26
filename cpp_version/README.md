@@ -120,9 +120,6 @@ cpp_version/
 │   └── gauges/
 │       ├── tables.json       # 量规尺寸、公差、偏差和长度表
 │       └── unified.json      # UN 系列及中径制造公差 U
-├── scripts/
-│   ├── sync-gauges.py        # 从 Rust 版同步量规数据与说明
-│   └── sync-copy.py          # 从 Rust 版同步工具文案与单位说明
 ├── licenses/                 # 第三方许可原文及内嵌许可汇总
 └── third_party/
     ├── README.md             # 第三方源码说明
@@ -137,7 +134,6 @@ cpp_version/
 
 - 计算使用 `double`，适用温区、单位、允差和模型条件见各页“计算说明”。量规模型与数据边界见 [量规数据说明](../data/gauges/README.md)。
 - 输入仅在当前运行期间保存。分度表和样条支持 CSV 导出；量规支持复制完整结果。
-- 开发时可运行 `python scripts/sync-gauges.py`、`python scripts/sync-copy.py` 同步 Rust 数据和说明；普通构建无需 Python 或 Rust。
 
 ## 许可证
 

@@ -136,7 +136,7 @@ cpp_version/
 ## 使用说明
 
 - 计算使用 `double`，适用温区、单位、允差和模型条件见各页“计算说明”。量规模型与数据边界见 [量规数据说明](../data/gauges/README.md)。
-- 输入在关闭程序后不保留。分度表和样条支持 CSV 导出；量规支持复制完整结果。
+- 输入仅在当前运行期间保存。分度表和样条支持 CSV 导出；量规支持复制完整结果。
 - 开发时可运行 `python scripts/sync-gauges.py`、`python scripts/sync-copy.py` 同步 Rust 数据和说明；普通构建无需 Python 或 Rust。
 
 ## 许可证

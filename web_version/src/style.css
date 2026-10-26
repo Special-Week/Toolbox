@@ -1,0 +1,6 @@
+/* 各界面区域独立维护，入口只统一导入。 */
+@import "./styles/shell.css";
+@import "./styles/forms.css";
+@import "./styles/results.css";
+@import "./styles/responsive.css";
+@import "./styles/mobile.css";

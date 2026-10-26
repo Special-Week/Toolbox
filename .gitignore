@@ -6,9 +6,6 @@
 # 本地另存网页、截图和参考脚本，不参与程序构建。
 /source/
 
-# 网页版整个目录。
-/web_version/
-
 # 本地分析、覆盖率和临时检查报告。
 /test-results/
 /coverage/

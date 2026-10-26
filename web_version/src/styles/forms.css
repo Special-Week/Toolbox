@@ -1,0 +1,356 @@
+/* 工具参数、输入框与动态数据编辑器。 */
+.breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #8a98af;
+  font-size: 11px;
+  margin-bottom: 27px;
+  flex-wrap: wrap;
+}
+.breadcrumb button {
+  border: none;
+  background: none;
+  color: var(--blue);
+  padding: 0;
+  min-height: 24px;
+}
+.tool-heading {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  margin-bottom: 28px;
+}
+.tool-heading h1 {
+  font-size: 27px;
+  line-height: 1.4;
+}
+.tool-heading p {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-top: 6px;
+}
+.reset-button {
+  margin-left: auto;
+  white-space: nowrap;
+  align-self: flex-start;
+}
+.panel {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  margin-bottom: 20px;
+  min-width: 0;
+}
+.section-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.section-heading .muted {
+  font-size: 11px;
+  margin-top: 7px;
+  line-height: 1.6;
+}
+.tool-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px 16px;
+  align-items: start;
+}
+.field {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 9px;
+}
+.field-label {
+  font-size: 12px;
+  color: #718099;
+  line-height: 1.5;
+}
+.field small {
+  font-size: 11px;
+  color: #9aa7bb;
+}
+input,
+select,
+textarea {
+  min-width: 0;
+  width: 100%;
+  border: 1px solid #dce5f1;
+  background: white;
+  border-radius: 6px;
+  padding: 0 12px;
+  height: 42px;
+  color: #31425d;
+  transition: border-color 0.12s;
+  box-shadow: 0 1px 2px #19396503;
+}
+input:hover,
+select:hover,
+textarea:hover {
+  border-color: #b5c8e4;
+}
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: #6e9eea;
+}
+input:disabled {
+  background: #f3f6fa;
+  color: #9aa7b9;
+}
+input {
+  cursor: text;
+}
+input::placeholder,
+textarea::placeholder {
+  color: #b1bbc9;
+  font-size: 11px;
+}
+select {
+  cursor: pointer;
+  padding-right: 8px;
+}
+textarea {
+  height: auto;
+  padding: 10px 12px;
+  line-height: 1.7;
+  resize: vertical;
+}
+.button {
+  border: 1px solid transparent;
+  border-radius: 6px;
+  min-height: 36px;
+  padding: 8px 14px;
+  line-height: 1.4;
+  font-size: 12px;
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+.button.primary {
+  background: var(--blue);
+  color: white;
+}
+.button.primary:hover:not(:disabled) {
+  background: #1f5fcf;
+}
+.button.secondary {
+  background: #edf3ff;
+  color: var(--blue);
+  border-color: #e7effc;
+}
+.button.secondary:hover:not(:disabled) {
+  background: #e0ebfe;
+}
+.button.subtle {
+  background: #f5f7fb;
+  color: #7988a0;
+}
+.button.subtle:hover:not(:disabled) {
+  background: #edf1f8;
+  color: #47638a;
+}
+.button.danger-text {
+  color: #ad6970;
+  background: transparent;
+  min-height: 30px;
+  padding-left: 0;
+  font-size: 11px;
+}
+.full-width,
+.array-editor,
+.budget-editor,
+.pressure-components {
+  grid-column: 1/-1;
+  min-width: 0;
+}
+.array-editor + .array-editor {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+.array-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 15px;
+}
+.array-toolbar strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+.array-toolbar .muted {
+  font-size: 11px;
+}
+.toolbar-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+  flex-wrap: wrap;
+}
+.toolbar-actions .button {
+  font-size: 11px;
+  min-height: 30px;
+  padding: 6px 9px;
+}
+.point-header,
+.point-row {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.point-header {
+  font-size: 11px;
+  color: #92a0b5;
+  margin-bottom: 7px;
+}
+.point-header span:not(:first-child) {
+  padding-left: 12px;
+}
+.point-row,
+.vector-row {
+  margin-bottom: 10px;
+}
+.vector-row {
+  display: grid;
+  grid-template-columns: minmax(38px, 100px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+.row-index {
+  font-size: 11px;
+  color: #91a0b7;
+  overflow-wrap: anywhere;
+}
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  margin-top: 19px;
+  font-size: 11px;
+  color: #8a98ad;
+}
+.pagination .button {
+  font-size: 11px;
+  min-height: 30px;
+  padding: 6px 10px;
+}
+.paste-panel {
+  background: #f7f9fd;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 14px;
+  margin-bottom: 18px;
+}
+.paste-panel p {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+.paste-panel textarea {
+  margin-bottom: 10px;
+}
+.error-text {
+  color: #c65e61 !important;
+}
+.budget-root {
+  border: 1px solid var(--border);
+  padding: 16px;
+  border-radius: 8px;
+  margin-bottom: 14px;
+  background: #fcfdff;
+}
+.budget-child {
+  border-left: 2px solid #dbe7fb;
+  padding-left: 14px;
+  margin: 18px 0;
+}
+.budget-node .form-grid {
+  gap: 13px;
+}
+.budget-node .array-toolbar {
+  margin-top: 16px;
+}
+.measurement-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+.measurement-grid input {
+  height: 36px;
+}
+.measurement-grid .field-label {
+  font-size: 10px;
+}
+.measurement-grid .field {
+  gap: 5px;
+}
+/* 辅助设置使用原生折叠，收起时保留字段与已填写值。 */
+.advanced-settings {
+  margin-top: 18px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.advanced-settings > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 13px;
+  color: #637795;
+}
+.advanced-settings > summary::-webkit-details-marker {
+  display: none;
+}
+.advanced-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  flex-shrink: 0;
+}
+.advanced-toggle svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+}
+.advanced-collapse {
+  display: none;
+}
+.advanced-settings[open] > summary .advanced-expand {
+  display: none;
+}
+.advanced-settings[open] > summary .advanced-collapse {
+  display: inline;
+}
+.advanced-settings[open] > summary svg {
+  transform: rotate(180deg);
+}
+.advanced-settings > .form-grid {
+  margin-top: 14px;
+}

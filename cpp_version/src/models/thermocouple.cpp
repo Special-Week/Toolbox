@@ -115,6 +115,13 @@ double thermoTemperature(const std::string &kind, double e) {
     if (e == highEmf) {
         return hi;
     }
+    // 精确命中连接点时直接返回，避免微小分段差异让二分迭代误报无解。
+    for (const auto &part : thermoSegments(kind)) {
+        const double join = part.maximum;
+        if (join > lo && join < hi && thermoEmf(kind, join) == e) {
+            return join;
+        }
+    }
     for (int i = 0; i < 80; ++i) {
         double mid = lo + (hi - lo) * .5;
         (thermoEmf(kind, mid) < e ? lo : hi) = mid;

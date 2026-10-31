@@ -257,10 +257,10 @@
   .reset-button {
     align-self: center;
     margin-top: 6px;
-    margin-left: 57px;
-    padding: 6px 10px;
-    font-size: 11px;
-    min-height: 30px;
+    margin-left: auto;
+    padding: 8px 14px;
+    font-size: 13px;
+    min-height: 40px;
   }
   .form-grid,
   .input-panels .form-grid {

@@ -1,5 +1,5 @@
 //! 应用状态与页面调度；输入以“工具 ID + 字段名”隔离，避免切换工具后串值。
-//! 状态只在当前进程内保留，未实现磁盘持久化。
+//! 复杂计算自动续接本地输入；快捷换算每次打开使用示例。
 use crate::calculators::common::*;
 use crate::calculators::spline::ExportJob;
 use crate::catalog::{Dimension, Group, TOOLS, ToolDef, ToolKind, units_for};
@@ -11,6 +11,8 @@ use std::sync::atomic::Ordering;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 mod dashboard;
+mod input_history;
+use input_history::InputHistory;
 
 pub(crate) struct ToolboxApp {
     selected: Option<&'static str>,
@@ -18,6 +20,9 @@ pub(crate) struct ToolboxApp {
     search: String,
     // 保留用户输入的原始文本，允许编辑中的空串、负号等暂时无效状态。
     values: HashMap<String, String>,
+    history: InputHistory,
+    opened: Option<&'static str>,
+    example_revision: u64,
     sidebar_collapsed: bool,
     collapsed_groups: HashSet<Group>,
     spline_export: Option<ExportJob>,
@@ -28,11 +33,15 @@ pub(crate) struct ToolboxApp {
 
 impl Default for ToolboxApp {
     fn default() -> Self {
+        let history = InputHistory::new();
         Self {
             selected: None,
             selected_group: None,
             search: String::new(),
-            values: HashMap::new(),
+            values: history.values.clone(),
+            history,
+            opened: None,
+            example_revision: 0,
             sidebar_collapsed: false,
             collapsed_groups: Group::ALL.into_iter().collect(),
             spline_export: None,
@@ -84,6 +93,18 @@ impl eframe::App for ToolboxApp {
                     .inner_margin(egui::Margin::same(0)),
             )
             .show(ctx, |ui| self.render_main(ui));
+        if let Some(remaining) = self.history.remaining() {
+            if remaining.is_zero() {
+                self.history.flush();
+            }
+            if let Some(remaining) = self.history.remaining() {
+                ctx.request_repaint_after(remaining);
+            }
+        }
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.history.flush();
     }
 }
 
@@ -289,6 +310,7 @@ impl ToolboxApp {
         if let Some(id) = self.selected {
             self.render_selected(ui, id);
         } else {
+            self.opened = None;
             self.render_dashboard(ui);
         }
     }
@@ -297,12 +319,18 @@ impl ToolboxApp {
         let Some(tool) = TOOLS.iter().find(|tool| tool.id == id) else {
             return;
         };
+        if self.opened != Some(id) {
+            if !tool.remembers_inputs() {
+                self.clear_tool_inputs(tool);
+            }
+            self.opened = Some(id);
+        }
         let mut back = false;
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.add_space(22.0);
-                ui.horizontal(|ui| {
+                ui.horizontal_wrapped(|ui| {
                     if ui.button(RichText::new("← 工具箱").color(BLUE)).clicked() {
                         back = true;
                     }
@@ -310,32 +338,60 @@ impl ToolboxApp {
                         RichText::new(format!("/ {} / {}", tool.group.title(), tool.name))
                             .color(MUTED),
                     );
+                    if tool.remembers_inputs() && self.history.error {
+                        ui.label(RichText::new("输入暂未保存").size(11.0).color(MUTED))
+                            .on_hover_text("本地保存暂时不可用，当前输入仍可使用，稍后自动重试");
+                    }
                 });
                 ui.add_space(13.0);
                 ui.horizontal(|ui| {
-                    if !tool.icon.is_empty() {
-                        ui.add_sized(
-                            [46.0, 46.0],
-                            egui::Button::new(
-                                RichText::new(tool.icon).size(18.0).strong().color(BLUE),
+                    // 操作与标题同排，右侧留白；先预留按钮宽度，长标题可在左侧换行。
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.add_space(24.0);
+                        if ui
+                            .add_enabled(
+                                self.spline_export.is_none(),
+                                egui::Button::new(RichText::new("恢复示例").size(14.0))
+                                    .min_size(Vec2::new(104.0, 40.0)),
                             )
-                            .fill(BLUE_SOFT),
-                        );
-                    }
-                    ui.vertical(|ui| {
-                        ui.label(RichText::new(tool.name).size(26.0).strong().color(INK));
-                        ui.label(RichText::new(tool.description).size(12.5).color(MUTED));
+                            .on_hover_text("将当前工具的全部输入恢复为示例值")
+                            .clicked()
+                        {
+                            self.clear_tool_inputs(tool);
+                            self.example_revision += 1;
+                        }
+                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                            if !tool.icon.is_empty() {
+                                ui.add_sized(
+                                    [46.0, 46.0],
+                                    egui::Button::new(
+                                        RichText::new(tool.icon).size(18.0).strong().color(BLUE),
+                                    )
+                                    .fill(BLUE_SOFT),
+                                );
+                            }
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(tool.name).size(26.0).strong().color(INK));
+                                ui.label(RichText::new(tool.description).size(12.5).color(MUTED));
+                            });
+                        });
                     });
                 });
                 ui.add_space(17.0);
-                match tool.kind {
+                ui.push_id((tool.id, self.example_revision), |ui| match tool.kind {
                     ToolKind::Unit(dimension) => self.render_unit_page(ui, tool, dimension),
                     kind => self.render_calculator(ui, tool, kind),
-                }
+                });
             });
+        self.history.observe(tool, &self.values);
         if back {
             self.selected = None;
         }
+    }
+
+    fn clear_tool_inputs(&mut self, tool: &ToolDef) {
+        let prefix = format!("{}.", tool.id);
+        self.values.retain(|key, _| !key.starts_with(&prefix));
     }
 
     fn matches(&self, tool: &ToolDef) -> bool {

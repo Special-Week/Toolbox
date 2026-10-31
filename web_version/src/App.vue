@@ -10,6 +10,7 @@ import { schema, initialize, adjust } from "./schema";
 import { decimal, display, download } from "./format";
 import { resultCsv } from "./export";
 import { calculationNote } from "./notes";
+import { INPUT_STORAGE_KEY, rememberedInputs } from "./input-history";
 import FieldEditor from "./components/FieldEditor.vue";
 import CurveChart from "./components/CurveChart.vue";
 import ResultTable from "./components/ResultTable.vue";
@@ -148,7 +149,9 @@ const equation = computed(() => {
 const logo = import.meta.env.BASE_URL + "toolbox.svg";
 let timer: ReturnType<typeof setTimeout> | undefined;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
+let lastSavedInputs = "";
 let revision = 0;
+const inputGeneration = ref(0);
 
 function open(tool: Tool | null, hash = true) {
   if (tool && selected.value?.id === tool.id) {
@@ -163,7 +166,8 @@ function open(tool: Tool | null, hash = true) {
   message.value = "";
   mobileNav.value = false;
   if (tool && catalog.value) {
-    states[tool.id] ??= {};
+    if (!tool.rememberInputs) states[tool.id] = {};
+    else states[tool.id] ??= {};
     initialize(tool, states[tool.id], catalog.value);
     document.title = `${tool.name} · 工具箱`;
   } else document.title = "工具箱 · 计量与工程计算";
@@ -238,16 +242,22 @@ function save() {
 }
 function saveNow() {
   clearTimeout(saveTimer);
+  if (!catalog.value) return;
   try {
-    localStorage.setItem("toolbox-web:v1", JSON.stringify(states));
+    const text = JSON.stringify(rememberedInputs(catalog.value.tools, states));
+    if (text === lastSavedInputs) return;
+    localStorage.setItem(INPUT_STORAGE_KEY, text);
+    lastSavedInputs = text;
   } catch {
     /* 存储不可用时继续保留本次会话输入。 */
   }
 }
 watch(
-  // 不同工具可能拥有完全相同的默认输入，必须把工具 ID 纳入更新依据。
+  // 工具切换和恢复示例均触发重算，即使恢复前后的输入文本完全相同。
   () =>
-    selected.value ? selected.value.id + JSON.stringify(current.value) : "",
+    selected.value
+      ? selected.value.id + ":" + inputGeneration.value + JSON.stringify(current.value)
+      : "",
   () => {
     clearTimeout(timer);
     const version = ++revision;
@@ -285,8 +295,14 @@ watch(
 
 function reset() {
   if (selected.value && catalog.value) {
+    clearTimeout(timer);
+    ++revision;
+    ++inputGeneration.value;
+    result.value = null;
+    error.value = "";
     states[selected.value.id] = {};
     initialize(selected.value, states[selected.value.id], catalog.value);
+    saveNow();
     message.value = "已恢复示例输入。";
   }
 }
@@ -437,16 +453,12 @@ onMounted(async () => {
     const c = await engine.request<Catalog>("catalog");
     catalog.value = c;
     try {
-      const saved = JSON.parse(localStorage.getItem("toolbox-web:v1") ?? "{}");
-      if (saved && typeof saved === "object" && !Array.isArray(saved))
-        for (const tool of c.tools) {
-          const v = saved[tool.id];
-          if (v && typeof v === "object" && !Array.isArray(v))
-            states[tool.id] = v;
-        }
+      const saved = JSON.parse(localStorage.getItem(INPUT_STORAGE_KEY) ?? "{}");
+      Object.assign(states, rememberedInputs(c.tools, saved));
     } catch {
       /* 损坏或旧版输入不阻碍网站启动。 */
     }
+    saveNow();
     route();
     window.addEventListener("hashchange", route);
   } catch (e) {
@@ -677,7 +689,7 @@ onUnmounted(() => {
         </div>
         <GaugeTool
           v-if="selected.kind === 'gauge'"
-          :key="selected.id"
+          :key="selected.id + ':' + inputGeneration"
           :engine="engine"
           :tool="selected"
           :state="current"

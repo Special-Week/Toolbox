@@ -111,6 +111,27 @@ pub(crate) struct ToolDef {
     pub(crate) description: &'static str,
 }
 
+impl ToolDef {
+    /// 只续接需要反复录入的参数和数据；即用即走的换算不保存输入。
+    pub(crate) fn remembers_inputs(&self) -> bool {
+        matches!(
+            self.kind,
+            ToolKind::StandardThermocouple
+                | ToolKind::StandardPlatinumResistor
+                | ToolKind::Thermistor
+                | ToolKind::PressureReference
+                | ToolKind::TransmitterReference
+                | ToolKind::Repeatability
+                | ToolKind::RangeMethod
+                | ToolKind::ResultantError
+                | ToolKind::Uncertainty
+                | ToolKind::BSplineInterpolation
+                | ToolKind::CalibrationCurveFit
+                | ToolKind::Gauge(_)
+        )
+    }
+}
+
 /// 六种量规工具独立编号，各自保存输入参数。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum GaugeKind {

@@ -59,6 +59,20 @@ struct State {
     std::wstring &value(const std::string &key, const std::wstring &initial);
     int &choice(const std::string &key, int initial);
 };
+// 每个工具一个本地快照，停止输入后保存；快捷换算不进入持久化范围。
+bool remembersInputs(const Tool &tool);
+class InputHistory {
+    std::wstring path_;
+    State saved_;
+    bool pending_ = false;
+    ULONGLONG due_ = 0;
+
+  public:
+    explicit InputHistory(std::wstring path = {});
+    void load(State &state);
+    void observe(const Tool &tool, const State &state);
+    void flush(bool force = false);
+};
 struct Scene {
     Rect clip;
     std::vector<Draw> draws;
@@ -137,6 +151,9 @@ class App {
     std::map<HWND, std::string> nativeKeys_;
     bool synchronizing_ = false;
     float contentHeight_ = 0, sideHeight_ = 0;
+    InputHistory inputHistory_;
+    void clearToolInputs(const Tool &tool);
+    void restoreExample();
     void synchronizeControls();
     void paint();
     void releaseTarget();
@@ -177,5 +194,6 @@ void renderErrors(Page &page);
 void renderOther(Page &page);
 void renderCurveFit(Page &page);
 void renderGauges(Page &page);
+void clearGaugeCache(const std::string &id);
 void showLicenses(HWND owner, float dpi);
 } // namespace toolbox

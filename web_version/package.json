@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
+    "test:offline": "node --test scripts/service-worker.test.mjs",
     "dev": "npm run build:wasm && vite --host 127.0.0.1",
     "build": "npm run build:wasm && vue-tsc --noEmit && vite build",
     "preview": "vite preview --host 127.0.0.1"

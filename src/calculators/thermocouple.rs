@@ -194,6 +194,14 @@ pub(crate) fn thermocouple_temperature(kind: &str, emf: f64) -> Result<f64, Stri
     if emf == high_emf {
         return Ok(upper);
     }
+    // 分段多项式在连接处存在微小数值差异。连接点本身若精确命中，
+    // 直接返回该点，避免二分迭代收敛到另一段的一侧后误报无解。
+    for segment in &reference.segments {
+        let join = segment.max;
+        if join > lower && join < upper && reference.emf(join)? == emf {
+            return Ok(join);
+        }
+    }
     for _ in 0..80 {
         let middle = lower + (upper - lower) * 0.5;
         if reference.emf(middle)? < emf {
@@ -232,4 +240,53 @@ pub(crate) fn corrected_temperature(
 ) -> Result<(f64, f64), String> {
     let compensated = measured + correction + thermocouple_emf(kind, cold)?;
     Ok((thermocouple_temperature(kind, compensated)?, compensated))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn type_k_zero_and_near_zero_round_trip() {
+        assert_eq!(thermocouple_temperature("K", 0.0).unwrap(), 0.0);
+        for temperature in [-0.00001, 0.0, 0.00001, 100.0] {
+            let emf = thermocouple_emf("K", temperature).unwrap();
+            let restored = thermocouple_temperature("K", emf).unwrap();
+            assert!(
+                (restored - temperature).abs() < 1e-7,
+                "{temperature}: {restored}"
+            );
+        }
+    }
+
+    #[test]
+    fn all_reference_segment_boundaries_and_midpoints_round_trip() {
+        for kind in [
+            "B", "E", "J", "K", "N", "R", "S", "T", "C", "D", "G", "L", "LR", "U", "A",
+        ] {
+            let r = reference(kind).unwrap();
+            for segment in &r.segments {
+                for temperature in [segment.min, (segment.min + segment.max) * 0.5, segment.max] {
+                    let emf = thermocouple_emf(kind, temperature).unwrap();
+                    if kind == "B" && emf <= 0.0 {
+                        continue;
+                    }
+                    let restored = thermocouple_temperature(kind, emf)
+                        .unwrap_or_else(|error| panic!("{kind}, {temperature} °C: {error}"));
+                    assert!(
+                        (restored - temperature).abs() < 1e-6,
+                        "{kind}, {temperature} °C: {restored}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ambiguous_type_b_and_nonfinite_emf_stay_invalid() {
+        for emf in [0.0, -0.001, f64::NAN, f64::INFINITY] {
+            assert!(thermocouple_temperature("B", emf).is_err());
+        }
+        assert!(thermocouple_temperature("K", f64::NAN).is_err());
+    }
 }

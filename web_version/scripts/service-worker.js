@@ -61,7 +61,7 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       caches
         .open(CACHE)
-        .then(async (cache) => (await cache.match(INDEX)) || fetch(request)),
+        .then(async (cache) => (await cache.match(INDEX, { ignoreVary: true })) || fetch(request)),
     );
     return;
   }
@@ -69,12 +69,15 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     (async () => {
       const current = await caches.open(CACHE);
-      const response = await current.match(request);
+      // 这里只缓存构建生成的静态文件，按完整 URL 匹配同一份内容。
+      // 模块请求可能带 Origin，而预缓存请求没有；忽略这类 Vary 差异，
+      // 防止更新移除旧资源后误走网络并取到 HTML 回退页面。
+      const response = await current.match(request, { ignoreVary: true });
       if (response) return response;
       for (const name of (await caches.keys()).filter((name) =>
         name.startsWith(PREFIX),
       )) {
-        const previous = await (await caches.open(name)).match(request);
+        const previous = await (await caches.open(name)).match(request, { ignoreVary: true });
         if (previous) return previous;
       }
       return fetch(request);

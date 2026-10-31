@@ -29,7 +29,7 @@ pub fn catalog_json() -> String {
         let note_modes: Vec<_> = calculators::explanations::variants(t.kind).iter()
             .map(|(mode, note, formula)| json!({"mode": mode, "note": note, "formula": formula}))
             .collect();
-        json!({"id":t.id,"name":t.name,"group":t.group.title(),"icon":t.icon,"description":t.description,"kind":kind,"units":options,"note":note,"formula":formula,"noteModes":note_modes})
+        json!({"id":t.id,"name":t.name,"group":t.group.title(),"icon":t.icon,"description":t.description,"kind":kind,"units":options,"note":note,"formula":formula,"noteModes":note_modes,"rememberInputs":t.remembers_inputs()})
     }).collect();
     json!({"tools":tools,"rtd":sensors::rtd_catalog(),"zones":sensors::zone_catalog(),"lowRanges":sensors::low_catalog(),"defaults":sensors::defaults()}).to_string()
 }

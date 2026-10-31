@@ -6,6 +6,7 @@ export interface Tool {
   icon: string;
   description: string;
   kind: string;
+  rememberInputs: boolean;
   note: string;
   formula: string;
   noteModes: { mode: number; note: string; formula: string }[];

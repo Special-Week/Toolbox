@@ -68,11 +68,34 @@ void App::refresh() {
     }
 }
 void App::open(int index) {
+    if (index >= 0 && index != selected && !remembersInputs(tools().at(std::size_t(index)))) {
+        clearToolInputs(tools().at(std::size_t(index)));
+    }
     selected = index;
     scroll = 0;
     refresh();
 }
+void App::clearToolInputs(const Tool &tool) {
+    const auto prefix = tool.id + ".";
+    for (auto it = state.values.begin(); it != state.values.end();)
+        if (it->first.compare(0, prefix.size(), prefix) == 0) it = state.values.erase(it);
+        else ++it;
+    for (auto it = state.choices.begin(); it != state.choices.end();)
+        if (it->first.compare(0, prefix.size(), prefix) == 0) it = state.choices.erase(it);
+        else ++it;
+    clearGaugeCache(tool.id);
+    SetFocus(window_);
+}
+void App::restoreExample() {
+    if (selected < 0 || exportJob.active) return;
+    const auto &tool = tools().at(std::size_t(selected));
+    clearToolInputs(tool);
+    inputHistory_.observe(tool, state);
+    inputHistory_.flush(true);
+    refresh();
+}
 int App::run(HINSTANCE instance, int show) {
+    inputHistory_.load(state);
     // Win7 使用系统 DPI；Win10 及以后按每屏 DPI 缩放同一套逻辑坐标。
     auto user = GetModuleHandleW(L"user32.dll");
     using SetContext = BOOL(WINAPI *)(HANDLE);
@@ -290,11 +313,18 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         return reinterpret_cast<LRESULT>(editBrush_);
     }
     case WM_TIMER:
+        inputHistory_.flush();
         if (exportJob.active) {
             refresh();
         }
         return 0;
+    case WM_QUERYENDSESSION:
+        if (selected >= 0) inputHistory_.observe(tools().at(std::size_t(selected)), state);
+        inputHistory_.flush(true);
+        return TRUE;
     case WM_CLOSE:
+        if (selected >= 0) inputHistory_.observe(tools().at(std::size_t(selected)), state);
+        inputHistory_.flush(true);
         exportJob.cancel = true;
         DestroyWindow(window_);
         return 0;
@@ -466,9 +496,19 @@ void App::rebuild() {
             scene.text({x, y, 48, 48}, tool.icon, 18, Blue, false, true);
         }
         float offset = tool.icon.empty() ? 0 : 60;
-        scene.text({x + offset, y, w - offset, 32}, tool.name, 26, Ink, true);
-        scene.text({x + offset, y + 34, w - offset, 44}, tool.description, 12, Muted);
+        const float actionWidth = 104, actionGap = 16;
+        const bool actionBelow = textWidth(tool.name, 26) + offset + actionWidth + actionGap > w;
+        const float textSpace = w - offset - (!exportJob.active && !actionBelow ? actionWidth + actionGap : 0);
+        scene.text({x + offset, y, textSpace, 32}, tool.name, 26, Ink, true);
+        scene.text({x + offset, y + 34, textSpace, 44}, tool.description, 12, Muted);
+        if (!exportJob.active && !actionBelow) {
+            scene.button({x + w - actionWidth, y + 3, actionWidth, 40}, L"恢复示例", [this] { restoreExample(); });
+        }
         y += 86;
+        if (!exportJob.active && actionBelow) {
+            scene.button({x + w - actionWidth, y, actionWidth, 40}, L"恢复示例", [this] { restoreExample(); });
+            y += 52;
+        }
         Page page(*this, scene, tool, x, y, w);
         try {
             renderPage(page);
@@ -479,6 +519,7 @@ void App::rebuild() {
         page.y += 14;
         page.explain();
         contentHeight_ = page.y + scroll - top + 24;
+        inputHistory_.observe(tool, state);
     }
     if (contentHeight_ > height - top) {
         float track = height - top - 12, thumb = std::max(28.f, track * (height - top) / contentHeight_);

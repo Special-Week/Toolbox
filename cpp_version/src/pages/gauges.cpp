@@ -7,6 +7,7 @@
 namespace toolbox {
 namespace {
 using GaugeType = gauges::Type;
+std::map<std::string, gauges::PageData> gaugeCache;
 GaugeType typeOf(Kind kind) {
     switch (kind) {
     case Kind::GaugeMetric:
@@ -151,9 +152,16 @@ void drawTable(Page &p, const gauges::Report &report, const gauges::Table &table
 }
 } // namespace
 void renderGauges(Page &p) {
-    // 缓存仅保存本次会话的字段和文本；原生控件通过稳定键复用，输入时不会重建编辑框。
-    static std::map<std::string, gauges::PageData> cache;
-    auto &previous = cache[p.tool.id];
+    auto type = typeOf(p.tool.kind);
+    if (gaugeCache.find(p.tool.id) == gaugeCache.end()) {
+        gauges::State saved;
+        const auto prefix = p.key("gauge.input.");
+        for (const auto &entry : p.state.values)
+            if (entry.first.compare(0, prefix.size(), prefix) == 0)
+                saved[entry.first.substr(prefix.size())] = utf8(entry.second);
+        gaugeCache[p.tool.id] = gauges::page(type, std::move(saved), "");
+    }
+    auto &previous = gaugeCache[p.tool.id];
     auto input = previous.state;
     std::string changed;
     for (const auto &field : previous.fields) {
@@ -176,8 +184,10 @@ void renderGauges(Page &p) {
             changed = field.key;
         }
     }
-    auto type = typeOf(p.tool.kind);
     auto data = gauges::page(type, std::move(input), changed);
+    // 保存规范字段值，避免恢复时把旧下拉索引解释成另一种规格。
+    for (const auto &entry : data.state)
+        p.state.values[p.key("gauge.input." + entry.first)] = wide(entry.second);
     p.heading(L"计算参数");
     for (const auto &field : data.fields) {
         const auto key = p.key("gauge." + field.key);
@@ -247,4 +257,5 @@ void renderGauges(Page &p) {
     }
     previous = std::move(data);
 }
+void clearGaugeCache(const std::string &id) { gaugeCache.erase(id); }
 } // namespace toolbox

@@ -231,8 +231,10 @@
     padding: 10px;
   }
   .main .reset-button {
-    font-size: 12px;
+    font-size: 13px;
     padding: 8px 12px;
+    min-width: 104px;
+    min-height: 44px;
   }
   .toolbar-actions {
     gap: 8px;

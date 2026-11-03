@@ -91,6 +91,8 @@ const std::vector<Tool> &tools() {
          L"按自然端点条件拟合 Q 型值点，支持区间内插与端点外推。"},
         {"calibration_curve_fit", L"校准曲线拟合", Group::Other, Kind::CalibrationCurveFit, L"Fit",
          L"根据成对数据拟合方程，计算系数、相关系数、拟合优度与残差。"},
+        {"metrology_pdf_download", L"计量规范 PDF 下载", Group::Other, Kind::PdfDownload, L"PDF",
+         L"从规范详情页获取预览 PDF，检查页数并保存到本地。"},
     };
     return data;
 }

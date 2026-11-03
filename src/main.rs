@@ -7,6 +7,7 @@ mod catalog;
 mod fonts;
 mod icon;
 mod navigation;
+mod pdf_download;
 mod units;
 
 use crate::app::ToolboxApp;

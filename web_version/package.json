@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
-    "test:offline": "node --test scripts/service-worker.test.mjs",
+    "test:offline": "node --test scripts/service-worker.test.mjs scripts/build-cache.test.mjs",
+    "test:pdf": "node --test scripts/pdf-download.test.mjs server/pdf-cache.test.mjs server/http.test.mjs",
+    "start": "node server/index.mjs",
     "dev": "npm run build:wasm && vite --host 127.0.0.1",
-    "build": "npm run build:wasm && vue-tsc --noEmit && vite build",
+    "build": "npm run build:wasm && vue-tsc --noEmit && node scripts/clean-dist.mjs && vite build && node scripts/package-server.mjs",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

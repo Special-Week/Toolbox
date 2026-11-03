@@ -1,6 +1,6 @@
 # 工具箱 · 网页版
 
-**Toolbox Web** 是面向计量、仪表与分析检测的浏览器计算工具，包含 **7 个分类、49 个工具**。支持电脑和手机，计算在本地浏览器中完成，无需计算后端或数据库。
+**Toolbox Web** 是面向计量、仪表与分析检测的浏览器工具箱，包含 **7 个分类、50 个工具**。支持电脑和手机，计算在本地浏览器中完成；计量规范 PDF 下载使用配套 Node.js 服务获取文件并缓存到磁盘，无需数据库。
 
 ## 功能概览
 
@@ -12,7 +12,7 @@
 | 温湿度工具（4） | 湿度换算、耳温计黑体发射率修正、黑体辐射源发射率误差、辐射温度计示值修正 |
 | 误差工具（5） | 重复性、极差法、合成误差、误差分析、不确定度计算 |
 | 量规计算（6） | 公制普通螺纹 M、梯形螺纹 Tr、美制统一螺纹 UN、R/NPT 管螺纹、钢筋直螺纹、光滑量规 |
-| 其他工具（3） | 变送器、三次均匀 B 样条插值、校准曲线拟合 |
+| 其他工具（4） | 变送器、三次均匀 B 样条插值、校准曲线拟合、计量规范 PDF 下载 |
 
 完整清单见 [主项目 README](../README.md#功能分类)。支持结果复制、适用工具的 CSV 导出、分度表、曲线和残差图。
 
@@ -55,7 +55,7 @@ npm run dev -- --host 0.0.0.0
 npm run build
 ```
 
-此命令使用 Rust release 优化构建 Wasm、生成绑定、检查 TypeScript 并打包网页，最终输出到 `dist/`。
+此命令使用 Rust release 优化构建 Wasm、生成绑定、检查 TypeScript，并将网页、PDF 后端和启动脚本一起打包到 `dist/`。重新构建会清理旧产物，保留 `dist/.pdf-cache/` 中已有的 PDF 缓存。
 
 本地预览构建结果：
 
@@ -67,11 +67,39 @@ npm run preview
 
 ## 部署
 
+### 完整服务（含 PDF 下载）
+
+将完整 `dist/` 上传到服务器，保留 `server/`、`serve.mjs` 和 `serve.py`。运行环境需要 **Node.js 22.12+**；使用 Python 启动入口时还需 Python 3。部署机无需 Rust、npm 或 `node_modules/`。
+
+在上传后的 `dist` 目录运行：
+
+```powershell
+python serve.py
+```
+
+默认监听 **`0.0.0.0:5173`**。本机访问 `http://127.0.0.1:5173/`，局域网设备使用服务器的实际 IP。可用 `python serve.py 8080` 修改端口，或用 `--bind 127.0.0.1` 限定为本机访问。
+
+也可直接运行 `node serve.mjs`，默认监听 `0.0.0.0:4173`；可通过 `HOST`、`PORT` 环境变量调整监听地址和端口。
+
+### PDF 下载与缓存
+
+在“其他工具 → 计量规范 PDF 下载”粘贴规范详情页链接，例如：
+
+```text
+https://jjg.spc.org.cn/resmea/standard/detail.html?standno=JJF+1059.1-2012
+```
+
+确认下载提示后，网页请求同源 `/api/pdf` 接口，由服务器访问规范网站。服务器按链接中的 `standno` 编号匹配缓存：已有有效 PDF 就直接发送；没有或文件损坏时，获取 PDF、解析实际页数并完整保存后发送。相同编号的空格编码、页码等附加参数不影响缓存匹配，同一规范的并发请求合并获取。
+
+使用上述完整构建包启动时，缓存默认位于 **`serve.py` 同级的 `.pdf-cache/`**，保存 PDF 和对应 JSON 信息，重启后仍可使用，不自动过期。更新部署时请保留此目录；可用 `TOOLBOX_PDF_CACHE` 环境变量指定其他位置。单个 PDF 上限 50 MB，网站接口调整或限流时可能下载失败，请按网站的电子文本使用说明使用文件。
+
 ### 静态网站
 
-将 **`dist/` 内的全部文件**上传到静态网站服务器，保持目录结构。支持域名根目录与子目录部署，服务器应将 `.wasm` 作为 `application/wasm` 返回。运行服务器无需安装 Rust 或 Node.js。
+只使用计算功能时，可将网页静态资源部署到静态服务器，保持目录结构，并将 `.wasm` 作为 `application/wasm` 返回。纯静态托管无法提供 `/api/pdf`，需要 PDF 下载时使用上面的完整服务。
 
 ### GitHub Pages
+
+此模板只发布静态网页，适用于计算功能，不提供 PDF 下载接口。
 
 1. 将 [deploy/github-pages.yml](deploy/github-pages.yml) 复制到仓库根目录 `.github/workflows/web-pages.yml`。
 2. 在仓库 **Settings → Pages** 中选择 **GitHub Actions**。
@@ -100,6 +128,7 @@ web_version/
 │   ├── main.ts                      # Vue 应用入口
 │   ├── App.vue                      # 页面状态、导航及计算调度
 │   ├── schema.ts                    # 表单配置、默认值和输入模式
+│   ├── input-history.ts             # 需要记忆的工具及本地输入过滤
 │   ├── engine.ts                    # 计算请求与返回结果管理
 │   ├── engine.worker.ts             # Worker 内加载和调用 Wasm
 │   ├── types.ts                     # 工具、输入和结果的类型定义
@@ -107,23 +136,28 @@ web_version/
 │   ├── format.ts / export.ts        # 数字显示、结果复制与 CSV 格式
 │   ├── mobile-input.ts              # 手机数字输入辅助
 │   ├── style.css / styles/          # 布局、表单、结果与手机样式
-│   └── components/                  # 输入控件、量规、不确定度、图表及 PWA
+│   └── components/                  # 输入控件、量规、图表、PDF 下载及 PWA
+├── server/                          # PDF 获取、真实页数校验、磁盘缓存及测试
 ├── scripts/
 │   ├── build-wasm.mjs               # 编译 Rust 并生成浏览器绑定
 │   ├── sync-licenses.mjs            # 汇总发布所需的许可声明
+│   ├── clean-dist.mjs               # 清理旧构建产物，保留 PDF 缓存
+│   ├── package-server.mjs           # 将后端和启动脚本打包到 dist
 │   ├── offline-plugin.ts           # 生成离线资源清单与版本
 │   └── service-worker.js            # 离线缓存与更新处理
 ├── public/                          # 图标、应用清单与许可文件
-└── deploy/github-pages.yml          # GitHub Pages 部署模板
+└── deploy/
+    ├── serve.py / serve.mjs         # 完整服务启动脚本，构建时复制到 dist
+    └── github-pages.yml             # GitHub Pages 静态部署模板
 ```
 
-`node_modules/` 为 npm 依赖，`pkg/` 为 Wasm 和绑定文件，`core/target/` 为 Rust 构建缓存，`dist/` 为最终网站；均已由 Git 忽略。
+`node_modules/` 为 npm 依赖，`pkg/` 为 Wasm 和绑定文件，`core/target/` 为 Rust 构建缓存，`dist/` 为完整部署包；均已由 Git 忽略。启动脚本请修改 `deploy/` 中的源文件，再重新构建。
 
 ## 使用说明
 
 - **计算**：使用双精度，具体单位、公式和适用范围见各工具的“计算说明”。示例数据应替换为实际测量值或证书参数。
-- **数据保存**：输入保存在当前浏览器，不上传服务器；清理网站数据会清除保存的输入。本地存储不可用时仅保留当前会话。
-- **离线使用**：通过 HTTPS 或 localhost 加载生产版本，等待离线资源就绪后可断网计算；普通服务器 IP 的 HTTP 访问不启用离线缓存。安装能力取决于浏览器。
+- **输入保存**：部分需要反复录入的工具自动保存最近输入，可用“恢复示例”重置；单位换算等快捷工具和 PDF 下载链接不保存。计算输入保存在当前浏览器的 `localStorage`，不上传服务器；清理网站数据会清除保存的输入，存储不可用时仅保留当前会话。PDF 下载时会将规范链接发送给服务器。
+- **离线使用**：通过 HTTPS 或 localhost 加载生产版本，等待离线资源就绪后可断网计算；普通服务器 IP 的 HTTP 访问不启用离线缓存。PDF 下载需要连接服务器，PDF 磁盘缓存不加入网页离线资源。安装能力取决于浏览器。
 - **版本更新**：有新版本时可点击“更新并刷新”，刷新前保存需要保留的结果。开发服务不注册离线缓存。
 - **导出**：分度表最多 5 万行；B 样条支持 2～500 个 Q 点、最多 500 万点采样。支持流式保存的浏览器可导出全部采样点，其他浏览器单次最多导出 25 万行。
 - **量规**：支持复制完整报告，适用范围见 [量规数据说明](../data/gauges/README.md)。

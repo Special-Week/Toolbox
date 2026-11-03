@@ -4,6 +4,7 @@
 -fno-fast-math -ffp-contract=off
 -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601 -DWINVER=0x0601
 -Iinclude -Ithird_party
+-Ithird_party/pdfio -Ithird_party/pdfio/ttf -Ithird_party/zlib
 
 src/main.cpp
 src/core/catalog_data.cpp
@@ -21,6 +22,7 @@ src/models/radiation.cpp
 src/models/uncertainty.cpp
 src/models/spline.cpp
 src/models/curve_fit.cpp
+src/models/pdf_download.cpp
 src/models/gauges/data.cpp
 src/models/gauges/report.cpp
 src/models/gauges/lookup.cpp
@@ -51,6 +53,7 @@ src/pages/errors.cpp
 src/pages/other.cpp
 src/pages/curve_fit.cpp
 src/pages/curve_fit_chart.cpp
+src/pages/pdf_download.cpp
 
 third_party/double-conversion/bignum.cc
 third_party/double-conversion/bignum-dtoa.cc
@@ -61,7 +64,9 @@ third_party/double-conversion/fixed-dtoa.cc
 third_party/double-conversion/string-to-double.cc
 third_party/double-conversion/strtod.cc
 build/Toolbox.res.o
+build/pdf-deps.a
 
 -municode -mwindows -static -static-libgcc
 -lstdc++ -ld2d1 -ldwrite -lwindowscodecs -lcomctl32 -lcomdlg32 -lole32 -lgdi32 -luuid
+-lwinhttp -lbcrypt -ladvapi32 -lwinpthread -lshell32
 -Wl,--major-subsystem-version,6,--minor-subsystem-version,1

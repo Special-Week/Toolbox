@@ -68,7 +68,7 @@ void App::refresh() {
     }
 }
 void App::open(int index) {
-    if (index >= 0 && index != selected && !remembersInputs(tools().at(std::size_t(index)))) {
+    if (index >= 0 && index != selected && tools().at(std::size_t(index)).kind != Kind::PdfDownload && !remembersInputs(tools().at(std::size_t(index)))) {
         clearToolInputs(tools().at(std::size_t(index)));
     }
     selected = index;
@@ -89,6 +89,14 @@ void App::clearToolInputs(const Tool &tool) {
 void App::restoreExample() {
     if (selected < 0 || exportJob.active) return;
     const auto &tool = tools().at(std::size_t(selected));
+    if (tool.kind == Kind::PdfDownload) {
+        if (pdfJob->active) return;
+        std::lock_guard<std::mutex> lock(pdfJob->mutex);
+        pdfJob->result.reset();
+        pdfJob->error.clear();
+        pdfJob->message.clear();
+        pdfSavePending = false;
+    }
     clearToolInputs(tool);
     inputHistory_.observe(tool, state);
     inputHistory_.flush(true);
@@ -234,6 +242,7 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         refresh();
         return 0;
     case WM_MOUSEWHEEL: {
+        if (pdfModal != PdfModal::None) return 0;
         POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
         ScreenToClient(window_, &p);
         float side = width >= 880 ? (collapsed ? 92.f : 245.f) : 0;
@@ -312,8 +321,20 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         SetBkColor(dc, RGB(255, 255, 255));
         return reinterpret_cast<LRESULT>(editBrush_);
     }
+    case WM_KEYDOWN:
+        if (pdfModal != PdfModal::None) {
+            if (w == VK_ESCAPE) { pdfModal = PdfModal::None; refresh(); }
+            else if (w == VK_TAB) { pdfDialogFocus = 1 - pdfDialogFocus; refresh(); }
+            else if (w == VK_RETURN || w == VK_SPACE) {
+                if (pdfModal == PdfModal::Warning && pdfDialogFocus == 0) startPdfDownload();
+                else { pdfModal = PdfModal::None; refresh(); }
+            }
+            return 0;
+        }
+        break;
     case WM_TIMER:
         inputHistory_.flush();
+        pollPdfDownload();
         if (exportJob.active) {
             refresh();
         }
@@ -441,8 +462,9 @@ void App::synchronizeControls() {
             }
         }
         float scale = dpi_ / 96;
-        int px = int(c.rect.x * scale) + 1, py = int(c.rect.y * scale) + 2, pw = int(c.rect.w * scale) - 2,
-            ph = int((combo ? 380 : c.rect.h - 4) * scale);
+        const float insetY = c.key == "metrology_pdf_download.url" ? 11.f : 2.f;
+        int px = int(c.rect.x * scale) + 1, py = int((c.rect.y + insetY) * scale), pw = int(c.rect.w * scale) - 2,
+            ph = int((combo ? 380 : c.rect.h - 2 * insetY) * scale);
         SetWindowPos(n.window, HWND_TOP, px, py, pw, ph, SWP_NOACTIVATE | SWP_SHOWWINDOW);
         // 裁去离开视口的部分；编辑框不截获滚轮，主窗口负责纵向滚动。
         int clipTop = std::max(0, int(top * scale) - py), clipBottom = std::min(ph, int(bottom * scale) - py);
@@ -485,6 +507,7 @@ void App::rebuild() {
               w = std::min(width - left - 48, tool.group == Group::Gauges ||
                                                       tool.kind == Kind::BSplineInterpolation ||
                                                       tool.kind == Kind::CalibrationCurveFit
+                                                      || tool.kind == Kind::PdfDownload
                                                   ? 960.f
                                                   : 820.f),
               y = top + 10 - scroll;
@@ -502,11 +525,11 @@ void App::rebuild() {
         scene.text({x + offset, y, textSpace, 32}, tool.name, 26, Ink, true);
         scene.text({x + offset, y + 34, textSpace, 44}, tool.description, 12, Muted);
         if (!exportJob.active && !actionBelow) {
-            scene.button({x + w - actionWidth, y + 3, actionWidth, 40}, L"恢复示例", [this] { restoreExample(); });
+            scene.button({x + w - actionWidth, y + 3, actionWidth, 40}, tool.kind == Kind::PdfDownload ? L"清空" : L"恢复示例", [this] { restoreExample(); });
         }
         y += 86;
         if (!exportJob.active && actionBelow) {
-            scene.button({x + w - actionWidth, y, actionWidth, 40}, L"恢复示例", [this] { restoreExample(); });
+            scene.button({x + w - actionWidth, y, actionWidth, 40}, tool.kind == Kind::PdfDownload ? L"清空" : L"恢复示例", [this] { restoreExample(); });
             y += 52;
         }
         Page page(*this, scene, tool, x, y, w);
@@ -528,6 +551,7 @@ void App::rebuild() {
                     thumb},
                    Border, 2);
     }
+    renderPdfModal();
     synchronizeControls();
     InvalidateRect(window_, nullptr, FALSE);
 }

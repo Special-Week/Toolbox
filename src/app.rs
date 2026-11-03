@@ -12,6 +12,7 @@ use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 mod dashboard;
 mod input_history;
+mod pdf_download;
 use input_history::InputHistory;
 
 pub(crate) struct ToolboxApp {
@@ -27,6 +28,7 @@ pub(crate) struct ToolboxApp {
     collapsed_groups: HashSet<Group>,
     spline_export: Option<ExportJob>,
     spline_export_message: Option<String>,
+    pdf_download: pdf_download::PdfDownloadPage,
     // 页眉纹理由 egui 持有，保持高分辨率源图以适应窗口 DPI 缩放。
     brand_icon: Option<egui::TextureHandle>,
 }
@@ -46,6 +48,7 @@ impl Default for ToolboxApp {
             collapsed_groups: Group::ALL.into_iter().collect(),
             spline_export: None,
             spline_export_message: None,
+            pdf_download: Default::default(),
             brand_icon: None,
         }
     }
@@ -54,6 +57,7 @@ impl Default for ToolboxApp {
 impl eframe::App for ToolboxApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.poll_spline_export(ctx);
+        self.pdf_download.poll(ctx);
         egui::TopBottomPanel::top("header")
             .frame(
                 egui::Frame::new()
@@ -350,14 +354,30 @@ impl ToolboxApp {
                         ui.add_space(24.0);
                         if ui
                             .add_enabled(
-                                self.spline_export.is_none(),
-                                egui::Button::new(RichText::new("恢复示例").size(14.0))
-                                    .min_size(Vec2::new(104.0, 40.0)),
+                                self.spline_export.is_none()
+                                    && !(matches!(tool.kind, ToolKind::PdfDownload)
+                                        && self.pdf_download.busy()),
+                                egui::Button::new(
+                                    RichText::new(if matches!(tool.kind, ToolKind::PdfDownload) {
+                                        "清空"
+                                    } else {
+                                        "恢复示例"
+                                    })
+                                    .size(14.0),
+                                )
+                                .min_size(Vec2::new(104.0, 40.0)),
                             )
-                            .on_hover_text("将当前工具的全部输入恢复为示例值")
+                            .on_hover_text(if matches!(tool.kind, ToolKind::PdfDownload) {
+                                "清空链接和本次下载结果"
+                            } else {
+                                "将当前工具的全部输入恢复为示例值"
+                            })
                             .clicked()
                         {
                             self.clear_tool_inputs(tool);
+                            if matches!(tool.kind, ToolKind::PdfDownload) {
+                                self.pdf_download.clear();
+                            }
                             self.example_revision += 1;
                         }
                         ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -681,6 +701,7 @@ impl ToolboxApp {
             ToolKind::Transmitter => self.render_transmitter(ui, tool),
             ToolKind::BSplineInterpolation => self.render_bspline(ui, tool),
             ToolKind::CalibrationCurveFit => self.render_curve_fit(ui, tool),
+            ToolKind::PdfDownload => self.pdf_download.render(ui),
             ToolKind::Unit(_) => {}
         }
     }

@@ -31,15 +31,6 @@
   line-height: 1.7;
   margin-top: 6px;
 }
-.reset-button {
-  margin-left: auto;
-  white-space: nowrap;
-  align-self: center;
-  min-width: 104px;
-  min-height: 40px;
-  padding: 10px 16px;
-  font-size: 14px;
-}
 .panel {
   background: white;
   border: 1px solid var(--border);
@@ -177,6 +168,27 @@ textarea {
   min-height: 30px;
   padding-left: 0;
   font-size: 11px;
+}
+.reset-button {
+  margin-left: auto;
+  align-self: center;
+  flex-shrink: 0;
+  min-width: 104px;
+  min-height: 40px;
+  padding: 10px 16px;
+  font-size: 14px;
+  color: var(--blue);
+  background: var(--soft);
+  border-color: #b8cff3;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.reset-button:hover:not(:disabled) {
+  background: #e0ebfe;
+  border-color: #82acee;
+}
+.reset-button:active:not(:disabled) {
+  background: #d2e2fb;
+  border-color: #6999e4;
 }
 .full-width,
 .array-editor,

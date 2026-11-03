@@ -4,6 +4,8 @@
 namespace toolbox {
 CalculationNotes calculationNotes(const Tool &tool, int variant) {
     switch (tool.kind) {
+    case Kind::PdfDownload:
+        return {};
     case Kind::Unit: {
         auto note = unitNotes(tool.dimension);
         return note.empty() ? CalculationNotes{} : CalculationNotes{{L"使用条件", note}};

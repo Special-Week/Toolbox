@@ -100,6 +100,7 @@ pub(crate) enum ToolKind {
     Transmitter,
     BSplineInterpolation,
     CalibrationCurveFit,
+    PdfDownload,
 }
 
 pub(crate) struct ToolDef {
@@ -548,5 +549,13 @@ pub(crate) const TOOLS: &[ToolDef] = &[
         ToolKind::CalibrationCurveFit,
         "Fit",
         "根据成对数据拟合方程，计算系数、相关系数、拟合优度与残差。"
+    ),
+    tool!(
+        "metrology_pdf_download",
+        "计量规范 PDF 下载",
+        Other,
+        ToolKind::PdfDownload,
+        "PDF",
+        "从规范详情页获取预览 PDF，检查页数并保存到本地。"
     ),
 ];

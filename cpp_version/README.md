@@ -1,12 +1,12 @@
 # 工具箱 C++ 版
 
-**Toolbox** 的 Windows 桌面版，使用 C++17、Win32、Direct2D 和 DirectWrite，提供 **7 个分类、49 个工具**。支持窗口缩放、工具搜索和分类折叠，采用系统字体与 DPI 适配。
+**Toolbox** 的 Windows 桌面版，使用 C++17、Win32、Direct2D 和 DirectWrite，提供 **7 个分类、50 个工具**。支持窗口缩放、工具搜索和分类折叠，采用系统字体与 DPI 适配。
 
 完整功能清单和通用计算约定见 [主项目 README](../README.md#功能分类)。本目录可独立构建。
 
 ## 构建与运行
 
-预先将完整的 **mingw64 / mingw32** 工具链加入 PATH，确保 `gcc`、C++ 编译组件和 `windres` 来自同一套工具链。以下命令在 `cpp_version` 目录执行。
+预先将完整的 **mingw64 / mingw32** 工具链加入 PATH，确保 `gcc`、C++ 编译组件、`ar` 和 `windres` 来自同一套工具链。以下命令在 `cpp_version` 目录执行。构建脚本会通过 PowerShell 编译随源码提供的 PDFio、zlib 依赖。
 
 ### 64 位（默认）
 
@@ -36,6 +36,7 @@ Windows 7 SP1 32 位构建方案使用 **GCC 8.1.0、POSIX/DWARF/MSVCRT** 工具
 
 ```powershell
 New-Item -ItemType Directory -Force build, dist/x64 | Out-Null
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-pdf.ps1
 windres -c 65001 -O coff resources/Toolbox.rc -o build/Toolbox.res.o
 gcc "@build.rsp" -O2 -s -o dist/x64/Toolbox.exe
 ```
@@ -62,6 +63,7 @@ cpp_version/
 │   ├── curve_fit.hpp         # 校准曲线模型、系数和统计量接口
 │   ├── gauges.hpp            # 量规输入、查表和结果报告接口
 │   ├── gui.hpp               # 窗口、控件、页面和绘图接口
+│   ├── pdf_download.hpp      # 规范 PDF 获取、校验与保存接口
 │   └── resource_ids.h        # 代码与资源文件共用的资源编号
 ├── src/
 │   ├── main.cpp              # Windows 程序入口与 COM 初始化
@@ -82,6 +84,7 @@ cpp_version/
 │   │   ├── uncertainty.cpp   # 不确定度分量及合成
 │   │   ├── curve_fit.cpp     # 校准曲线拟合、系数及统计量
 │   │   ├── spline.cpp        # B 样条插值、反算和采样
+│   │   ├── pdf_download.cpp  # 规范网站请求、PDF 解析及原始文件保存
 │   │   └── gauges/
 │   │       ├── data.cpp      # 内嵌量规数据读取
 │   │       ├── lookup.cpp    # 公差、偏差与尺寸分档查询
@@ -103,6 +106,7 @@ cpp_version/
 │   │   ├── errors.cpp        # 重复性、误差和不确定度页面
 │   │   ├── gauges.cpp        # 量规参数表单和结果表格
 │   │   ├── other.cpp         # 变送器与 B 样条页面
+│   │   ├── pdf_download.cpp  # 规范 PDF 下载页面与提示弹窗
 │   │   ├── curve_fit.cpp / curve_fit.hpp  # 校准曲线输入与结果展示
 │   │   └── curve_fit_chart.cpp            # 拟合曲线和残差图
 │   └── gui/
@@ -112,6 +116,7 @@ cpp_version/
 │       ├── navigation.cpp    # 首页、工具搜索及分类导航
 │       ├── icon.cpp          # 图标资源加载
 │       ├── export.cpp        # CSV 导出与后台任务
+│       ├── input_history.cpp # 最近输入的本地 JSON 保存与恢复
 │       └── licenses.cpp      # 程序内许可查看
 ├── resources/
 │   ├── Toolbox.rc            # 图标、版本、程序清单、数据和许可资源入口
@@ -121,9 +126,13 @@ cpp_version/
 │       ├── tables.json       # 量规尺寸、公差、偏差和长度表
 │       └── unified.json      # UN 系列及中径制造公差 U
 ├── licenses/                 # 第三方许可原文及内嵌许可汇总
+├── scripts/build-pdf.ps1     # 按当前 MinGW 架构编译 PDF 依赖
+├── tests/pdf_download.cpp    # PDF 下载与校验测试
 └── third_party/
     ├── README.md             # 第三方源码说明
-    └── double-conversion/    # 十进制解析与格式化组件
+    ├── double-conversion/    # 十进制解析与格式化组件
+    ├── pdfio/                # PDF 文件解析及页数检查
+    └── zlib/                 # PDF 流解压依赖
 ```
 
 `include/toolbox/` 定义公共接口，`src/models/` 实现计算，`src/pages/` 组织参数和结果，`src/gui/` 处理窗口与绘制。`resources/` 由 `windres` 编译并链接进 EXE，构建时须保留。
@@ -133,7 +142,9 @@ cpp_version/
 ## 使用说明
 
 - 计算使用 `double`，适用温区、单位、允差和模型条件见各页“计算说明”。量规模型与数据边界见 [量规数据说明](../data/gauges/README.md)。
-- 输入仅在当前运行期间保存。分度表和样条支持 CSV 导出；量规支持复制完整结果。
+- 部分需要反复录入的工具自动保存最近输入，默认使用 `%LOCALAPPDATA%\Toolbox\cpp\inputs-v1.json`，可用“恢复示例”重置。单位换算等快捷工具和 PDF 下载链接不保存。
+- “其他工具 → 计量规范 PDF 下载”支持粘贴规范网站的 HTTPS 详情页链接，由本机获取 PDF、检查实际页数并选择位置保存。下载前显示提示，保存成功后显示确认；单文件上限 50 MB，请按网站的电子文本使用说明使用文件。
+- 分度表和样条支持 CSV 导出；量规支持复制完整结果。
 
 ## 许可证
 

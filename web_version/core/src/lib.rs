@@ -57,6 +57,7 @@ fn kind_name(kind: ToolKind) -> &'static str {
         ToolKind::Transmitter => "transmitter",
         ToolKind::BSplineInterpolation => "spline",
         ToolKind::CalibrationCurveFit => "fit",
+        ToolKind::PdfDownload => "pdf",
         ToolKind::Unit(_) => "unit",
         ToolKind::Gauge(_) => "gauge",
     }
@@ -66,6 +67,7 @@ pub(crate) fn calculate_inner(id: &str, input: &str) -> Result<Output, String> {
     let tool = TOOLS.iter().find(|t| t.id == id).ok_or("工具不存在")?;
     let input = Input::new(input)?;
     match tool.kind {
+        ToolKind::PdfDownload => Err("此工具通过服务器缓存获取 PDF，无需数值计算。".into()),
         ToolKind::Unit(d) => {
             let units = units::units_for(d);
             let source = input.index("source", 0, units.len())?;

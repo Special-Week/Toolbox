@@ -188,10 +188,10 @@ mod tests {
     }
 
     #[test]
-    fn all_49_default_pages_calculate_without_errors() {
+    fn all_default_pages_render_without_errors() {
         let directory = tempfile::tempdir().unwrap();
         let ctx = context();
-        assert_eq!(TOOLS.len(), 49);
+        assert_eq!(TOOLS.len(), 50);
         assert_eq!(
             TOOLS.iter().filter(|tool| tool.remembers_inputs()).count(),
             17
@@ -206,7 +206,12 @@ mod tests {
                 .collect();
             assert!(errors.is_empty(), "{}: {errors:?}", tool.id);
             assert!(
-                texts.iter().any(|(text, _)| text == "恢复示例"),
+                texts.iter().any(|(text, _)| text
+                    == if matches!(tool.kind, crate::catalog::ToolKind::PdfDownload) {
+                        "清空"
+                    } else {
+                        "恢复示例"
+                    }),
                 "{}",
                 tool.id
             );

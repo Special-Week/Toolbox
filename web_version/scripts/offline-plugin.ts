@@ -19,7 +19,7 @@ export function offlinePlugin(): Plugin {
         const entries = await readdir(folder, { withFileTypes: true });
         return (
           await Promise.all(
-            entries.map((entry) =>
+            entries.filter((entry) => entry.name !== ".pdf-cache").map((entry) =>
               entry.isDirectory()
                 ? files(path.join(folder, entry.name))
                 : [path.join(folder, entry.name)],

@@ -99,6 +99,7 @@ enum class Kind {
     Transmitter,
     BSplineInterpolation,
     CalibrationCurveFit,
+    PdfDownload,
     GaugeMetric,
     GaugeTrapezoidal,
     GaugeUnified,

@@ -28,6 +28,7 @@ echo %TARGET% | findstr /b /c:"%EXPECTED%-" >nul || (
 )
 if not exist build mkdir build || goto failed
 if not exist "dist\%ARCH%" mkdir "dist\%ARCH%" || goto failed
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-pdf.ps1 || goto failed
 windres -c 65001 -O coff resources/Toolbox.rc -o build/Toolbox.res.o || goto failed
 rem EXE 直接生成到发布目录，build 仅存放资源编译的中间文件。
 gcc "@build.rsp" -O2 -s %CPU_FLAGS% -o "dist/%ARCH%/Toolbox.exe" || goto failed

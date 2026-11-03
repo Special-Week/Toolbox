@@ -2,6 +2,10 @@
 #include "toolbox/gui.hpp"
 namespace toolbox {
 void renderOther(Page &p) {
+    if (p.tool.kind == Kind::PdfDownload) {
+        renderPdfDownload(p);
+        return;
+    }
     if (p.tool.kind == Kind::CalibrationCurveFit) {
         renderCurveFit(p);
         return;

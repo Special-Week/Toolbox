@@ -11,6 +11,8 @@ export function syncLicenses(webRoot) {
     readFileSync(path.join(repository, "LICENSE"), "utf8"),
     "Vue 与 @vue/* 运行时：MIT",
     readFileSync(path.join(webRoot, "node_modules/vue/LICENSE"), "utf8"),
+    "服务端 PDF 解析：PDF.js 4.2.67（Apache-2.0）",
+    readFileSync(path.join(webRoot, "server/vendor/pdfjs/LICENSE"), "utf8"),
     "Rust/WebAssembly 依赖：以下许可来自 core/Cargo.lock 对应版本。",
   ];
   const registry = path.join(

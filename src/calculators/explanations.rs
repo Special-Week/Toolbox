@@ -5,6 +5,7 @@ pub(crate) type NoteVariant = (usize, &'static str, &'static str);
 
 pub(crate) fn for_tool(kind: ToolKind) -> &'static str {
     match kind {
+        ToolKind::PdfDownload => "",
         ToolKind::Gauge(kind) => super::gauges::notes(kind),
         ToolKind::Unit(dimension) => crate::units::notes::for_dimension(dimension),
         ToolKind::WorkingThermocouple => {
@@ -71,6 +72,7 @@ pub(crate) fn for_tool(kind: ToolKind) -> &'static str {
 
 pub(crate) fn formula(kind: ToolKind) -> String {
     let text = match kind {
+        ToolKind::PdfDownload => "",
         ToolKind::Gauge(kind) => return super::gauges::formula(kind),
         ToolKind::Unit(_) => "",
         ToolKind::WorkingThermocouple => {

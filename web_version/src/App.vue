@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import GaugeTool from "./components/GaugeTool.vue";
+import PdfDownload from "./components/PdfDownload.vue";
 import NumericInput from "./components/NumericInput.vue";
 import MobileActions from "./components/MobileActions.vue";
 import PwaStatus from "./components/PwaStatus.vue";
@@ -21,6 +22,7 @@ const catalog = ref<Catalog>();
 const loading = ref(true);
 const loadError = ref("");
 const selected = ref<Tool | null>(null);
+const pdfDownloader = ref<InstanceType<typeof PdfDownload>>();
 const inputPanel = ref<HTMLElement>();
 const resultPanel = ref<HTMLElement>();
 let inputScroll: number | null = null;
@@ -261,7 +263,7 @@ watch(
   () => {
     clearTimeout(timer);
     const version = ++revision;
-    if (!selected.value || selected.value.kind === "gauge") {
+    if (!selected.value || ["gauge", "pdf"].includes(selected.value.kind)) {
       save();
       busy.value = false;
       return;
@@ -294,6 +296,7 @@ watch(
 );
 
 function reset() {
+  if (selected.value?.kind === "pdf") { pdfDownloader.value?.reset(); return; }
   if (selected.value && catalog.value) {
     clearTimeout(timer);
     ++revision;
@@ -580,7 +583,7 @@ onUnmounted(() => {
     </nav>
   </aside>
   <main
-    :class="['main', { wide: collapsed, 'has-mobile-actions': !!selected }]"
+    :class="['main', { wide: collapsed, 'has-mobile-actions': !!selected && selected.kind !== 'pdf' }]"
   >
     <PwaStatus :busy="busy || exporting" @before-update="saveNow" />
     <div v-if="loading" class="loading-state">
@@ -680,11 +683,12 @@ onUnmounted(() => {
             <p>{{ selected.description }}</p>
           </div>
           <button
-            class="button subtle reset-button"
-            :disabled="exporting"
+            type="button"
+            class="button reset-button"
+            :disabled="exporting || (selected.kind === 'pdf' && pdfDownloader?.busy)"
             @click="reset"
           >
-            恢复示例
+            {{ selected.kind === "pdf" ? "清空" : "恢复示例" }}
           </button>
         </div>
         <GaugeTool
@@ -695,7 +699,7 @@ onUnmounted(() => {
           :state="current"
           @state="states[selected!.id] = $event"
         />
-        <template v-else>
+        <template v-else-if="selected.kind !== 'pdf'">
           <div class="tool-workspace">
             <div ref="inputPanel" class="input-panels">
               <section
@@ -971,9 +975,10 @@ onUnmounted(() => {
         </section>
       </template>
     </template>
+    <PdfDownload ref="pdfDownloader" v-show="selected?.kind === 'pdf'" :active="selected?.kind === 'pdf'" />
   </main>
   <MobileActions
-    :selected="!!selected"
+    :selected="!!selected && selected.kind !== 'pdf'"
     :hidden="mobileNav"
     @inputs="jumpInputs"
     @results="jumpResults"

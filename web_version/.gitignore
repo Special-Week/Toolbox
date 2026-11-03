@@ -3,3 +3,5 @@ dist/
 pkg/
 core/target/
 *.log
+# 服务端持久 PDF 缓存。
+/.pdf-cache/

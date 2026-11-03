@@ -4,11 +4,13 @@
 #define NOMINMAX
 #endif
 #include "models.hpp"
+#include "pdf_download.hpp"
 #include <atomic>
 #include <d2d1.h>
 #include <dwrite.h>
 #include <map>
 #include <mutex>
+#include <memory>
 #include <thread>
 #include <windows.h>
 
@@ -131,6 +133,13 @@ struct ExportJob {
     std::wstring message;
     ~ExportJob();
 };
+struct PdfJob {
+    std::atomic<bool> active{false}, done{false};
+    std::mutex mutex;
+    std::shared_ptr<pdf::Download> result;
+    std::wstring error, message;
+};
+enum class PdfModal { None, Warning, Success };
 class App {
     struct Native {
         HWND window = nullptr;
@@ -172,6 +181,16 @@ class App {
     std::array<bool, groupCount> expanded{};
     float scroll = 0, sideScroll = 0, width = 1220, height = 820;
     ExportJob exportJob;
+    std::shared_ptr<PdfJob> pdfJob = std::make_shared<PdfJob>();
+    PdfModal pdfModal = PdfModal::None;
+    std::wstring pdfPendingUrl, pdfDialogText;
+    bool pdfSavePending = false;
+    int pdfDialogFocus = 0;
+    void requestPdfDownload(const std::wstring &url);
+    void startPdfDownload();
+    void pollPdfDownload();
+    void savePdf();
+    void renderPdfModal();
     ~App();
     int run(HINSTANCE instance, int show);
     void refresh();
@@ -192,6 +211,7 @@ void renderPressure(Page &page);
 void renderHumidity(Page &page);
 void renderErrors(Page &page);
 void renderOther(Page &page);
+void renderPdfDownload(Page &page);
 void renderCurveFit(Page &page);
 void renderGauges(Page &page);
 void clearGaugeCache(const std::string &id);

@@ -8,7 +8,8 @@ pdfjs.GlobalWorkerOptions.workerSrc = new URL("./vendor/pdfjs/pdf.worker.min.mjs
 export const DEFAULT_CACHE_DIRECTORY = fileURLToPath(new URL("../.pdf-cache/", import.meta.url));
 const ORIGIN = "https://jjg.spc.org.cn";
 const PREVIEW = ORIGIN + "/resmea/view/stdonline";
-const MAX_PDF_BYTES = 50 * 1024 * 1024;
+const MAX_PDF_BYTES = 100 * 1024 * 1024;
+const MAX_CACHED_PDF_BYTES = 100 * 1024 * 1024;
 const ERROR_HASH = "f487c0adbe09950cd6effdbca2af0b9d59b4c53ed7adbf5e58cfff694b3e2ed8";
 const AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
 
@@ -68,7 +69,7 @@ function parameter(page, key) {
 async function readBounded(response, limit) {
   if (Number(response.headers.get("content-length")) > limit) {
     await response.body?.cancel();
-    throw new PdfError("网站返回的数据超过大小限制（PDF 上限 50 MB）。");
+    throw new PdfError("网站返回的数据超过大小限制（PDF 上限 100 MB）。");
   }
   const chunks = [];
   let size = 0;
@@ -78,14 +79,14 @@ async function readBounded(response, limit) {
     const { value, done } = await reader.read();
     if (done) break;
     size += value.byteLength;
-    if (size > limit) { await reader.cancel(); throw new PdfError("网站返回的数据超过大小限制（PDF 上限 50 MB）。"); }
+    if (size > limit) { await reader.cancel(); throw new PdfError("网站返回的数据超过大小限制（PDF 上限 100 MB）。"); }
     chunks.push(Buffer.from(value));
   }
   return Buffer.concat(chunks, size);
 }
 
 export async function inspectPdf(data) {
-  if (!data.length || data.length > MAX_PDF_BYTES || data.subarray(0, 5).toString() !== "%PDF-") throw new PdfError("网站没有返回有效的 PDF。");
+  if (!data.length || data.length > MAX_CACHED_PDF_BYTES || data.subarray(0, 5).toString() !== "%PDF-") throw new PdfError("文件不是有效的 PDF，或超过缓存文件大小限制（100 MB）。");
   if (createHash("sha256").update(data).digest("hex") === ERROR_HASH) throw new PdfError("网站返回了在线阅读加载失败的提示文件。");
   // PDF.js 会转移输入缓冲区，解析时复制，缓存和响应始终使用原始字节。
   const task = pdfjs.getDocument({ data: new Uint8Array(data), disableFontFace: true, isEvalSupported: false, stopAtErrors: true, verbosity: 0 });
@@ -152,7 +153,7 @@ export function createPdfCache({ cacheDirectory = process.env.TOOLBOX_PDF_CACHE 
     const pdf = path.join(directory, standard.key + ".pdf");
     try {
       const info = await stat(pdf);
-      if (!info.isFile() || info.size > MAX_PDF_BYTES) return null;
+      if (!info.isFile() || info.size > MAX_CACHED_PDF_BYTES) return null;
       const data = await readFile(pdf);
       let pages;
       try { pages = await inspectPdf(data); } catch (error) { if (error instanceof PdfError) return null; throw error; }

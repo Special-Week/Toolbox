@@ -24,6 +24,9 @@ fn action_button(label: &str, primary: bool) -> egui::Button<'_> {
 #[derive(Default)]
 pub(super) struct PdfDownloadPage {
     url: String,
+    query: String,
+    last_query: String,
+    page: usize,
     job: Option<Receiver<Result<Download, String>>>,
     result: Option<Download>,
     message: String,
@@ -83,6 +86,213 @@ mod tests {
         app.pdf_download.clear();
         assert!(app.pdf_download.url.is_empty());
         assert!(app.pdf_download.error.is_none());
+    }
+
+    #[test]
+    fn clicking_a_search_result_confirms_the_selected_standard_before_download() {
+        let ctx = egui::Context::default();
+        crate::fonts::configure_fonts(&ctx);
+        crate::configure_style(&ctx);
+        let mut page = PdfDownloadPage {
+            query: "jjf1059.1".into(),
+            ..Default::default()
+        };
+        let render = |page: &mut PdfDownloadPage, events| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        [620.0, 820.0].into(),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| page.render(ui));
+                },
+            )
+        };
+        render(&mut page, vec![]);
+        let first = render(&mut page, vec![]);
+        let position = first
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "下载 PDF" => {
+                    Some(text.pos + Vec2::splat(4.0))
+                }
+                _ => None,
+            })
+            .unwrap_or_else(|| {
+                let texts: Vec<_> = first
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) => Some((text.galley.text(), text.pos)),
+                        _ => None,
+                    })
+                    .collect();
+                panic!("搜索结果应有下载按钮：{texts:?}");
+            });
+        for pressed in [true, false] {
+            render(
+                &mut page,
+                vec![
+                    egui::Event::PointerMoved(position),
+                    egui::Event::PointerButton {
+                        pos: position,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        assert!(page.confirm_download);
+        assert!(!page.busy());
+        assert_eq!(
+            page.url,
+            "https://jjg.spc.org.cn/resmea/standard/detail.html?standno=JJF+1059.1-2012"
+        );
+        page.clear();
+        assert!(page.query.is_empty());
+        assert!(page.url.is_empty());
+    }
+
+    #[test]
+    fn search_cards_share_size_and_show_full_names_at_different_widths() {
+        for width in [375.0, 960.0] {
+            let ctx = egui::Context::default();
+            crate::fonts::configure_fonts(&ctx);
+            crate::configure_style(&ctx);
+            let mut page = PdfDownloadPage {
+                query: "11".into(),
+                ..Default::default()
+            };
+            let render = |page: &mut PdfDownloadPage| {
+                ctx.run(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            [width, 10000.0].into(),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default().show(ctx, |ui| page.render(ui));
+                    },
+                )
+            };
+            render(&mut page);
+            let output = render(&mut page);
+            let frames: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.stroke.width > 0.0
+                            && rect.stroke.color == BLUE_SOFT
+                            && rect.rect.width() > width - 70.0 =>
+                    {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                frames.len(),
+                11,
+                "应显示一个输入框和十个结果卡片：{frames:?}"
+            );
+            let cards = &frames[1..];
+            for card in cards {
+                assert!((card.width() - cards[0].width()).abs() < 0.5);
+                assert!((card.height() - cards[0].height()).abs() < 0.5);
+                assert!(card.max.x <= width, "结果卡片应位于窗口内");
+            }
+            let buttons: Vec<_> = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect)
+                        if rect.fill == BLUE
+                            && rect.rect.width() >= 100.0
+                            && rect.rect.height() >= 35.0 =>
+                    {
+                        Some(rect.rect)
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                buttons.len(),
+                cards.len(),
+                "每个结果卡片应有一个下载按钮：卡片 {cards:?}；按钮形状 {:?}",
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == "下载 PDF" =>
+                            Some(format!("text {:?}", text.pos)),
+                        egui::Shape::Rect(rect) if rect.fill == BLUE =>
+                            Some(format!("rect {:?}", rect.rect)),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>()
+            );
+            for (button, card) in buttons.iter().zip(cards) {
+                assert!(card.contains_rect(*button), "下载按钮应位于结果卡片内");
+                assert!(
+                    (button.min.x - buttons[0].min.x).abs() < 0.5,
+                    "下载按钮应水平对齐：{buttons:?}"
+                );
+                assert!(
+                    (button.center().y - card.center().y).abs() < 0.5,
+                    "下载按钮应垂直居中：{button:?} / {card:?}"
+                );
+            }
+            for ((standard, card), button) in pdf_download::search_standards("11")
+                .iter()
+                .take(10)
+                .zip(cards)
+                .zip(&buttons)
+            {
+                let text = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == standard.name => {
+                            Some(text)
+                        }
+                        _ => None,
+                    })
+                    .expect("应显示完整规范名称");
+                assert!(
+                    card.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())),
+                    "规范名称超出卡片：{}",
+                    standard.name
+                );
+                assert!(
+                    text.pos.x + text.galley.size().x <= button.min.x,
+                    "名称不应覆盖下载按钮"
+                );
+            }
+            for (standard, card) in pdf_download::search_standards("11")
+                .iter()
+                .take(10)
+                .zip(cards)
+            {
+                assert!(
+                    output.shapes.iter().any(|shape| match &shape.shape {
+                        egui::Shape::Text(text) if text.galley.text() == standard.category => card
+                            .contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())),
+                        _ => false,
+                    }),
+                    "每张卡片应单独显示规范类型：{}",
+                    standard.code
+                );
+            }
+        }
     }
 
     #[test]
@@ -294,7 +504,7 @@ impl PdfDownloadPage {
     }
 
     pub(super) fn render(&mut self, ui: &mut egui::Ui) {
-        ui.set_max_width(960.0);
+        ui.set_max_width(ui.available_width().min(960.0));
         egui::Frame::new()
             .fill(egui::Color32::WHITE)
             .stroke(egui::Stroke::new(1.0_f32, BLUE_SOFT))
@@ -303,17 +513,15 @@ impl PdfDownloadPage {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing = Vec2::new(12.0, 10.0);
                 ui.label(
-                    RichText::new("规范详情页链接")
+                    RichText::new("规范名称或编号")
                         .size(15.0)
                         .strong()
                         .color(INK),
                 );
                 ui.label(
-                    RichText::new(
-                        "在国家计量技术规范全文公开系统打开规范详情，复制地址后粘贴到这里。",
-                    )
-                    .size(12.0)
-                    .color(MUTED),
+                    RichText::new("输入名称关键词或规范编号筛选，在结果中选择需要下载的规范。")
+                        .size(12.0)
+                        .color(MUTED),
                 );
                 ui.add_enabled_ui(!self.busy(), |ui| {
                     let mut field = egui::Frame::new()
@@ -327,7 +535,7 @@ impl PdfDownloadPage {
                         .begin(ui);
                     let response = field.content_ui.add_sized(
                         [field.content_ui.available_width(), 20.0],
-                        TextEdit::singleline(&mut self.url)
+                        TextEdit::singleline(&mut self.query)
                             .frame(false)
                             .margin(0)
                             .font(egui::FontId::proportional(14.0)),
@@ -337,13 +545,12 @@ impl PdfDownloadPage {
                     }
                     field.end(ui);
                 });
+                ui.label(
+                    RichText::new("数据来源：https://jjg.spc.org.cn/（截至 2026-11 的规范目录）")
+                        .size(12.0)
+                        .color(MUTED),
+                );
                 ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add_enabled(!self.busy(), action_button("下载 PDF", true))
-                        .clicked()
-                    {
-                        self.request_download();
-                    }
                     ui.hyperlink_to("打开规范网站", "https://jjg.spc.org.cn/resmea/");
                     if self.busy() {
                         ui.spinner();
@@ -351,6 +558,7 @@ impl PdfDownloadPage {
                     }
                 });
             });
+        self.render_search_results(ui);
         if let Some(download) = &self.result {
             render_metrics(
                 ui,
@@ -391,20 +599,184 @@ impl PdfDownloadPage {
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 8.0;
                 ui.label(RichText::new("获取流程与接口说明").size(14.0).strong().color(BLUE));
-                ui.label(RichText::new("1. 解析详情页链接中的 standno 规范编号，并读取详情页标题中的规范名称。").size(13.0).color(INK));
+                ui.label(RichText::new("1. 按名称或编号搜索内置目录，选择规范后使用对应详情页链接获取 PDF。").size(13.0).color(INK));
                 ui.label(RichText::new("2. 请求在线预览页面，提交 a100（规范编号）和 ismobile=1，取得 token 与 enc 参数。").size(13.0).color(INK));
                 ui.add(egui::Label::new(RichText::new("POST https://jjg.spc.org.cn/resmea/view/stdonline").monospace().size(12.0).color(MUTED)).wrap());
                 ui.label(RichText::new("3. 沿用同一会话的 Cookie，以 token 作为查询参数、enc 作为 myfoxit 请求头，获取预览 PDF。").size(13.0).color(INK));
                 ui.add(egui::Label::new(RichText::new("GET https://jjg.spc.org.cn/resmea/view/onlinereading?token=…").monospace().size(12.0).color(MUTED)).wrap());
                 ui.label(RichText::new("4. 检查 PDF 格式、已知错误提示文件及实际页数，再按所选位置保存网站返回的原始 PDF。").size(13.0).color(INK));
                 ui.separator();
-                ui.label(RichText::new("以上为网站在线预览使用的接口，网站调整或限流时可能无法获取。仅支持本站 HTTPS 详情页，单个 PDF 上限 50 MB；请按网站的电子文本使用说明使用文件。").size(12.0).color(MUTED));
+                ui.label(RichText::new("以上为网站在线预览使用的接口，网站调整或限流时可能无法获取。仅支持本站 HTTPS 详情页，单个 PDF 上限 100 MB；请按网站的电子文本使用说明使用文件。").size(12.0).color(MUTED));
             });
         if self.choose_save {
             self.choose_save = false;
             self.save();
         }
         self.render_dialogs(ui.ctx());
+    }
+
+    fn render_search_results(&mut self, ui: &mut egui::Ui) {
+        if self.query != self.last_query {
+            self.page = 0;
+            self.last_query = self.query.clone();
+        }
+        if self.query.trim().is_empty() {
+            return;
+        }
+        let rows = pdf_download::search_standards(&self.query);
+        let pages = rows.len().div_ceil(10).max(1);
+        self.page = self.page.min(pages - 1);
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new(format!("找到 {} 条规范", rows.len()))
+                .strong()
+                .color(INK),
+        );
+        if rows.is_empty() {
+            ui.label("未找到匹配的规范，请尝试其他名称或编号。");
+        }
+        let start = self.page * 10;
+        let visible = &rows[start..rows.len().min(start + 10)];
+        let card_width = (ui.available_width() - 28.0).max(0.0);
+        let text_width = (card_width - 140.0).max(140.0);
+        let row_height = visible
+            .iter()
+            .map(|standard| {
+                [
+                    (standard.code.clone(), 14.0),
+                    (standard.name.clone(), 15.0),
+                    (standard.category.clone(), 12.0),
+                    (
+                        format!(
+                            "状态：{}　发布：{}　实施：{}",
+                            standard.status,
+                            standard.published,
+                            if standard.effective.is_empty() {
+                                "未提供"
+                            } else {
+                                &standard.effective
+                            }
+                        ),
+                        12.0,
+                    ),
+                ]
+                .into_iter()
+                .map(|(text, size)| {
+                    ui.painter()
+                        .layout(text, egui::FontId::proportional(size), INK, text_width)
+                        .size()
+                        .y
+                        .max(ui.spacing().interact_size.y)
+                })
+                .sum::<f32>()
+                    + ui.spacing().item_spacing.y * 3.0
+                    + 8.0
+            })
+            .fold(40.0_f32, f32::max);
+        for standard in visible {
+            egui::Frame::new()
+                .fill(egui::Color32::WHITE)
+                .stroke(egui::Stroke::new(1.0_f32, BLUE_SOFT))
+                .corner_radius(8)
+                .inner_margin(14)
+                .show(ui, |ui| {
+                    ui.set_min_width(card_width);
+                    ui.set_min_height(row_height);
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(card_width, row_height),
+                        egui::Layout::right_to_left(egui::Align::Center),
+                        |ui| {
+                            if ui
+                                .add_enabled(!self.busy(), action_button("下载 PDF", true))
+                                .clicked()
+                            {
+                                self.url = standard.url.clone();
+                                self.request_download();
+                            }
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(text_width, row_height),
+                                egui::Layout::top_down(egui::Align::Min),
+                                |ui| {
+                                    ui.set_max_width(text_width);
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&standard.code).strong().color(BLUE),
+                                        )
+                                        .wrap(),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&standard.name).size(15.0).color(INK),
+                                        )
+                                        .wrap(),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(&standard.category)
+                                                .size(12.0)
+                                                .color(MUTED),
+                                        )
+                                        .wrap(),
+                                    );
+                                    ui.add(
+                                        egui::Label::new(
+                                            RichText::new(format!(
+                                                "状态：{}　发布：{}　实施：{}",
+                                                standard.status,
+                                                standard.published,
+                                                if standard.effective.is_empty() {
+                                                    "未提供"
+                                                } else {
+                                                    &standard.effective
+                                                }
+                                            ))
+                                            .size(12.0)
+                                            .color(
+                                                if matches!(
+                                                    standard.status.as_str(),
+                                                    "被代替" | "废止"
+                                                ) {
+                                                    crate::RED
+                                                } else {
+                                                    MUTED
+                                                },
+                                            ),
+                                        )
+                                        .wrap(),
+                                    );
+                                },
+                            );
+                        },
+                    );
+                });
+            ui.add_space(6.0);
+        }
+        if !rows.is_empty() {
+            ui.horizontal(|ui| {
+                if ui
+                    .add_enabled(!self.busy() && self.page > 0, egui::Button::new("上一页"))
+                    .clicked()
+                {
+                    self.page -= 1;
+                }
+                ui.label(format!("第 {} / {} 页", self.page + 1, pages));
+                if ui
+                    .add_enabled(
+                        !self.busy() && self.page + 1 < pages,
+                        egui::Button::new("下一页"),
+                    )
+                    .clicked()
+                {
+                    self.page += 1;
+                }
+            });
+        }
+        ui.label(
+            RichText::new("规范状态与实施日期请以规范网站为准。")
+                .size(12.0)
+                .color(MUTED),
+        );
+        ui.add_space(12.0);
     }
 
     fn request_download(&mut self) {
@@ -431,6 +803,11 @@ impl PdfDownloadPage {
                 ui.set_width(440.0);
                 ui.spacing_mut().item_spacing = Vec2::new(12.0, 12.0);
                 ui.label(RichText::new("下载提示").size(19.0).strong().color(INK));
+                if let Some(standard) = pdf_download::standard_catalog().iter().find(|row| row.url == self.url) {
+                    ui.label(RichText::new(format!("{} {}", standard.code, standard.name)).strong().color(INK));
+                    ui.label(RichText::new(format!("{} · 实施日期：{}", standard.status,
+                        if standard.effective.is_empty() { "未提供" } else { &standard.effective })).size(12.0).color(MUTED));
+                }
                 ui.add_space(8.0);
                 ui.label(RichText::new("短时间内频繁下载可能触发网站限流（HTTP 429 Too Many Requests），请适当控制下载频率。").size(14.0).color(INK));
                 ui.label(RichText::new("请按网站的电子文本使用说明使用下载文件。").size(13.0).color(MUTED));

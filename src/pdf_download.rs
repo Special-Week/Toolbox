@@ -3,11 +3,12 @@ use regex::Regex;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
 use url::Url;
 
 const ROOT: &str = "https://jjg.spc.org.cn";
-const MAX_PDF_BYTES: usize = 50 * 1024 * 1024;
+const MAX_PDF_BYTES: usize = 100 * 1024 * 1024;
 const MAX_HTML_BYTES: usize = 1024 * 1024;
 const ERROR_PDF_HASH: &str = "f487c0adbe09950cd6effdbca2af0b9d59b4c53ed7adbf5e58cfff694b3e2ed8";
 const AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0";
@@ -17,6 +18,73 @@ pub(crate) struct Download {
     pub(crate) name: String,
     pub(crate) data: Vec<u8>,
     pub(crate) pages: usize,
+}
+
+pub(crate) struct Standard {
+    pub(crate) code: String,
+    pub(crate) name: String,
+    pub(crate) category: String,
+    pub(crate) status: String,
+    pub(crate) published: String,
+    pub(crate) effective: String,
+    pub(crate) url: String,
+    search_code: String,
+    search_name: String,
+}
+
+fn search_key(text: &str) -> String {
+    text.chars()
+        .filter(|c| !c.is_whitespace())
+        .flat_map(char::to_lowercase)
+        .map(|c| {
+            if matches!(c, '－' | '—' | '–') {
+                '-'
+            } else {
+                c
+            }
+        })
+        .collect()
+}
+
+pub(crate) fn standard_catalog() -> &'static [Standard] {
+    static CATALOG: OnceLock<Vec<Standard>> = OnceLock::new();
+    CATALOG.get_or_init(|| {
+        let data: serde_json::Value =
+            serde_json::from_str(include_str!("../data/standards/catalog.json"))
+                .expect("内置规范目录 JSON 无效");
+        data["standards"]
+            .as_array()
+            .expect("内置规范目录缺少清单")
+            .iter()
+            .map(|row| {
+                let field = |key| row[key].as_str().expect("内置规范字段无效").to_owned();
+                let code = field("code");
+                let name = field("name");
+                Standard {
+                    search_code: search_key(&code),
+                    search_name: search_key(&name),
+                    code,
+                    name,
+                    category: field("category"),
+                    status: field("status"),
+                    published: field("published"),
+                    effective: field("effective"),
+                    url: field("url"),
+                }
+            })
+            .collect()
+    })
+}
+
+pub(crate) fn search_standards(query: &str) -> Vec<&'static Standard> {
+    let key = search_key(query);
+    if key.is_empty() {
+        return Vec::new();
+    }
+    standard_catalog()
+        .iter()
+        .filter(|row| row.search_code.contains(&key) || row.search_name.contains(&key))
+        .collect()
 }
 
 pub(crate) fn detail_link(input: &str) -> Result<(String, Url), String> {
@@ -126,7 +194,7 @@ pub(crate) fn default_filename(code: &str, name: &str) -> String {
 
 pub(crate) fn validate_pdf(data: &[u8]) -> Result<usize, String> {
     if data.len() > MAX_PDF_BYTES {
-        return Err("文件超过 50 MB 的大小限制。".into());
+        return Err("文件超过 100 MB 的大小限制。".into());
     }
     if !data.starts_with(b"%PDF-") {
         return Err("网站没有返回有效的 PDF。".into());
@@ -179,7 +247,7 @@ fn read_limited(reader: impl Read, limit: usize) -> Result<Vec<u8>, String> {
         .read_to_end(&mut data)
         .map_err(|error| format!("读取网站响应失败：{error}"))?;
     if data.len() > limit {
-        return Err("网站返回的数据超过大小限制（PDF 上限 50 MB）。".into());
+        return Err("网站返回的数据超过大小限制（PDF 上限 100 MB）。".into());
     }
     Ok(data)
 }

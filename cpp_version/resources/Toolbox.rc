@@ -7,6 +7,7 @@ TOOLBOX_ICON ICON "resources/toolbox.ico"
 TOOLBOX_LICENSE_TEXT RCDATA "licenses/third-party-licenses.txt"
 TOOLBOX_GAUGE_TABLES RCDATA "resources/gauges/tables.json"
 TOOLBOX_GAUGE_UNIFIED RCDATA "resources/gauges/unified.json"
+TOOLBOX_STANDARD_CATALOG RCDATA "resources/standards.json"
 1 RT_MANIFEST "resources/Toolbox.manifest"
 1 VERSIONINFO
  FILEVERSION 0,1,0,0

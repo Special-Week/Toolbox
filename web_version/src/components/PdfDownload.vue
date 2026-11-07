@@ -1,12 +1,20 @@
 <script setup lang="ts">
-import { nextTick, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch } from "vue";
 import { download } from "../format";
+import { searchStandards, standards, type Standard } from "../standard-catalog";
 
 const props = defineProps<{ active: boolean }>();
 interface PdfResult { code: string; name: string; pages: number; filename: string; cache: "HIT" | "MISS" }
 interface WritableFile { write(data: Blob): Promise<void>; close(): Promise<void>; abort(): Promise<void> }
 type PickerWindow = Window & { showSaveFilePicker?: (options: unknown) => Promise<{ name: string; createWritable(): Promise<WritableFile> }> };
 const url = ref("");
+const query = ref("");
+const page = ref(0);
+const matches = computed(() => searchStandards(query.value));
+const pageCount = computed(() => Math.max(1, Math.ceil(matches.value.length / 10)));
+const visibleStandards = computed(() => matches.value.slice(page.value * 10, (page.value + 1) * 10));
+const selectedStandard = computed(() => standards.find(standard => standard.url === url.value));
+watch(query, () => { page.value = 0; });
 const busy = ref(false);
 const phase = ref("");
 const error = ref("");
@@ -32,11 +40,16 @@ async function requestDownload() {
   if (busy.value) return;
   error.value = "";
   try { validLink(url.value); }
-  catch { error.value = "请粘贴国家计量技术规范全文公开系统的 HTTPS 规范详情页链接。"; return; }
+  catch { error.value = "请从搜索结果中选择要下载的规范。"; return; }
   previousFocus = document.activeElement as HTMLElement | null;
   warningOpen.value = true;
   await nextTick();
   warningDialog.value?.showModal();
+}
+function chooseStandard(standard: Standard) {
+  if (busy.value) return;
+  url.value = standard.url;
+  requestDownload();
 }
 function closeWarning() {
   warningOpen.value = false;
@@ -67,7 +80,7 @@ async function start() {
     const filename = decodeURIComponent(response.headers.get("x-pdf-filename") || "");
     if (!code || !filename || !Number.isInteger(pages) || pages < 1 || (cache !== "HIT" && cache !== "MISS")) throw new Error("服务器返回的 PDF 信息不完整。");
     const blob = await response.blob();
-    if (blob.size > 50 * 1024 * 1024 || await blob.slice(0, 5).text() !== "%PDF-") throw new Error("服务器返回的 PDF 文件无效。");
+    if (blob.size > 100 * 1024 * 1024 || await blob.slice(0, 5).text() !== "%PDF-") throw new Error("服务器返回的 PDF 文件无效。");
     cachedBlob = blob;
     result.value = { code, name, pages, filename, cache };
     browserSave();
@@ -110,7 +123,8 @@ function closeSuccess() { successPending.value = false; successDialog.value?.clo
 function reset() {
   if (busy.value) return;
   closeWarning(); closeSuccess();
-  url.value = ""; error.value = ""; message.value = ""; result.value = null; cachedBlob = null;
+  url.value = ""; query.value = ""; page.value = 0;
+  error.value = ""; message.value = ""; result.value = null; cachedBlob = null;
 }
 watch(() => props.active, active => {
   if (active) showSuccess();
@@ -123,14 +137,35 @@ defineExpose({ reset, busy });
 <template>
   <div class="pdf-tool">
     <section class="panel pdf-input-panel">
-      <h2><label for="metrology-pdf-url">规范详情页链接</label></h2>
-      <p class="pdf-muted">在国家计量技术规范全文公开系统打开规范详情，复制地址后粘贴到这里。PDF 由服务器获取并缓存。</p>
-      <input id="metrology-pdf-url" v-model="url" class="pdf-link-input" type="url" :disabled="busy" autocomplete="off" spellcheck="false" @keydown.enter.prevent="requestDownload" />
+      <h2><label for="metrology-pdf-search">规范名称或编号</label></h2>
+      <p class="pdf-muted">输入名称关键词或规范编号筛选，在结果中选择需要下载的规范。</p>
+      <p class="pdf-muted">数据来源：<a href="https://jjg.spc.org.cn/" target="_blank" rel="noopener noreferrer">https://jjg.spc.org.cn/</a>，截至 2026-11 的规范目录。</p>
+      <input id="metrology-pdf-search" v-model="query" class="pdf-link-input" type="search" :disabled="busy" autocomplete="off" spellcheck="false" />
       <div class="pdf-actions">
-        <button type="button" class="button primary pdf-button" :disabled="busy" @click="requestDownload">{{ busy ? "正在处理…" : "下载 PDF" }}</button>
         <a class="button secondary pdf-button" href="https://jjg.spc.org.cn/resmea/" target="_blank" rel="noopener noreferrer">打开规范网站</a>
         <span v-if="busy" class="pdf-muted" role="status">{{ phase }}</span>
       </div>
+    </section>
+    <section v-if="query.trim()" class="pdf-search-results" aria-label="规范搜索结果">
+      <h2 role="status">找到 {{ matches.length }} 条规范</h2>
+      <p v-if="!matches.length" class="pdf-muted">未找到匹配的规范，请尝试其他名称或编号。</p>
+      <div class="pdf-standard-list">
+        <article v-for="standard in visibleStandards" :key="standard.code" class="panel pdf-standard">
+          <div class="pdf-standard-info">
+            <strong class="pdf-standard-code">{{ standard.code }}</strong>
+            <h3>{{ standard.name }}</h3>
+            <p class="pdf-standard-meta">{{ standard.category }}</p>
+            <p class="pdf-standard-meta"><span :class="{ 'pdf-old-status': ['被代替', '废止'].includes(standard.status) }">状态：{{ standard.status }}</span>　发布：{{ standard.published || '未提供' }}　实施：{{ standard.effective || '未提供' }}</p>
+          </div>
+          <button type="button" class="button primary pdf-button" :disabled="busy" :aria-label="'下载 ' + standard.code + ' ' + standard.name" @click="chooseStandard(standard)">下载 PDF</button>
+        </article>
+      </div>
+      <div v-if="matches.length" class="pdf-pagination">
+        <button type="button" class="button secondary" :disabled="busy || page === 0" @click="page--">上一页</button>
+        <span class="pdf-muted">第 {{ page + 1 }} / {{ pageCount }} 页</span>
+        <button type="button" class="button secondary" :disabled="busy || page + 1 >= pageCount" @click="page++">下一页</button>
+      </div>
+      <p class="pdf-muted">规范状态与实施日期请以规范网站为准。</p>
     </section>
     <p v-if="error" class="notice pdf-error" role="alert">{{ error }}</p>
     <section v-if="result" class="pdf-results" aria-label="下载结果">
@@ -146,17 +181,21 @@ defineExpose({ reset, busy });
     <p v-if="message" class="pdf-muted" role="status">{{ message }}</p>
     <section class="panel pdf-explanation">
       <h2>获取流程与接口说明</h2>
-      <p>1. 将详情页链接发送给工具箱服务器，提取 standno 规范编号。相同编号共用缓存，不受页码等附加参数影响。</p>
+      <p>1. 按名称或编号搜索内置目录，选择规范后将其详情页链接发送给服务器。服务器按 standno 规范编号匹配缓存。</p>
       <p>2. 优先读取服务器本地 PDF；文件有效就直接发送，不访问规范网站。</p>
       <p>3. 未命中缓存时，服务器读取规范名称，再提交 a100（规范编号）和 ismobile=1，获取 token 与 enc。</p>
       <code>POST https://jjg.spc.org.cn/resmea/view/stdonline</code>
       <p>4. 服务器携带同一会话的 Cookie，使用 token 请求文件，enc 作为 myfoxit 请求头获取 PDF。</p>
       <code>GET https://jjg.spc.org.cn/resmea/view/onlinereading?token=…</code>
       <p>5. 校验 PDF 格式并解析真实页数，完整保存 PDF 和规范信息后发送给浏览器；相同规范的并发请求合并获取。</p>
-      <p class="pdf-muted">PDF 缓存保存在服务器磁盘，重启后仍可使用，不会自动过期。浏览器下载后请确认本地保存结果。单个 PDF 上限 50 MB，请按网站的电子文本使用说明使用文件。</p>
+      <p class="pdf-muted">PDF 缓存保存在服务器磁盘，重启后仍可使用，不会自动过期。浏览器下载后请确认本地保存结果。单个 PDF 上限 100 MB，请按网站的电子文本使用说明使用文件。</p>
     </section>
     <dialog ref="warningDialog" class="pdf-dialog" aria-labelledby="pdf-warning-title" @cancel.prevent="closeWarning">
       <h2 id="pdf-warning-title">下载提示</h2>
+      <template v-if="selectedStandard">
+        <p><strong>{{ selectedStandard.code }} {{ selectedStandard.name }}</strong></p>
+        <p class="pdf-muted">{{ selectedStandard.status }} · 实施日期：{{ selectedStandard.effective || '未提供' }}</p>
+      </template>
       <p>此链接将发送给工具箱服务器，优先使用本地缓存；未命中时由服务器访问规范网站。频繁获取不同规范可能触发网站限流（HTTP 429）。</p>
       <p class="pdf-muted">请按网站的电子文本使用说明使用下载文件。</p>
       <div class="pdf-dialog-actions"><button type="button" class="button secondary pdf-button" autofocus @click="closeWarning">取消</button><button type="button" class="button primary pdf-button" @click="start">知道了，继续下载</button></div>
@@ -174,6 +213,15 @@ defineExpose({ reset, busy });
 .pdf-tool { max-width: 960px; }
 .pdf-tool h2 { font-size: 15px; margin: 0 0 10px; }
 .pdf-input-panel { border-radius: 8px; padding: 18px; }
+.pdf-search-results { margin: 18px 0; }
+.pdf-standard-list { display: grid; grid-auto-rows: 1fr; gap: 10px; }
+.pdf-standard { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px; border-radius: 8px; margin: 0; }
+.pdf-standard-info { min-width: 0; }
+.pdf-standard-code { color: var(--blue); font-size: 14px; }
+.pdf-standard h3 { margin: 6px 0; font-size: 15px; font-weight: 500; overflow-wrap: anywhere; }
+.pdf-standard-meta { margin: 5px 0 0; color: var(--muted); font-size: 12px; line-height: 1.6; }
+.pdf-old-status { color: #a36022; }
+.pdf-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 14px 0; }
 .pdf-muted { color: var(--muted); font-size: 12px; line-height: 1.7; }
 .pdf-link-input { display: block; width: 100%; min-height: 44px; margin: 12px 0; padding: 10px 12px; border: 1px solid #a9bddb; border-radius: 6px; background: white; font-size: 14px; }
 .pdf-link-input:focus { border-color: var(--blue); outline: 2px solid #2769dc20; outline-offset: 1px; }
@@ -197,5 +245,5 @@ defineExpose({ reset, busy });
 .pdf-dialog h2 { font-size: 19px; margin: 0 0 20px; }
 .pdf-dialog p { font-size: 14px; line-height: 1.8; margin: 8px 0; overflow-wrap: anywhere; }
 .pdf-dialog-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 24px; flex-wrap: wrap; }
-@media (max-width: 600px) { .pdf-metrics { grid-template-columns: 1fr; } .pdf-button { min-height: 44px; } .pdf-dialog { padding: 20px; } }
+@media (max-width: 600px) { .pdf-metrics { grid-template-columns: 1fr; } .pdf-button { min-height: 44px; } .pdf-dialog { padding: 20px; } .pdf-standard { align-items: stretch; flex-direction: column; gap: 12px; } }
 </style>

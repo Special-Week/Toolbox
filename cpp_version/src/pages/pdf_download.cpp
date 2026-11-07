@@ -120,27 +120,81 @@ void App::savePdf() {
 
 void renderPdfDownload(Page &p) {
     const float x = p.x, y = p.y, w = p.w, pad = 18;
-    const auto hint = L"在国家计量技术规范全文公开系统打开规范详情，复制地址后粘贴到这里。";
+    const auto hint = L"输入名称关键词或规范编号筛选，在结果中选择需要下载的规范。";
     const float hintHeight = p.app.paragraphHeight(hint, w - 2 * pad, 12);
-    const float inputY = y + pad + 30 + hintHeight + 10, buttonsY = inputY + 54;
+    const auto source = L"数据来源：https://jjg.spc.org.cn/（截至 2026-11 的规范目录）";
+    const float sourceHeight = p.app.paragraphHeight(source, w - 2 * pad, 12);
+    const float inputY = y + pad + 30 + hintHeight + 10, sourceY = inputY + 54, buttonsY = sourceY + sourceHeight + 6;
     p.ui.fill({x, y, w, buttonsY + 40 + pad - y}, White, 8);
     p.ui.border({x, y, w, buttonsY + 40 + pad - y}, Border, 8);
-    p.ui.text({x + pad, y + pad, w - 2 * pad, 26}, L"规范详情页链接", 15, Ink, true);
+    p.ui.text({x + pad, y + pad, w - 2 * pad, 26}, L"规范名称或编号", 15, Ink, true);
     p.ui.text({x + pad, y + pad + 30, w - 2 * pad, hintHeight}, hint, 12, Muted, false, false, true);
-    const auto url = p.state.value(p.key("url"), L"");
+    p.ui.text({x + pad, sourceY, w - 2 * pad, sourceHeight}, source, 12, Muted, false, false, true);
+    const auto query = p.state.value(p.key("query"), L"");
     if (!p.app.pdfJob->active) {
-        p.ui.input(p.key("url"), {x + pad, inputY, w - 2 * pad, 42}, url);
-        button(p.ui, {x + pad, buttonsY, 112, 40}, L"下载 PDF", [owner = &p.app, url] { owner->requestPdfDownload(url); }, true);
+        p.ui.input(p.key("query"), {x + pad, inputY, w - 2 * pad, 42}, query);
     } else {
         p.ui.fill({x + pad, inputY, w - 2 * pad, 42}, Background, 6);
         p.ui.border({x + pad, inputY, w - 2 * pad, 42});
-        p.ui.text({x + pad + 12, inputY, w - 2 * pad - 24, 42}, url, 14, Muted);
+        p.ui.text({x + pad + 12, inputY, w - 2 * pad - 24, 42}, query, 14, Muted);
         p.ui.text({x + pad, buttonsY, w - 2 * pad, 40}, L"正在获取规范名称并检查 PDF…", 14, Blue);
     }
     if (!p.app.pdfJob->active) {
-        button(p.ui, {x + pad + 124, buttonsY, 132, 40}, L"打开规范网站", [owner = p.app.handle()] { ShellExecuteW(owner, L"open", L"https://jjg.spc.org.cn/resmea/", nullptr, nullptr, SW_SHOWNORMAL); }, false);
+        button(p.ui, {x + pad, buttonsY, 132, 40}, L"打开规范网站", [owner = p.app.handle()] { ShellExecuteW(owner, L"open", L"https://jjg.spc.org.cn/resmea/", nullptr, nullptr, SW_SHOWNORMAL); }, false);
     }
     p.y = buttonsY + 40 + pad + 12;
+    auto& lastQuery = p.state.value(p.key("last_query"), L"");
+    auto& page = p.state.choice(p.key("page"), 0);
+    if (lastQuery != query) { page = 0; lastQuery = query; }
+    if (query.find_first_not_of(L" \t\r\n　") != std::wstring::npos) {
+        const auto rows = pdf::search_standards(query);
+        const int pages = std::max(1, int((rows.size() + 9) / 10));
+        page = std::clamp(page, 0, pages - 1);
+        p.heading(L"找到 " + std::to_wstring(rows.size()) + L" 条规范");
+        if (rows.empty()) p.note(L"未找到匹配的规范，请尝试其他名称或编号。");
+        struct ResultLayout {
+            const pdf::Standard* standard;
+            std::wstring type, details;
+            float nameHeight, typeHeight, detailsHeight;
+        };
+        const float textWidth = std::max(120.f, w - 2 * pad - 138);
+        std::vector<ResultLayout> layouts;
+        float rowHeight = 0;
+        for (size_t i = size_t(page) * 10; i < std::min(rows.size(), size_t(page + 1) * 10); ++i) {
+            const auto* standard = rows[i];
+            ResultLayout item{standard, standard->category,
+                L"状态：" + standard->status + L"　发布：" + standard->published + L"　实施：" + (standard->effective.empty() ? L"未提供" : standard->effective),
+                p.app.paragraphHeight(standard->name, textWidth, 15), 0, 0};
+            item.typeHeight = p.app.paragraphHeight(item.type, textWidth, 12);
+            item.detailsHeight = p.app.paragraphHeight(item.details, textWidth, 12);
+            rowHeight = std::max(rowHeight, 2 * pad + 28 + item.nameHeight + 6 + item.typeHeight + 4 + item.detailsHeight);
+            layouts.push_back(std::move(item));
+        }
+        for (const auto& item : layouts) {
+            const auto* standard = item.standard;
+            p.ui.fill({x, p.y, w, rowHeight}, White, 8);
+            p.ui.border({x, p.y, w, rowHeight}, Border, 8);
+            p.ui.text({x + pad, p.y + pad, textWidth, 24}, standard->code, 14, Blue, true);
+            p.ui.text({x + pad, p.y + pad + 28, textWidth, item.nameHeight}, standard->name, 15, Ink, false, false, true);
+            p.ui.text({x + pad, p.y + pad + 34 + item.nameHeight, textWidth, item.typeHeight}, item.type, 12, Muted, false, false, true);
+            p.ui.text({x + pad, p.y + pad + 38 + item.nameHeight + item.typeHeight, textWidth, item.detailsHeight}, item.details, 12,
+                standard->status == L"被代替" || standard->status == L"废止" ? Red : Muted, false, false, true);
+            if (!p.app.pdfJob->active) button(p.ui, {x + w - pad - 112, p.y + (rowHeight - 40) / 2, 112, 40}, L"下载 PDF",
+                [owner = &p.app, standard] { owner->requestPdfDownload(standard->url); }, true);
+            p.y += rowHeight + 10;
+        }
+        if (!rows.empty()) {
+            if (!p.app.pdfJob->active && page > 0) button(p.ui, {x, p.y, 112, 40}, L"上一页", [owner = &p.app, key = p.key("page")] {
+                --owner->state.choices[key]; owner->scroll = 0; owner->refresh();
+            }, false);
+            p.ui.text({x + 124, p.y, w - 248, 40}, L"第 " + std::to_wstring(page + 1) + L" / " + std::to_wstring(pages) + L" 页", 13, Muted, false, true);
+            if (!p.app.pdfJob->active && page + 1 < pages) button(p.ui, {x + w - 112, p.y, 112, 40}, L"下一页", [owner = &p.app, key = p.key("page")] {
+                ++owner->state.choices[key]; owner->scroll = 0; owner->refresh();
+            }, false);
+            p.y += 50;
+        }
+        p.note(L"规范状态与实施日期请以规范网站为准。");
+    }
     std::shared_ptr<pdf::Download> result;
     std::wstring error, message;
     {
@@ -158,13 +212,13 @@ void renderPdfDownload(Page &p) {
     if (!error.empty()) p.note(error, Red);
     if (!message.empty()) p.note(message);
     const std::vector<std::wstring> lines{
-        L"1. 解析详情页链接中的 standno 规范编号，并读取详情页标题中的规范名称。",
+        L"1. 按名称或编号搜索内置目录，选择规范后使用对应详情页链接获取 PDF。",
         L"2. 请求在线预览页面，提交 a100（规范编号）和 ismobile=1，取得 token 与 enc 参数。",
         L"POST https://jjg.spc.org.cn/resmea/view/stdonline",
         L"3. 沿用同一会话的 Cookie，以 token 作为查询参数、enc 作为 myfoxit 请求头，获取预览 PDF。",
         L"GET https://jjg.spc.org.cn/resmea/view/onlinereading?token=…",
         L"4. 检查 PDF 格式、已知错误提示文件及实际页数，再按所选位置保存网站返回的原始 PDF。",
-        L"以上为网站在线预览使用的接口，网站调整或限流时可能无法获取。仅支持本站 HTTPS 详情页，单个 PDF 上限 50 MB；请按网站的电子文本使用说明使用文件。"
+        L"以上为网站在线预览使用的接口，网站调整或限流时可能无法获取。仅支持本站 HTTPS 详情页，单个 PDF 上限 100 MB；请按网站的电子文本使用说明使用文件。"
     };
     float height = 2 * pad + 30;
     for (const auto &line : lines) height += p.app.paragraphHeight(line, w - 2 * pad, 13) + 8;
@@ -187,7 +241,12 @@ void App::renderPdfModal() {
     scene.scrollRegions.clear();
     scene.fill({0, 0, width, height}, Color(0, 0, 0, .38f));
     const bool warning = pdfModal == PdfModal::Warning;
-    const std::wstring text = warning ? L"短时间内频繁下载可能触发网站限流（HTTP 429 Too Many Requests），请适当控制下载频率。\n\n请按网站的电子文本使用说明使用下载文件。" : pdfDialogText;
+    std::wstring text = warning ? L"短时间内频繁下载可能触发网站限流（HTTP 429 Too Many Requests），请适当控制下载频率。\n\n请按网站的电子文本使用说明使用下载文件。" : pdfDialogText;
+    if (warning) for (const auto& standard : pdf::standard_catalog()) if (standard.url == pdfPendingUrl) {
+        text = standard.code + L" " + standard.name + L"\n" + standard.status + L" · 实施日期：" +
+            (standard.effective.empty() ? L"未提供" : standard.effective) + L"\n\n" + text;
+        break;
+    }
     const float w = std::min(488.f, width - 48), inner = w - 48;
     const float textHeight = paragraphHeight(text, inner, 14), h = textHeight + 144;
     const float x = (width - w) / 2, y = std::max(12.f, (height - h) / 2), buttonY = y + h - 64;

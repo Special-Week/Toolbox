@@ -556,6 +556,6 @@ pub(crate) const TOOLS: &[ToolDef] = &[
         Other,
         ToolKind::PdfDownload,
         "PDF",
-        "从规范详情页获取预览 PDF，检查页数并保存到本地。"
+        "按规范名称或编号搜索，选择规范后下载 PDF 并检查页数。"
     ),
 ];

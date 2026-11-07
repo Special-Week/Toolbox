@@ -6,16 +6,16 @@ export const LINK = "https://jjg.spc.org.cn/resmea/standard/detail.html?standno=
 export const NAME = "测量不确定度评定与表示";
 
 // 包含正确对象偏移和交叉引用表，实际交给 PDF.js 解析。
-export function pdf(pages = 2) {
+export function pdf(pages = 2, padding = 0) {
   const objects = ["<< /Type /Catalog /Pages 2 0 R >>", `<< /Type /Pages /Kids [${Array.from({ length: pages }, (_, i) => `${i + 3} 0 R`).join(" ")}] /Count ${pages} >>`];
   for (let i = 0; i < pages; i++) objects.push("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 200 200] >>");
   let text = "%PDF-1.4\n";
   const offsets = [0];
   for (const [index, body] of objects.entries()) { offsets.push(text.length); text += `${index + 1} 0 obj\n${body}\nendobj\n`; }
-  const start = text.length;
-  text += `xref\n0 ${offsets.length}\n0000000000 65535 f \n` + offsets.slice(1).map(value => String(value).padStart(10, "0") + " 00000 n \n").join("");
+  const prefix = Buffer.from(text), start = prefix.length + padding;
+  text = `xref\n0 ${offsets.length}\n0000000000 65535 f \n` + offsets.slice(1).map(value => String(value).padStart(10, "0") + " 00000 n \n").join("");
   text += `trailer\n<< /Size ${offsets.length} /Root 1 0 R >>\nstartxref\n${start}\n%%EOF\n`;
-  return Buffer.from(text);
+  return Buffer.concat([prefix, Buffer.alloc(padding, 0x20), Buffer.from(text)]);
 }
 
 export function upstream(data = pdf()) {

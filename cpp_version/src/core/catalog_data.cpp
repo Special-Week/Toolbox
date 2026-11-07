@@ -92,7 +92,7 @@ const std::vector<Tool> &tools() {
         {"calibration_curve_fit", L"校准曲线拟合", Group::Other, Kind::CalibrationCurveFit, L"Fit",
          L"根据成对数据拟合方程，计算系数、相关系数、拟合优度与残差。"},
         {"metrology_pdf_download", L"计量规范 PDF 下载", Group::Other, Kind::PdfDownload, L"PDF",
-         L"从规范详情页获取预览 PDF，检查页数并保存到本地。"},
+         L"按规范名称或编号搜索，选择规范后下载 PDF 并检查页数。"},
     };
     return data;
 }

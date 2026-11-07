@@ -79,7 +79,7 @@ test("HTML、损坏 PDF、超限响应和 HTTP 429 不进入缓存，失败后�
       if (kind === "429") return new Response("limit", { status: 429 });
       if (kind === "redirect") return new Response("", { status: 302, headers: { location: "http://127.0.0.1/private" } });
       if (new URL(url).pathname.endsWith("onlinereading")) {
-        if (kind === "oversize") return new Response(pdf(), { headers: { "content-length": String(51 * 1024 * 1024) } });
+        if (kind === "oversize") return new Response(pdf(), { headers: { "content-length": String(101 * 1024 * 1024) } });
         return new Response(kind === "html" ? "<html>Error</html>" : "%PDF-1.4\ninvalid");
       }
       return normal.fetchImpl(url, options);
@@ -93,6 +93,16 @@ test("HTML、损坏 PDF、超限响应和 HTTP 429 不进入缓存，失败后�
   await assert.rejects(cache.get(LINK));
   fail = false;
   assert.equal((await cache.get(LINK)).cache, "MISS");
+});
+
+test("超过原 50 MB 上限的 PDF 可下载、解析及缓存复用", async t => {
+  const data = pdf(2, 51 * 1024 * 1024), remote = upstream(data);
+  const cache = createPdfCache({ cacheDirectory: await temporary(t), fetchImpl: remote.fetchImpl });
+  const first = await cache.get(LINK);
+  assert.equal(first.cache, "MISS"); assert.equal(first.pages, 2); assert.deepEqual(first.data, data);
+  const second = await cache.get(LINK);
+  assert.equal(second.cache, "HIT"); assert.equal(second.pages, 2); assert.deepEqual(second.data, data);
+  assert.equal(remote.calls.length, 3);
 });
 
 test("缓存写入失败时不宣称下载成功，不留下临时文件", async t => {

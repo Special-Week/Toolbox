@@ -62,6 +62,14 @@ test("Vite 开发及预览服务也使用同一磁盘缓存接口", async t => {
   const root = fileURLToPath(new URL("..", import.meta.url));
   const dev = await createServer({ root, server: { host: "127.0.0.1", port: 0 }, logLevel: "silent" });
   t.after(() => dev.close()); await dev.listen();
+  const devOrigin = "http://127.0.0.1:" + dev.httpServer.address().port;
+  const searchModule = await fetch(devOrigin + "/src/standard-catalog.ts");
+  assert.equal(searchModule.status, 200);
+  await searchModule.text();
+  const catalogPath = path.resolve(root, "../data/standards/catalog.json").replaceAll("\\", "/");
+  const catalogData = await fetch(devOrigin + "/@fs/" + catalogPath + "?import");
+  assert.equal(catalogData.status, 200);
+  assert((await catalogData.text()).includes("JJF 1059.1-2012"));
   const response = await fetch("http://127.0.0.1:" + dev.httpServer.address().port + query(LINK));
   assert.equal(response.status, 200); assert.equal(response.headers.get("x-pdf-cache"), "HIT");
   assert.deepEqual(Buffer.from(await response.arrayBuffer()), data);

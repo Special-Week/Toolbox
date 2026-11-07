@@ -1,4 +1,6 @@
 #include "toolbox/pdf_download.hpp"
+#include "toolbox/gauges.hpp"
+#include "toolbox/resource_ids.h"
 
 #include <windows.h>
 #include <winhttp.h>
@@ -16,7 +18,7 @@
 
 namespace toolbox::pdf {
 namespace {
-constexpr size_t max_pdf_bytes = 50 * 1024 * 1024;
+constexpr size_t max_pdf_bytes = 100 * 1024 * 1024;
 const wchar_t* host = L"jjg.spc.org.cn";
 const wchar_t* agent = L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                        L"(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0";
@@ -239,6 +241,50 @@ std::string text_of(const std::vector<unsigned char>& data) {
     return std::string(data.begin(), data.end());
 }
 } // namespace
+
+namespace {
+std::wstring search_key(const std::wstring& text) {
+    std::wstring out;
+    for (wchar_t c : text) {
+        if (iswspace(c) || c == 0x3000 || c == 0x00a0 || c == 0x202f) continue;
+        if (c == L'－' || c == L'—' || c == L'–') c = L'-';
+        out += towlower(c);
+    }
+    return out;
+}
+}
+
+const std::vector<Standard>& standard_catalog() {
+    static const std::vector<Standard> catalog = [] {
+        auto module = GetModuleHandleW(nullptr);
+        auto resource = FindResourceW(module, MAKEINTRESOURCEW(TOOLBOX_STANDARD_CATALOG), RT_RCDATA);
+        if (!resource) throw Failure(L"缺少内置规范目录，请重新构建程序。");
+        auto loaded = LoadResource(module, resource);
+        auto bytes = loaded ? static_cast<const char*>(LockResource(loaded)) : nullptr;
+        if (!bytes) throw Failure(L"无法读取内置规范目录。");
+        auto data = gauges::Data::parse({bytes, SizeofResource(module, resource)});
+        std::vector<Standard> rows;
+        for (const auto& row : data["standards"].array) {
+            Standard item;
+            item.code = from_utf8(row["code"].string); item.name = from_utf8(row["name"].string);
+            item.category = from_utf8(row["category"].string); item.status = from_utf8(row["status"].string);
+            item.published = from_utf8(row["published"].string); item.effective = from_utf8(row["effective"].string);
+            item.url = from_utf8(row["url"].string); item.searchCode = search_key(item.code); item.searchName = search_key(item.name);
+            rows.push_back(std::move(item));
+        }
+        return rows;
+    }();
+    return catalog;
+}
+
+std::vector<const Standard*> search_standards(const std::wstring& query) {
+    std::vector<const Standard*> rows;
+    const auto key = search_key(query);
+    if (key.empty()) return rows;
+    for (const auto& item : standard_catalog())
+        if (item.searchCode.find(key) != std::wstring::npos || item.searchName.find(key) != std::wstring::npos) rows.push_back(&item);
+    return rows;
+}
 
 std::wstring standard_number(const std::wstring& input) {
     std::wstring url = trim(input);

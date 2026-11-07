@@ -70,6 +70,27 @@ fn accepts_detail_links_and_canonicalizes_only_the_standard_number() {
 }
 
 #[test]
+fn searches_the_five_catalogs_by_name_and_normalized_number() {
+    let catalog = standard_catalog();
+    assert_eq!(catalog.len(), 2882);
+    let mut codes = std::collections::HashSet::new();
+    let categories: std::collections::HashSet<_> =
+        catalog.iter().map(|row| row.category.as_str()).collect();
+    assert_eq!(categories.len(), 5);
+    for row in catalog {
+        assert!(codes.insert(&row.code));
+        assert!(!row.name.is_empty());
+        assert_eq!(detail_link(&row.url).unwrap().0, row.code);
+    }
+    let rows = search_standards(" jjf1059.1－2012 ");
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].name, "测量不确定度评定与表示");
+    assert!(!search_standards("压力 表").is_empty());
+    assert!(search_standards("   ").is_empty());
+    assert!(search_standards("no-such-standard-xyz").is_empty());
+}
+
+#[test]
 fn parses_preview_parameters_and_title_without_accepting_header_injection() {
     assert_eq!(
         standard_name("<TITLE class='x'>温度 &amp; 压力 - 国家计量技术规范全文公开系统</TITLE>"),

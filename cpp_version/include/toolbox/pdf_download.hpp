@@ -19,6 +19,12 @@ struct Download {
     size_t pages = 0;
 };
 
+struct Standard {
+    std::wstring code, name, category, status, published, effective, url, searchCode, searchName;
+};
+const std::vector<Standard>& standard_catalog();
+std::vector<const Standard*> search_standards(const std::wstring& query);
+
 std::wstring standard_number(const std::wstring& url);
 std::wstring standard_name(const std::string& html);
 std::wstring default_filename(const std::wstring& code, const std::wstring& name);

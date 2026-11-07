@@ -4,13 +4,20 @@ import { readFileSync } from "node:fs";
 import { parse, compileScript } from "@vue/compiler-sfc";
 import ts from "typescript";
 import * as Vue from "vue";
+import { pdf } from "../server/test-helpers.mjs";
 
 const filename = new URL("../src/components/PdfDownload.vue", import.meta.url);
 const source = readFileSync(filename, "utf8");
+const catalogSource = readFileSync(new URL("../src/standard-catalog.ts", import.meta.url), "utf8")
+  .replace(/import catalog from ["'][^"']+["'];?/, "const catalog = " + readFileSync(new URL("../../data/standards/catalog.json", import.meta.url), "utf8") + ";");
+const catalogJs = ts.transpileModule(catalogSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const catalogModuleUrl = "data:text/javascript;base64," + Buffer.from(catalogJs).toString("base64");
+const catalogModule = await import(catalogModuleUrl);
 const { descriptor } = parse(source, { filename: filename.pathname });
 const script = compileScript(descriptor, { id: "pdf-test", genDefaultAs: "PdfComponent" });
 let js = ts.transpileModule(script.content, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 js = js.replace(/import \{ download \} from ["']\.\.\/format["'];?/, "const download = (...args) => globalThis.pdfDownloads.push(args);");
+js = js.replace(/from ["']\.\.\/standard-catalog["']/g, "from " + JSON.stringify(catalogModuleUrl));
 js = js.replace(/from ["']vue["']/g, "from " + JSON.stringify(import.meta.resolve("vue")));
 const component = (await import("data:text/javascript;base64," + Buffer.from(js + "\nPdfComponent.render = () => null; export default PdfComponent;").toString("base64"))).default;
 const renderer = Vue.createRenderer({
@@ -39,6 +46,27 @@ async function mount(fetchImpl = async () => response()) {
   await Vue.nextTick();
   return { page, app, active, calls, cleanup() { app.unmount(); globalThis.fetch = oldFetch; } };
 }
+
+test("按名称和编号筛选、分页，选择结果后确认才发起下载", async () => {
+  const env = await mount();
+  try {
+    assert.equal(catalogModule.standards.length, 2882); assert.equal(env.page.matches.length, 0);
+    env.page.query = "压力 表"; await Vue.nextTick();
+    assert(env.page.matches.length > 0); assert(env.page.matches.every(item => item.name.includes("压力表")));
+    env.page.query = "JJF"; await Vue.nextTick();
+    assert.equal(env.page.visibleStandards.length, 10); assert(env.page.pageCount > 1);
+    env.page.page = 1; assert.notEqual(env.page.visibleStandards[0].code, env.page.matches[0].code);
+    env.page.query = " jjf1059.1－2012 "; await Vue.nextTick();
+    assert.equal(env.page.page, 0); assert.equal(env.page.matches.length, 1);
+    assert.equal(env.page.matches[0].name, result.name);
+    env.page.chooseStandard(env.page.matches[0]); await Vue.nextTick();
+    assert(env.page.warningOpen); assert.equal(env.calls.length, 0); assert.equal(env.page.url, link);
+    assert.equal(env.page.selectedStandard.code, result.code);
+    env.page.closeWarning(); assert.equal(env.calls.length, 0);
+    env.page.query = "no-such-standard-xyz"; await Vue.nextTick(); assert.equal(env.page.matches.length, 0);
+    env.page.reset(); assert.equal(env.page.query, ""); assert.equal(env.page.matches.length, 0);
+  } finally { env.cleanup(); }
+});
 
 test("无效链接、警告取消不发请求，输入为空且无预设地址", async () => {
   const env = await mount();
@@ -71,6 +99,16 @@ test("确认后请求同源服务器，收到 PDF 后交给浏览器下载并显
       env.page.reset(); assert.equal(env.page.url, ""); assert.equal(env.page.result, null);
     } finally { env.cleanup(); }
   }
+});
+
+test("前端可接收并保存超过原 50 MB 上限的 PDF", async () => {
+  const data = pdf(2, 51 * 1024 * 1024);
+  const env = await mount(async () => new Response(data, { headers: response().headers }));
+  try {
+    env.page.url = link; await env.page.start();
+    assert.equal(env.page.error, ""); assert.equal(pdfDownloads.length, 1);
+    assert.equal(pdfDownloads[0][0].size, data.length); assert(env.page.successPending);
+  } finally { env.cleanup(); }
 });
 
 test("服务器错误、静态托管返回 HTML、无效 PDF 均不显示成功", async () => {

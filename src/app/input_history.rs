@@ -202,7 +202,9 @@ mod tests {
             let texts = text_shapes(&output);
             let errors: Vec<_> = texts
                 .iter()
-                .filter(|(text, _)| text.starts_with("⚠"))
+                .filter(|(text, _)| {
+                    text.starts_with("⚠") && !text.starts_with("⚠ 取值说明与适用限制")
+                })
                 .collect();
             assert!(errors.is_empty(), "{}: {errors:?}", tool.id);
             assert!(
@@ -218,6 +220,242 @@ mod tests {
             assert!(app.history.values.keys().all(|key|
                 tool.remembers_inputs() && key.starts_with(&format!("{}.", tool.id))), "{}", tool.id);
         }
+    }
+
+    #[test]
+    fn tool_content_panels_share_margins_at_normal_and_narrow_widths() {
+        let directory = tempfile::tempdir().unwrap();
+        for width in [620.0, 1220.0] {
+            let mut left_edges = Vec::new();
+            for (id, marker) in [
+                ("blackbody_radiation_source", "辐射温度参数"),
+                ("gauge_metric", "计算参数"),
+                ("metrology_pdf_download", "规范名称或编号"),
+            ] {
+                let mut app = app_at(directory.path().join(format!("{id}.json")));
+                let ctx = context();
+                frame(&mut app, &ctx, id, [width, 2000.0], vec![]);
+                let output = frame(&mut app, &ctx, id, [width, 2000.0], vec![]);
+                let marker = text_shapes(&output)
+                    .into_iter()
+                    .find(|(text, _)| text == marker)
+                    .unwrap()
+                    .1;
+                let panel = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.stroke.width > 0.0 && rect.rect.contains_rect(marker) =>
+                        {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .min_by(|a, b| a.width().total_cmp(&b.width()))
+                    .expect("参数面板应包围标题");
+                assert!(
+                    panel.right() <= width - 20.0,
+                    "{id} 的面板超出右边距：{panel:?}"
+                );
+                left_edges.push(panel.left());
+            }
+            assert!(
+                left_edges.iter().all(|x| (x - left_edges[0]).abs() < 1.0),
+                "面板应左对齐：{left_edges:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn input_and_choice_controls_align_at_desktop_width() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(directory.path().join("inputs.json"));
+        let ctx = context();
+        let id = "blackbody_radiation_source";
+        frame(&mut app, &ctx, id, [1220.0, 2000.0], vec![]);
+        let output = frame(&mut app, &ctx, id, [1220.0, 2000.0], vec![]);
+        let texts = text_shapes(&output);
+        let controls: Vec<_> = ["计算模型", "有效波长 (µm)"]
+            .iter()
+            .map(|label| {
+                let label = texts.iter().find(|(text, _)| text == label).unwrap().1;
+                output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| match &shape.shape {
+                        egui::Shape::Rect(rect)
+                            if rect.stroke.width > 0.0
+                                && rect.rect.left() > label.right()
+                                && rect.rect.center().y >= label.top()
+                                && rect.rect.center().y <= label.bottom()
+                                && (35.0..=40.0).contains(&rect.rect.height()) =>
+                        {
+                            Some(rect.rect)
+                        }
+                        _ => None,
+                    })
+                    .min_by(|a, b| a.width().total_cmp(&b.width()))
+                    .expect("应显示完整的表单控件边框")
+            })
+            .collect();
+        assert!(
+            (controls[0].left() - controls[1].left()).abs() < 1.0,
+            "控件应左对齐：{controls:?}"
+        );
+        assert!(
+            (controls[0].width() - controls[1].width()).abs() < 1.0,
+            "控件应等宽：{controls:?}"
+        );
+        assert!(
+            (controls[0].height() - controls[1].height()).abs() < 1.0,
+            "控件应等高：{controls:?}"
+        );
+    }
+
+    #[test]
+    fn spline_inputs_have_visible_borders_without_focus() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(directory.path().join("inputs.json"));
+        let ctx = context();
+        let id = "bspline_interpolation";
+        frame(&mut app, &ctx, id, [1220.0, 2000.0], vec![]);
+        let output = frame(&mut app, &ctx, id, [1220.0, 2000.0], vec![]);
+        let texts = text_shapes(&output);
+        for value in ["0.5", "250", "2002"] {
+            let text = texts
+                .iter()
+                .find(|(text, _)| text == value)
+                .expect("应显示输入值")
+                .1;
+            assert!(
+                output.shapes.iter().any(|shape| match &shape.shape {
+                    egui::Shape::Rect(rect) =>
+                        rect.stroke.width >= 1.0
+                            && rect.stroke.color.r() < 190
+                            && rect.stroke.color.g() < 190
+                            && rect.rect.height() >= 35.0
+                            && rect.rect.contains_rect(text),
+                    _ => false,
+                }),
+                "输入值 {value} 应位于清晰可见的边框内"
+            );
+        }
+        let point = texts
+            .iter()
+            .find(|(text, _)| text == "250")
+            .unwrap()
+            .1
+            .center();
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                &ctx,
+                id,
+                [1220.0, 2000.0],
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        let focused = frame(&mut app, &ctx, id, [1220.0, 2000.0], vec![]);
+        assert!(focused.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.stroke.color == crate::BLUE && rect.rect.contains(point)
+        )), "聚焦后边框应变蓝");
+        frame(
+            &mut app,
+            &ctx,
+            id,
+            [1220.0, 2000.0],
+            vec![egui::Event::Text("9".into())],
+        );
+        let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+        assert_ne!(app.value(tool, "q_0_x", "250"), "250", "输入框应可正常编辑");
+    }
+
+    #[test]
+    fn styled_choice_updates_the_selected_model() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(directory.path().join("inputs.json"));
+        let ctx = context();
+        let id = "blackbody_radiation_source";
+        let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+        let size = [1220.0, 2000.0];
+        let output = frame(&mut app, &ctx, id, size, vec![]);
+        let choice = text_shapes(&output)
+            .into_iter()
+            .find(|(text, _)| text == "有效波长法")
+            .unwrap()
+            .1
+            .center();
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                &ctx,
+                id,
+                size,
+                vec![
+                    egui::Event::PointerMoved(choice),
+                    egui::Event::PointerButton {
+                        pos: choice,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        let output = frame(&mut app, &ctx, id, size, vec![]);
+        let option = text_shapes(&output)
+            .into_iter()
+            .find(|(text, _)| text == "Planck 辐射平衡")
+            .expect("下拉菜单应展开")
+            .1
+            .center();
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                &ctx,
+                id,
+                size,
+                vec![
+                    egui::Event::PointerMoved(option),
+                    egui::Event::PointerButton {
+                        pos: option,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        assert_eq!(app.value(tool, "model", "0"), "1");
+    }
+
+    #[test]
+    fn invalid_input_shows_a_distinct_error_card() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(directory.path().join("inputs.json"));
+        let ctx = context();
+        let id = "blackbody_radiation_source";
+        let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+        frame(&mut app, &ctx, id, [1220.0, 2000.0], vec![]);
+        app.set_value(tool, "wavelength", "0".into());
+        let output = frame(&mut app, &ctx, id, [1220.0, 2000.0], vec![]);
+        let error = text_shapes(&output)
+            .into_iter()
+            .find(|(text, _)| text.starts_with('⚠'))
+            .expect("应显示错误说明")
+            .1;
+        assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Rect(rect) if rect.fill == egui::Color32::from_rgb(255, 244, 243) && rect.rect.contains_rect(error)
+        )), "错误说明应位于提示卡片中");
     }
 
     #[test]

@@ -24,8 +24,11 @@ void thermistorPage(Page &p) {
     PolynomialThermistor model;
     std::vector<std::pair<double, double>> points;
     if (source == 0) {
-        p.note(L"A：1/T = Σ A[i]·ln(R)^i；B：ln(R) = Σ B[i]·(1/T)^i。T 用 K，R 用 Ω。");
-        p.note(L"示例为 10 kΩ、25 °C、β=3950 K；实际使用请填写证书系数。");
+        p.note(L"请填写实际证书系数；温度用 K，电阻用 Ω。");
+        p.details("coefficient.info", L"系数与公式说明", {
+            L"A：1/T = Σ A[i]·ln(R)^i；B：ln(R) = Σ B[i]·(1/T)^i。T 用 K，R 用 Ω。",
+            L"示例为 10 kΩ、25 °C、β=3950 K；实际使用请填写证书系数。"
+        });
         for (int family = 0; family < 2; ++family) {
             bool open = p.collapse(family == 0 ? "a.open" : "b.open",
                                    family == 0 ? L"电阻 → 温度系数 A" : L"温度 → 电阻系数 B");

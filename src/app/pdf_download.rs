@@ -1,4 +1,4 @@
-use crate::calculators::common::{render_error_message, render_metrics};
+use crate::calculators::common::{collapsible_note, render_error_message, render_metrics};
 use crate::pdf_download::{self, Download};
 use crate::{BLUE, BLUE_SOFT, INK, MUTED};
 use eframe::egui::{self, RichText, TextEdit, Vec2};
@@ -57,6 +57,86 @@ mod tests {
                 egui::CentralPanel::default().show(ctx, |ui| app.render_selected(ui, id));
             },
         )
+    }
+
+    #[test]
+    fn acquisition_details_start_collapsed_and_can_be_toggled() {
+        let ctx = egui::Context::default();
+        crate::fonts::configure_fonts(&ctx);
+        crate::configure_style(&ctx);
+        let mut page = PdfDownloadPage::default();
+        let render = |page: &mut PdfDownloadPage, events, time| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        [960.0, 1200.0].into(),
+                    )),
+                    events,
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| page.render(ui));
+                },
+            )
+        };
+        let initial = render(&mut page, vec![], 0.0);
+        let header = initial
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "获取流程与接口说明" => {
+                    Some(text.pos + Vec2::splat(4.0))
+                }
+                _ => None,
+            })
+            .expect("应显示折叠标题");
+        let has_details =
+            |output: &egui::FullOutput| {
+                output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text().starts_with("2. 请求在线预览页面")
+        ))
+            };
+        assert!(!has_details(&initial), "说明应默认折叠");
+        for (pressed, time) in [(true, 0.1), (false, 0.2)] {
+            render(
+                &mut page,
+                vec![
+                    egui::Event::PointerMoved(header),
+                    egui::Event::PointerButton {
+                        pos: header,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+                time,
+            );
+        }
+        assert!(
+            has_details(&render(&mut page, vec![], 0.5)),
+            "点击后应展开说明"
+        );
+        for (pressed, time) in [(true, 0.6), (false, 0.7)] {
+            render(
+                &mut page,
+                vec![
+                    egui::Event::PointerMoved(header),
+                    egui::Event::PointerButton {
+                        pos: header,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+                time,
+            );
+        }
+        assert!(
+            !has_details(&render(&mut page, vec![], 1.0)),
+            "再次点击后应折叠说明"
+        );
     }
 
     #[test]
@@ -538,6 +618,7 @@ impl PdfDownloadPage {
                         TextEdit::singleline(&mut self.query)
                             .frame(false)
                             .margin(0)
+                            .vertical_align(egui::Align::Center)
                             .font(egui::FontId::proportional(14.0)),
                     );
                     if response.has_focus() {
@@ -592,22 +673,45 @@ impl PdfDownloadPage {
             ui.label(RichText::new(&self.message).color(MUTED));
         }
         ui.add_space(12.0);
-        egui::Frame::new()
-            .fill(BLUE_SOFT)
-            .corner_radius(8)
-            .inner_margin(18)
-            .show(ui, |ui| {
-                ui.spacing_mut().item_spacing.y = 8.0;
-                ui.label(RichText::new("获取流程与接口说明").size(14.0).strong().color(BLUE));
-                ui.label(RichText::new("1. 按名称或编号搜索内置目录，选择规范后使用对应详情页链接获取 PDF。").size(13.0).color(INK));
+        collapsible_note(
+            ui,
+            "pdf_acquisition_details",
+            "获取流程与接口说明",
+            |ui| {
+                ui.label(
+                    RichText::new(
+                        "1. 按名称或编号搜索内置目录，选择规范后使用对应详情页链接获取 PDF。",
+                    )
+                    .size(13.0)
+                    .color(INK),
+                );
                 ui.label(RichText::new("2. 请求在线预览页面，提交 a100（规范编号）和 ismobile=1，取得 token 与 enc 参数。").size(13.0).color(INK));
-                ui.add(egui::Label::new(RichText::new("POST https://jjg.spc.org.cn/resmea/view/stdonline").monospace().size(12.0).color(MUTED)).wrap());
+                ui.add(
+                    egui::Label::new(
+                        RichText::new("POST https://jjg.spc.org.cn/resmea/view/stdonline")
+                            .monospace()
+                            .size(12.0)
+                            .color(MUTED),
+                    )
+                    .wrap(),
+                );
                 ui.label(RichText::new("3. 沿用同一会话的 Cookie，以 token 作为查询参数、enc 作为 myfoxit 请求头，获取预览 PDF。").size(13.0).color(INK));
-                ui.add(egui::Label::new(RichText::new("GET https://jjg.spc.org.cn/resmea/view/onlinereading?token=…").monospace().size(12.0).color(MUTED)).wrap());
+                ui.add(
+                    egui::Label::new(
+                        RichText::new(
+                            "GET https://jjg.spc.org.cn/resmea/view/onlinereading?token=…",
+                        )
+                        .monospace()
+                        .size(12.0)
+                        .color(MUTED),
+                    )
+                    .wrap(),
+                );
                 ui.label(RichText::new("4. 检查 PDF 格式、已知错误提示文件及实际页数，再按所选位置保存网站返回的原始 PDF。").size(13.0).color(INK));
                 ui.separator();
                 ui.label(RichText::new("以上为网站在线预览使用的接口，网站调整或限流时可能无法获取。仅支持本站 HTTPS 详情页，单个 PDF 上限 100 MB；请按网站的电子文本使用说明使用文件。").size(12.0).color(MUTED));
-            });
+            },
+        );
         if self.choose_save {
             self.choose_save = false;
             self.save();

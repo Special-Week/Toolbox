@@ -1,7 +1,9 @@
 //! 自然端点条件下的三次均匀参数 B 样条；x/y 均以等距参数插值，x 可非等距。
 //! 求 y(x) 必须先反求单调分支上的参数；CSV 导出使用独立线程和原子替换。
 use crate::app::ToolboxApp;
-use crate::calculators::common::{format_number, info_note, render_error_message, render_metrics};
+use crate::calculators::common::{
+    format_number, info_note, panel, render_error_message, render_metrics,
+};
 use crate::catalog::ToolDef;
 use crate::{BLUE, INK, MUTED};
 use eframe::egui::{self, Color32, RichText, ScrollArea, Vec2};
@@ -43,70 +45,69 @@ pub(crate) struct ExportJob {
 fn render_spline(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) {
     let mut points = Vec::new();
     let mut input_error = None;
-    let (minimum, maximum, step) = ui
-        .group(|ui| {
-            ui.set_max_width(960.0);
-            ui.label(RichText::new("插值参数").size(15.0).strong().color(INK));
-            ui.add_space(4.0);
-            app.input(ui, tool, "x_min", "曲线最小 x", "0", "绘图范围起点");
-            app.input(ui, tool, "x_max", "曲线最大 x", "2650", "绘图范围终点");
-            app.input(ui, tool, "step", "采样步进", "0.5", "必须大于 0");
-            ui.add_space(4.0);
-            let count = app.dynamic_count(ui, tool, "q_points", "Q 型值点", 9, 2, MAX_POINT_COUNT);
-            ui.label(RichText::new("x 须严格递增。").size(11.5).color(MUTED));
-            ui.add_space(4.0);
-            ScrollArea::vertical()
-                .id_salt("bspline_q_points")
-                .max_height(270.0)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.add_sized([42.0, 28.0], egui::Label::new(RichText::new("点").strong()));
-                        ui.add_sized(
-                            [ui.available_width() * 0.5, 28.0],
-                            egui::Label::new(RichText::new("x").strong()),
-                        );
-                        ui.add_sized(
-                            [ui.available_width(), 28.0],
-                            egui::Label::new(RichText::new("y").strong()),
-                        );
-                    });
-                    for index in 0..count {
-                        let (default_x, default_y) = DEFAULT_POINTS
-                            .get(index)
-                            .copied()
-                            .map(|(x, y)| (x.to_string(), y.to_string()))
-                            .unwrap_or_default();
-                        let label = format!("Q{index}");
-                        let x_key = format!("q_{index}_x");
-                        let y_key = format!("q_{index}_y");
-                        let width = ((ui.available_width() - 58.0) / 2.0).max(52.0);
-                        ui.horizontal(|ui| {
-                            ui.add_sized(
-                                [42.0, 36.0],
-                                egui::Label::new(RichText::new(label).color(BLUE)),
-                            );
-                            app.inline_input(ui, tool, &x_key, &default_x, width, "x");
-                            app.inline_input(ui, tool, &y_key, &default_y, width, "y");
-                        });
-                        let x = app.number(tool, &x_key, &default_x);
-                        let y = app.number(tool, &y_key, &default_y);
-                        match (x, y) {
-                            (Ok(x), Ok(y)) => points.push(Point { x, y }),
-                            (Err(error), _) | (_, Err(error)) if input_error.is_none() => {
-                                input_error = Some(format!("Q{index}：{error}"));
-                            }
-                            _ => {}
-                        }
-                    }
+    let (minimum, maximum, step) = panel(ui, |ui| {
+        ui.set_max_width(ui.available_width().min(960.0));
+        ui.label(RichText::new("插值参数").size(15.0).strong().color(INK));
+        ui.add_space(4.0);
+        app.input(ui, tool, "x_min", "曲线最小 x", "0", "绘图范围起点");
+        app.input(ui, tool, "x_max", "曲线最大 x", "2650", "绘图范围终点");
+        app.input(ui, tool, "step", "采样步进", "0.5", "必须大于 0");
+        ui.add_space(4.0);
+        let count = app.dynamic_count(ui, tool, "q_points", "Q 型值点", 9, 2, MAX_POINT_COUNT);
+        ui.label(RichText::new("x 须严格递增。").size(11.5).color(MUTED));
+        ui.add_space(4.0);
+        ScrollArea::vertical()
+            .id_salt("bspline_q_points")
+            .max_height(270.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add_sized([42.0, 28.0], egui::Label::new(RichText::new("点").strong()));
+                    ui.add_sized(
+                        [ui.available_width() * 0.5, 28.0],
+                        egui::Label::new(RichText::new("x").strong()),
+                    );
+                    ui.add_sized(
+                        [ui.available_width(), 28.0],
+                        egui::Label::new(RichText::new("y").strong()),
+                    );
                 });
-            (
-                app.number(tool, "x_min", "0"),
-                app.number(tool, "x_max", "2650"),
-                app.number(tool, "step", "0.5"),
-            )
-        })
-        .inner;
+                for index in 0..count {
+                    let (default_x, default_y) = DEFAULT_POINTS
+                        .get(index)
+                        .copied()
+                        .map(|(x, y)| (x.to_string(), y.to_string()))
+                        .unwrap_or_default();
+                    let label = format!("Q{index}");
+                    let x_key = format!("q_{index}_x");
+                    let y_key = format!("q_{index}_y");
+                    let width = ((ui.available_width() - 58.0) / 2.0).max(52.0);
+                    ui.horizontal(|ui| {
+                        ui.add_sized(
+                            [42.0, 36.0],
+                            egui::Label::new(RichText::new(label).color(BLUE)),
+                        );
+                        app.inline_input(ui, tool, &x_key, &default_x, width, "x");
+                        app.inline_input(ui, tool, &y_key, &default_y, width, "y");
+                    });
+                    let x = app.number(tool, &x_key, &default_x);
+                    let y = app.number(tool, &y_key, &default_y);
+                    match (x, y) {
+                        (Ok(x), Ok(y)) => points.push(Point { x, y }),
+                        (Err(error), _) | (_, Err(error)) if input_error.is_none() => {
+                            input_error = Some(format!("Q{index}：{error}"));
+                        }
+                        _ => {}
+                    }
+                }
+            });
+        (
+            app.number(tool, "x_min", "0"),
+            app.number(tool, "x_max", "2650"),
+            app.number(tool, "step", "0.5"),
+        )
+    })
+    .inner;
 
     ui.add_space(8.0);
     if let Some(error) = input_error {

@@ -118,8 +118,9 @@ class Form {
             for (const auto &r : unifiedData()["series"].array) {
                 const auto &s = r["size"].string;
                 double d = n(r, "diameter_in");
-                sizes.push_back(
-                    {s, s + "（" + utf8(format(d)) + " inch / " + utf8(format(d * inch)) + " mm）"});
+                const auto inText = utf8(format(d));
+                const auto mmText = utf8(format(d * inch));
+                sizes.push_back({s, s + " (" + inText + " inch / " + mmText + " mm)"});
             }
             auto size = edit("size", "公称直径 (inch，可填 1/2、1 1/4)", "1/4", sizes);
             auto variants = unVariants(size);

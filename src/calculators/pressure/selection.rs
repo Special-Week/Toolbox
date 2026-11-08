@@ -17,7 +17,7 @@ impl ToolboxApp {
         self.render_selection(ui, tool, true);
     }
     fn render_selection(&mut self, ui: &mut egui::Ui, tool: &ToolDef, transmitter: bool) {
-        ui.set_max_width(820.0);
+        ui.set_max_width(ui.available_width().min(820.0));
         if transmitter
             && self.select_index(
                 ui,

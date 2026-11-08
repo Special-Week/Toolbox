@@ -61,8 +61,8 @@ void Scene::icon(Rect r) {
     draws.push_back(d);
 }
 void Scene::input(const std::string &key, Rect r, const std::wstring &value) {
-    fill(r, White, 4);
-    border(r);
+    fill(r, Color(250 / 255.f, 252 / 255.f, 1), 6);
+    border(r, Color(150 / 255.f, 168 / 255.f, 192 / 255.f), 6);
     controls.push_back({key, r, clip, value, {}, 0});
 }
 void Scene::combo(const std::string &key, Rect r, const std::vector<std::wstring> &options, int selection) {
@@ -81,8 +81,38 @@ void Page::note(const std::wstring &t, Color c) {
     ui.text({x, y, w, h}, t, 13, c, false, false, true);
     y += h + 6;
 }
+void Page::error(const std::wstring &t) {
+    const std::wstring message = L"⚠ " + t;
+    const float h = std::max(22.f, app.paragraphHeight(message, std::max(1.f, w - 24), 13));
+    ui.fill({x, y, w, h + 24}, Color(1, 244 / 255.f, 243 / 255.f), 8);
+    ui.border({x, y, w, h + 24}, Color(242 / 255.f, 197 / 255.f, 193 / 255.f), 8);
+    ui.text({x + 12, y + 12, w - 24, h}, message, 13, Red, false, false, true);
+    y += h + 36;
+}
+void Page::details(const std::string &field, const std::wstring &title,
+                   const std::vector<std::wstring> &lines) {
+    const auto k = key(field);
+    const bool open = app.openDetails.count(k) != 0;
+    const float padding = 18, inner = std::max(1.f, w - 2 * padding);
+    float height = 60;
+    if (open) for (const auto &line : lines) height += app.paragraphHeight(line, inner, 13) + 8;
+    ui.fill({x, y, w, height}, Soft, 8);
+    ui.text({x + padding, y + 12, inner, 36}, (open ? L"▾  " : L"▸  ") + title, 14, Blue, true);
+    ui.hits.push_back({{x, y, w, 60}, ui.clip, [owner = &app, k] {
+        if (owner->openDetails.count(k)) owner->openDetails.erase(k);
+        else owner->openDetails.insert(k);
+        owner->refresh();
+    }});
+    float lineY = y + 52;
+    if (open) for (const auto &line : lines) {
+        const float lineHeight = app.paragraphHeight(line, inner, 13);
+        ui.text({x + padding, lineY, inner, lineHeight}, line, 13, Ink, false, false, true);
+        lineY += lineHeight + 8;
+    }
+    y += height + 12;
+}
 void Page::explain() {
-    // 说明只读取当前选择，公式默认折叠，不改变计算参数。
+    // 说明只读取当前选择，不改变计算参数。
     int variant = 0;
     if (tool.kind == Kind::ResultantError) {
         variant = state.choice(key("mode"), 0);
@@ -110,22 +140,12 @@ void Page::explain() {
     if (sections.empty()) {
         return;
     }
-    const float padding = 16, innerWidth = w - 2 * padding;
-    const float textHeight = app.paragraphHeight(sections.front().second, innerWidth);
-    const float height = 2 * padding + 32 + textHeight;
-    ui.fill({x, y, w, height}, White, 8);
-    ui.border({x, y, w, height}, Border, 8);
-    ui.fill({x, y + 16, 3, 22}, Blue, 1);
-    ui.text({x + padding, y + padding, innerWidth, 24}, L"计算说明", 15, Ink, true);
-    ui.text({x + padding, y + padding + 32, innerWidth, textHeight}, sections.front().second, 13, Ink, false,
-            false, true);
-    y += height + 8;
-    if (sections.size() > 1 &&
-        collapse("calculation.formula." + std::to_string(variant), L"详细公式与取值")) {
-        for (std::size_t i = 1; i < sections.size(); ++i) {
-            note(sections[i].second, Ink);
-        }
+    std::vector<std::wstring> lines{sections.front().second};
+    for (std::size_t i = 1; i < sections.size(); ++i) {
+        lines.push_back(sections[i].first);
+        lines.push_back(sections[i].second);
     }
+    details("calculation.details", L"计算说明", lines);
 }
 std::wstring Page::textInput(const std::string &f, const std::wstring &label, const std::wstring &initial) {
     auto &value = state.value(key(f), initial);
@@ -161,7 +181,7 @@ int Page::select(const std::string &f, const std::wstring &label, const std::vec
     bool inlineLabel = w >= 720;
     if (inlineLabel) {
         ui.text({x, y, 174, 36}, label, 13, Muted);
-        ui.combo(key(f), {x + 186, y, std::min(270.f, w - 186), 36}, options, choice);
+        ui.combo(key(f), {x + 186, y, w - 186, 36}, options, choice);
         y += 44;
     } else {
         ui.text({x, y, w, 24}, label, 13, Muted);
@@ -228,7 +248,6 @@ std::vector<std::pair<double, double>> Page::pairs(const std::string &f, const s
                                             return false; // 已到边界时让外层页面继续滚动。
                                         }
                                         owner->state.choices[scrollKey] = value;
-                                        owner->refresh();
                                         return true;
                                     }});
         float clipTop = std::max(top, previousClip.y);
@@ -278,7 +297,7 @@ void Page::metrics(const std::wstring &title, const Metrics &entries) {
     int i = 0;
     for (const auto &e : entries) {
         float cx = x + (i % columns) * (cell + 8), cy = y + (i / columns) * 88;
-        ui.fill({cx, cy, cell, 80}, White, 6);
+        ui.fill({cx, cy, cell, 80}, Color(247 / 255.f, 250 / 255.f, 1), 6);
         ui.border({cx, cy, cell, 80});
         ui.text({cx + 10, cy + 7, cell - 20, 24}, e.first, 12, Muted);
         ui.text({cx + 10, cy + 32, cell - 20, 39}, e.second, 16, Blue);
@@ -295,9 +314,7 @@ void Page::table(const std::vector<std::wstring> &headings,
     }
     y += 34;
     for (std::size_t j = 0; j < rows.size(); ++j) {
-        if (j % 2 == 0) {
-            ui.fill({x, y, w, 34}, White);
-        }
+        ui.fill({x, y, w, 34}, j % 2 == 0 ? White : TableStripe);
         for (std::size_t i = 0; i < rows[j].size(); ++i) {
             ui.text({x + float(i) * cell + 8, y, cell - 16, 34}, rows[j][i], 13);
         }

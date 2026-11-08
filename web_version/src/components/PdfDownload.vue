@@ -179,8 +179,8 @@ defineExpose({ reset, busy });
       <button type="button" class="button secondary pdf-button pdf-save" :disabled="busy" @click="saveAgain">保存 PDF…</button>
     </section>
     <p v-if="message" class="pdf-muted" role="status">{{ message }}</p>
-    <section class="panel pdf-explanation">
-      <h2>获取流程与接口说明</h2>
+    <details class="collapsible-note pdf-explanation">
+      <summary>获取流程与接口说明</summary>
       <p>1. 按名称或编号搜索内置目录，选择规范后将其详情页链接发送给服务器。服务器按 standno 规范编号匹配缓存。</p>
       <p>2. 优先读取服务器本地 PDF；文件有效就直接发送，不访问规范网站。</p>
       <p>3. 未命中缓存时，服务器读取规范名称，再提交 a100（规范编号）和 ismobile=1，获取 token 与 enc。</p>
@@ -189,7 +189,7 @@ defineExpose({ reset, busy });
       <code>GET https://jjg.spc.org.cn/resmea/view/onlinereading?token=…</code>
       <p>5. 校验 PDF 格式并解析真实页数，完整保存 PDF 和规范信息后发送给浏览器；相同规范的并发请求合并获取。</p>
       <p class="pdf-muted">PDF 缓存保存在服务器磁盘，重启后仍可使用，不会自动过期。浏览器下载后请确认本地保存结果。单个 PDF 上限 100 MB，请按网站的电子文本使用说明使用文件。</p>
-    </section>
+    </details>
     <dialog ref="warningDialog" class="pdf-dialog" aria-labelledby="pdf-warning-title" @cancel.prevent="closeWarning">
       <h2 id="pdf-warning-title">下载提示</h2>
       <template v-if="selectedStandard">
@@ -223,13 +223,12 @@ defineExpose({ reset, busy });
 .pdf-old-status { color: #a36022; }
 .pdf-pagination { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 14px 0; }
 .pdf-muted { color: var(--muted); font-size: 12px; line-height: 1.7; }
-.pdf-link-input { display: block; width: 100%; min-height: 44px; margin: 12px 0; padding: 10px 12px; border: 1px solid #a9bddb; border-radius: 6px; background: white; font-size: 14px; }
+.pdf-link-input { display: block; width: 100%; min-height: 44px; margin: 12px 0; padding: 0 12px; border: 1px solid #a9bddb; border-radius: 6px; background: white; font-size: 14px; }
 .pdf-link-input:focus { border-color: var(--blue); outline: 2px solid #2769dc20; outline-offset: 1px; }
 .pdf-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
 .pdf-button { min-width: 112px; min-height: 40px; font-size: 14px; padding: 10px 16px; border-radius: 6px; }
 .pdf-button.secondary { background: white; border-color: #cfd9e8; color: #233043; }
 .pdf-explanation { background: var(--soft); border: 0; border-radius: 8px; padding: 18px; margin-top: 16px; font-size: 13px; line-height: 1.8; }
-.pdf-explanation h2 { color: var(--blue); font-size: 14px; }
 .pdf-explanation p { margin: 8px 0; }
 .pdf-explanation code { display: block; overflow-wrap: anywhere; color: #61728b; font-size: 12px; }
 .pdf-results h2 { margin-bottom: 10px; }

@@ -11,8 +11,8 @@ use model::{Response, Spectrum, ear_blackbody};
 
 impl ToolboxApp {
     pub(crate) fn render_radiation(&mut self, ui: &mut egui::Ui, tool: &ToolDef, mode: u8) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(
                 RichText::new(if mode == 0 {
                     "黑体与探头参数"

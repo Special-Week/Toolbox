@@ -21,16 +21,61 @@ static LRESULT CALLBACK editProcedure(HWND window, UINT msg, WPARAM w, LPARAM l,
     }
     return DefSubclassProc(window, msg, w, l);
 }
-static LRESULT CALLBACK comboProcedure(HWND window, UINT msg, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR) {
+static LRESULT CALLBACK comboProcedure(HWND window, UINT msg, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR data) {
+    HWND face = reinterpret_cast<HWND>(data);
     // 下拉框收起时，滚轮只滚动页面，避免误改分度号、单位等计算参数。
     // 展开列表后仍保留原生滚动、点击与键盘选择行为。
     if (msg == WM_MOUSEWHEEL && !SendMessageW(window, CB_GETDROPPEDSTATE, 0, 0)) {
         return SendMessageW(GetParent(window), msg, w, l);
     }
+    if (face && msg == WM_PAINT) {
+        // 只借用普通下拉框绘制收起时的外观；真正的下拉列表仍由原控件负责。
+        RECT rect{};
+        GetClientRect(window, &rect);
+        SetWindowPos(face, nullptr, 0, 0, rect.right, rect.bottom, SWP_NOZORDER | SWP_NOACTIVATE);
+        SendMessageW(face, WM_SETFONT, SendMessageW(window, WM_GETFONT, 0, 0), FALSE);
+        SendMessageW(face, CB_SETITEMHEIGHT, WPARAM(-1), SendMessageW(window, CB_GETITEMHEIGHT, WPARAM(-1), 0));
+        EnableWindow(face, IsWindowEnabled(window));
+        const int selection = int(SendMessageW(window, CB_GETCURSEL, 0, 0));
+        const int length = selection < 0 ? CB_ERR : int(SendMessageW(window, CB_GETLBTEXTLEN, selection, 0));
+        std::wstring text(length < 0 ? 0 : std::size_t(length) + 1, L'\0');
+        if (length >= 0) {
+            SendMessageW(window, CB_GETLBTEXT, selection, reinterpret_cast<LPARAM>(text.data()));
+            text.resize(length);
+        }
+        PAINTSTRUCT paint{};
+        HDC dc = BeginPaint(window, &paint);
+        SendMessageW(face, WM_PRINT, reinterpret_cast<WPARAM>(dc),
+                     PRF_CLIENT | PRF_NONCLIENT | PRF_ERASEBKGND | PRF_CHILDREN);
+        COMBOBOXINFO info{};
+        info.cbSize = sizeof(info);
+        if (GetComboBoxInfo(window, &info)) {
+            RECT label = info.rcItem;
+            label.left += 3;
+            const int previousMode = SetBkMode(dc, TRANSPARENT);
+            const COLORREF previousColor = SetTextColor(dc, GetSysColor(IsWindowEnabled(window) ? COLOR_WINDOWTEXT : COLOR_GRAYTEXT));
+            HGDIOBJ previousFont = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+            DrawTextW(dc, text.c_str(), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            if (previousFont) SelectObject(dc, previousFont);
+            SetTextColor(dc, previousColor);
+            SetBkMode(dc, previousMode);
+            if (GetFocus() == window && !(SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS))
+                DrawFocusRect(dc, &info.rcItem);
+        }
+        EndPaint(window, &paint);
+        return 0;
+    }
     if (msg == WM_NCDESTROY) {
         RemoveWindowSubclass(window, comboProcedure, 1);
+        if (face && IsWindow(face)) DestroyWindow(face);
     }
-    return DefSubclassProc(window, msg, w, l);
+    const LRESULT result = DefSubclassProc(window, msg, w, l);
+    if (face && (msg == WM_SETFOCUS || msg == WM_KILLFOCUS || msg == WM_ENABLE ||
+                 msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP || msg == CB_SETCURSEL ||
+                 msg == WM_THEMECHANGED || msg == WM_SYSCOLORCHANGE)) {
+        InvalidateRect(window, nullptr, FALSE);
+    }
+    return result;
 }
 template <class T> static void release(T *&object) {
     if (object) {
@@ -39,6 +84,14 @@ template <class T> static void release(T *&object) {
     }
 }
 static D2D1_RECT_F rectangle(Rect r) { return D2D1::RectF(r.x, r.y, r.x + r.w, r.y + r.h); }
+static bool sameRect(Rect a, Rect b) { return a.x == b.x && a.y == b.y && a.w == b.w && a.h == b.h; }
+static std::array<std::wstring, 3> specColumns(const std::wstring &text) {
+    const auto first = text.find(L" ("), second = text.find(L" / ", first);
+    if (first == std::wstring::npos || second == std::wstring::npos || text.empty() || text.back() != L')')
+        return {text, L"", L""};
+    return {text.substr(0, first), text.substr(first + 2, second - first - 2),
+            text.substr(second + 3, text.size() - second - 4)};
+}
 App::~App() {
     // 窗口正常退出和初始化中途失败都由同一所有者回收资源。
     exportJob.cancel = true;
@@ -82,6 +135,9 @@ void App::clearToolInputs(const Tool &tool) {
         else ++it;
     for (auto it = state.choices.begin(); it != state.choices.end();)
         if (it->first.compare(0, prefix.size(), prefix) == 0) it = state.choices.erase(it);
+        else ++it;
+    for (auto it = openDetails.begin(); it != openDetails.end();)
+        if (it->compare(0, prefix.size(), prefix) == 0) it = openDetails.erase(it);
         else ++it;
     clearGaugeCache(tool.id);
     SetFocus(window_);
@@ -139,7 +195,7 @@ int App::run(HINSTANCE instance, int show) {
     HDC dc = GetDC(nullptr);
     dpi_ = float(GetDeviceCaps(dc, LOGPIXELSX));
     ReleaseDC(nullptr, dc);
-    editBrush_ = CreateSolidBrush(RGB(255, 255, 255));
+    editBrush_ = CreateSolidBrush(RGB(250, 252, 255));
     window_ = CreateWindowExW(0, wc.lpszClassName, L"工具箱 · 桌面版", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                               CW_USEDEFAULT, CW_USEDEFAULT, int(1220 * dpi_ / 96), int(820 * dpi_ / 96),
                               nullptr, nullptr, instance, this);
@@ -250,6 +306,8 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         for (auto it = scene.scrollRegions.rbegin(); it != scene.scrollRegions.rend(); ++it) {
             float px = p.x * 96.f / dpi_, py = p.y * 96.f / dpi_;
             if (it->rect.contains(px, py) && it->clip.contains(px, py) && it->scroll(delta)) {
+                rebuild(true);
+                RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
                 return 0;
             }
         }
@@ -258,8 +316,78 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         } else {
             scroll = std::clamp(scroll + delta, 0.f, std::max(0.f, contentHeight_ - (height - 96)));
         }
-        rebuild();
+        rebuild(true);
+        // 滚轮消息连续到达时也要及时重画子控件，否则旧位置的画面会累积成重影。
+        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         return 0;
+    }
+    case WM_MEASUREITEM: {
+        auto item = reinterpret_cast<MEASUREITEMSTRUCT *>(l);
+        if (item->CtlType == ODT_COMBOBOX) {
+            item->itemHeight = UINT(std::ceil(32 * dpi_ / 96));
+            return TRUE;
+        }
+        break;
+    }
+    case WM_DRAWITEM: {
+        auto item = reinterpret_cast<DRAWITEMSTRUCT *>(l);
+        if (item->CtlType != ODT_COMBOBOX) break;
+        const auto key = nativeKeys_.find(item->hwndItem);
+        if (key == nativeKeys_.end() ||
+            (key->second != "gauge_unified.gauge.size.suggestion" &&
+             key->second != "gauge_unified.gauge.tpi.suggestion")) break;
+        const auto native = native_.find(key->second);
+        if (native == native_.end()) break;
+        const bool selected = (item->itemState & ODS_SELECTED) != 0;
+        const bool closed = (item->itemState & ODS_COMBOBOXEDIT) != 0;
+        FillRect(item->hDC, &item->rcItem,
+                 GetSysColorBrush(selected ? COLOR_HIGHLIGHT : closed ? COLOR_BTNFACE : COLOR_WINDOW));
+        const int previousMode = SetBkMode(item->hDC, TRANSPARENT);
+        const COLORREF previousColor = SetTextColor(item->hDC, GetSysColor((item->itemState & ODS_DISABLED) ? COLOR_GRAYTEXT :
+                                                                           selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
+        HGDIOBJ previous = SelectObject(item->hDC, font_ ? font_ : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        if (item->itemID < native->second.options.size() && item->itemID < native->second.optionRows.size()) {
+            const auto &text = native->second.options[item->itemID];
+            const auto &columns = native->second.optionRows[item->itemID];
+            RECT rect = item->rcItem;
+            rect.left += int(std::ceil(6 * dpi_ / 96));
+            if (closed || columns[1].empty()) {
+                DrawTextW(item->hDC, text.c_str(), -1, &rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            } else {
+                const int gap = int(std::ceil(16 * dpi_ / 96));
+                for (std::size_t i = 0; i < columns.size(); ++i) {
+                    RECT cell = rect;
+                    if (i < 2) cell.right = std::min(cell.right, cell.left + native->second.optionColumns[i]);
+                    DrawTextW(item->hDC, columns[i].c_str(), -1, &cell,
+                              DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                    if (i < 2) rect.left += native->second.optionColumns[i] + gap;
+                }
+            }
+        }
+        SelectObject(item->hDC, previous);
+        SetBkMode(item->hDC, previousMode);
+        SetTextColor(item->hDC, previousColor);
+        if (item->itemState & ODS_FOCUS) DrawFocusRect(item->hDC, &item->rcItem);
+        return TRUE;
+    }
+    case WM_LBUTTONDOWN: {
+        const float px = GET_X_LPARAM(l) * 96.f / dpi_, py = GET_Y_LPARAM(l) * 96.f / dpi_;
+        for (auto it = scene.controls.rbegin(); it != scene.controls.rend(); ++it) {
+            if (!it->options.empty() || !it->rect.contains(px, py) || !it->clip.contains(px, py)) continue;
+            auto native = native_.find(it->key);
+            if (native == native_.end() || !IsWindowVisible(native->second.window)) continue;
+            HWND edit = native->second.window;
+            POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+            MapWindowPoints(window_, edit, &point, 1);
+            RECT client{};
+            GetClientRect(edit, &client);
+            point.x = std::clamp(point.x, 0L, std::max(0L, client.right - 1));
+            point.y = std::clamp(point.y, 0L, std::max(0L, client.bottom - 1));
+            SetFocus(edit);
+            SendMessageW(edit, WM_LBUTTONDOWN, w, MAKELPARAM(point.x, point.y));
+            return 0;
+        }
+        break;
     }
     case WM_LBUTTONUP: {
         float px = GET_X_LPARAM(l) * 96.f / dpi_, py = GET_Y_LPARAM(l) * 96.f / dpi_;
@@ -283,6 +411,12 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
             GetCursorPos(&p);
             ScreenToClient(window_, &p);
             float x = p.x * 96.f / dpi_, y = p.y * 96.f / dpi_;
+            for (const auto &control : scene.controls) {
+                if (control.options.empty() && control.rect.contains(x, y) && control.clip.contains(x, y)) {
+                    SetCursor(LoadCursorW(nullptr, IDC_IBEAM));
+                    return TRUE;
+                }
+            }
             bool clickable = false;
             for (auto &hit : scene.hits) {
                 if (hit.rect.contains(x, y) && hit.clip.contains(x, y)) {
@@ -306,9 +440,20 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
                     text.resize(length);
                     state.values[it->second] = text;
                     refresh();
-                } else if (HIWORD(w) == CBN_SELCHANGE) {
-                    state.choices[it->second] = int(SendMessageW(child, CB_GETCURSEL, 0, 0));
-                    refresh();
+                } else {
+                    const bool suggestion = it->second == "gauge_unified.gauge.size.suggestion" ||
+                                            it->second == "gauge_unified.gauge.tpi.suggestion";
+                    const auto notification = HIWORD(w);
+                    if (notification == CBN_SELCHANGE || (suggestion && notification == CBN_SELENDOK)) {
+                        // 浏览展开列表时不触发整页重算，确认选择或收起状态下用键盘选择仍立即生效。
+                        if (suggestion && notification == CBN_SELCHANGE &&
+                            SendMessageW(child, CB_GETDROPPEDSTATE, 0, 0)) return 0;
+                        const int selection = int(SendMessageW(child, CB_GETCURSEL, 0, 0));
+                        if (!suggestion || (selection >= 0 && state.choices[it->second] != selection)) {
+                            state.choices[it->second] = selection;
+                            refresh();
+                        }
+                    }
                 }
                 return 0;
             }
@@ -318,7 +463,7 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
     case WM_CTLCOLORLISTBOX: {
         auto dc = reinterpret_cast<HDC>(w);
         SetTextColor(dc, RGB(35, 48, 67));
-        SetBkColor(dc, RGB(255, 255, 255));
+        SetBkColor(dc, RGB(250, 252, 255));
         return reinterpret_cast<LRESULT>(editBrush_);
     }
     case WM_KEYDOWN:
@@ -355,12 +500,20 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
     }
     return DefWindowProcW(window_, msg, w, l);
 }
-void App::synchronizeControls() {
+void App::synchronizeControls(bool scrolling) {
     synchronizing_ = true;
     if (!font_) {
         font_ = CreateFontW(-int(14 * dpi_ / 96), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
                             OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH,
                             L"Microsoft YaHei");
+    }
+    int editHeight = int(std::ceil(20 * dpi_ / 96));
+    if (HDC dc = GetDC(window_)) {
+        HGDIOBJ previousFont = SelectObject(dc, font_);
+        TEXTMETRICW metrics{};
+        if (GetTextMetricsW(dc, &metrics)) editHeight = metrics.tmHeight + int(std::ceil(2 * dpi_ / 96));
+        SelectObject(dc, previousFont);
+        ReleaseDC(window_, dc);
     }
     for (auto &entry : native_) {
         entry.second.seen = false;
@@ -372,6 +525,9 @@ void App::synchronizeControls() {
         }
         auto &n = native_[c.key];
         bool combo = !c.options.empty();
+        const bool alignedSpecs = c.key == "gauge_unified.gauge.size.suggestion";
+        // 两个相邻按钮使用相同的原生外框与绘制方式，规格列表滚动时始终逐项绘制。
+        const bool ownerDraw = alignedSpecs || c.key == "gauge_unified.gauge.tpi.suggestion";
         if (n.window && n.combo != combo) {
             nativeKeys_.erase(n.window);
             DestroyWindow(n.window);
@@ -383,29 +539,33 @@ void App::synchronizeControls() {
             n.key = c.key;
             n.window = CreateWindowExW(0, combo ? L"COMBOBOX" : L"EDIT", L"",
                                        WS_CHILD | WS_TABSTOP |
-                                           (combo ? CBS_DROPDOWNLIST | WS_VSCROLL : ES_AUTOHSCROLL),
+                                           (combo ? CBS_DROPDOWNLIST | WS_VSCROLL |
+                                                        (ownerDraw ? CBS_OWNERDRAWFIXED | CBS_HASSTRINGS : 0)
+                                                  : ES_AUTOHSCROLL),
                                        0, 0, 0, 0, window_, nullptr, GetModuleHandleW(nullptr), nullptr);
             require(n.window != nullptr, "无法创建输入控件");
             nativeKeys_[n.window] = c.key;
-            SetWindowSubclass(n.window, combo ? comboProcedure : editProcedure, 1, 0);
+            HWND face = ownerDraw ? CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
+                                                     0, 0, 0, 0, window_, nullptr, GetModuleHandleW(nullptr), nullptr)
+                                  : nullptr;
+            SetWindowSubclass(n.window, combo ? comboProcedure : editProcedure, 1, reinterpret_cast<DWORD_PTR>(face));
         }
         n.seen = true;
+        const bool changed = combo && (created || n.options != c.options);
+        if (ownerDraw && !changed && n.layoutValid && n.optionDpi == dpi_ &&
+            sameRect(n.layoutRect, c.rect) && sameRect(n.layoutClip, c.clip) &&
+            SendMessageW(n.window, CB_GETDROPPEDSTATE, 0, 0)) {
+            continue;
+        }
         SendMessageW(n.window, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
         if (combo) {
-            int count = int(SendMessageW(n.window, CB_GETCOUNT, 0, 0));
-            bool changed = count != int(c.options.size());
-            if (!changed) {
-                for (int i = 0; i < count; ++i) {
-                    std::wstring text(std::size_t(SendMessageW(n.window, CB_GETLBTEXTLEN, i, 0)) + 1, L'\0');
-                    SendMessageW(n.window, CB_GETLBTEXT, i, reinterpret_cast<LPARAM>(text.data()));
-                    text.resize(text.size() - 1);
-                    if (text != c.options[std::size_t(i)]) {
-                        changed = true;
-                        break;
-                    }
-                }
-            }
             if (changed) {
+                n.options = c.options;
+                n.optionRows.clear();
+                if (ownerDraw) {
+                    n.optionRows.reserve(n.options.size());
+                    for (const auto &option : n.options) n.optionRows.push_back(specColumns(option));
+                }
                 SendMessageW(n.window, CB_RESETCONTENT, 0, 0);
                 for (auto &o : c.options) {
                     SendMessageW(n.window, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(o.c_str()));
@@ -415,23 +575,42 @@ void App::synchronizeControls() {
             // 仅在选项或 DPI 改变时重新测宽，滚动页面时复用缓存。
             if (changed || n.optionDpi != dpi_) {
                 n.optionTextWidth = 0;
+                n.optionColumns = {};
                 HDC dc = GetDC(n.window);
                 if (dc) {
                     HGDIOBJ previousFont = SelectObject(dc, font_);
-                    for (const auto &option : c.options) {
+                    for (std::size_t index = 0; index < n.options.size(); ++index) {
+                        const auto &option = n.options[index];
                         SIZE extent{};
                         if (GetTextExtentPoint32W(dc, option.c_str(), int(option.size()), &extent)) {
                             n.optionTextWidth = std::max(n.optionTextWidth, int(extent.cx));
+                        }
+                        if (alignedSpecs) {
+                            const auto &columns = n.optionRows[index];
+                            for (std::size_t i = 0; i < columns.size(); ++i) {
+                                if (GetTextExtentPoint32W(dc, columns[i].c_str(), int(columns[i].size()), &extent))
+                                    n.optionColumns[i] = std::max(n.optionColumns[i], int(extent.cx));
+                            }
                         }
                     }
                     SelectObject(dc, previousFont);
                     ReleaseDC(n.window, dc);
                 } else {
-                    for (const auto &option : c.options) {
+                    for (std::size_t index = 0; index < n.options.size(); ++index) {
+                        const auto &option = n.options[index];
                         n.optionTextWidth =
                             std::max(n.optionTextWidth, int(std::ceil(textWidth(option, 14) * dpi_ / 96)));
+                        if (alignedSpecs) {
+                            const auto &columns = n.optionRows[index];
+                            for (std::size_t i = 0; i < columns.size(); ++i)
+                                n.optionColumns[i] = std::max(n.optionColumns[i],
+                                    int(std::ceil(textWidth(columns[i], 14) * dpi_ / 96)));
+                        }
                     }
                 }
+                if (alignedSpecs)
+                    n.optionTextWidth = std::max(n.optionTextWidth, n.optionColumns[0] + n.optionColumns[1] +
+                        n.optionColumns[2] + int(std::ceil(32 * dpi_ / 96)));
                 n.optionDpi = dpi_;
             }
             const float comboScale = dpi_ / 96;
@@ -447,7 +626,17 @@ void App::synchronizeControls() {
             SendMessageW(n.window, CB_SETDROPPEDWIDTH, WPARAM(std::min(popupWidth, screenLimit)), 0);
             SendMessageW(n.window, CB_SETITEMHEIGHT, 0, LPARAM(std::ceil(32 * comboScale)));
             SendMessageW(n.window, CB_SETCURSEL, c.selection, 0);
-            SendMessageW(n.window, CB_SETITEMHEIGHT, WPARAM(-1), LPARAM(28 * dpi_ / 96));
+            LPARAM selectionHeight = LPARAM(28 * dpi_ / 96);
+            DWORD_PTR faceData = 0;
+            if (ownerDraw && GetWindowSubclass(n.window, comboProcedure, 1, &faceData) && faceData) {
+                HWND face = reinterpret_cast<HWND>(faceData);
+                SendMessageW(face, WM_SETFONT, reinterpret_cast<WPARAM>(font_), FALSE);
+                SetWindowPos(face, nullptr, 0, 0, int(c.rect.w * comboScale), int(380 * comboScale),
+                             SWP_NOZORDER | SWP_NOACTIVATE);
+                const LRESULT height = SendMessageW(face, CB_GETITEMHEIGHT, WPARAM(-1), 0);
+                if (height != CB_ERR) selectionHeight = height;
+            }
+            SendMessageW(n.window, CB_SETITEMHEIGHT, WPARAM(-1), selectionHeight);
         } else if (GetFocus() != n.window) {
             int length = GetWindowTextLengthW(n.window);
             std::wstring current(std::size_t(length) + 1, L'\0');
@@ -457,15 +646,15 @@ void App::synchronizeControls() {
                 SetWindowTextW(n.window, c.value.c_str());
             }
             SendMessageW(n.window, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN, MAKELPARAM(8, 8));
-            if (c.key == "home.search" || c.key == "navigation.search") {
-                SendMessageW(n.window, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"搜索名称或功能"));
-            }
         }
         float scale = dpi_ / 96;
-        const float insetY = c.key == "metrology_pdf_download.url" ? 11.f : 2.f;
-        int px = int(c.rect.x * scale) + 1, py = int((c.rect.y + insetY) * scale), pw = int(c.rect.w * scale) - 2,
-            ph = int((combo ? 380 : c.rect.h - 2 * insetY) * scale);
-        SetWindowPos(n.window, HWND_TOP, px, py, pw, ph, SWP_NOACTIVATE | SWP_SHOWWINDOW);
+        const int boxHeight = int(std::round(c.rect.h * scale));
+        const int ph = combo ? int(380 * scale) : std::min(std::max(1, boxHeight - 4), editHeight);
+        int px = int(c.rect.x * scale) + 1,
+            py = int(std::round(c.rect.y * scale)) + (combo ? int(2 * scale) : (boxHeight - ph) / 2),
+            pw = int(c.rect.w * scale) - 2;
+        SetWindowPos(n.window, HWND_TOP, px, py, pw, ph,
+                     SWP_NOACTIVATE | SWP_SHOWWINDOW | (scrolling ? SWP_NOCOPYBITS : 0));
         // 裁去离开视口的部分；编辑框不截获滚轮，主窗口负责纵向滚动。
         int clipTop = std::max(0, int(top * scale) - py), clipBottom = std::min(ph, int(bottom * scale) - py);
         if (combo && top <= c.rect.y && bottom >= c.rect.y + c.rect.h) {
@@ -473,6 +662,9 @@ void App::synchronizeControls() {
         } else {
             SetWindowRgn(n.window, CreateRectRgn(0, clipTop, pw, std::max(clipTop, clipBottom)), TRUE);
         }
+        n.layoutRect = c.rect;
+        n.layoutClip = c.clip;
+        n.layoutValid = true;
     }
     for (auto &entry : native_) {
         if (!entry.second.seen) {
@@ -481,7 +673,7 @@ void App::synchronizeControls() {
     }
     synchronizing_ = false;
 }
-void App::rebuild() {
+void App::rebuild(bool scrolling) {
     if (!window_ || width < 10 || height < 10) {
         return;
     }
@@ -537,11 +729,11 @@ void App::rebuild() {
             renderPage(page);
             page.check();
         } catch (const std::exception &e) {
-            page.note(page.inputError.empty() ? wide(e.what()) : page.inputError, Red);
+            page.error(page.inputError.empty() ? wide(e.what()) : page.inputError);
         }
         page.y += 14;
         page.explain();
-        contentHeight_ = page.y + scroll - top + 24;
+        contentHeight_ = page.y + scroll - top + 52;
         inputHistory_.observe(tool, state);
     }
     if (contentHeight_ > height - top) {
@@ -552,7 +744,7 @@ void App::rebuild() {
                    Border, 2);
     }
     renderPdfModal();
-    synchronizeControls();
+    synchronizeControls(scrolling);
     InvalidateRect(window_, nullptr, FALSE);
 }
 void App::paint() {

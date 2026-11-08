@@ -117,7 +117,7 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
             }
         }
         std::vector<std::wstring> labels;
-        if (distance < 12) {
+        if (residual && distance < 12) {
             labels = {L"第 " + std::to_wstring(closest + 1) + L" 组",
                       L"x = " + format(points[closest].first), L"y = " + format(points[closest].second),
                       L"拟合 y = " + format(fit.fitted[closest]), L"残差 = " + format(fit.residuals[closest])};
@@ -128,13 +128,26 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
             auto position = at({x, y});
             p.ui.line(float(position.x), plot.y, float(position.x), plot.y + plot.h, Muted);
             p.ui.fill({float(position.x) - 4, float(position.y) - 4, 8, 8}, Blue, 4);
-            labels = {L"x = " + format(x), L"拟合 y = " + format(y)};
+            labels = {xLabel + L" = " + format(x), yLabel + L" = " + format(y)};
+            if (distance < 12) {
+                labels.push_back(L"校准点 " + std::to_wstring(closest + 1) + L"：x = " + format(points[closest].first));
+                labels.push_back(L"实测 y = " + format(points[closest].second) + L"，残差 = " + format(fit.residuals[closest]));
+            }
         }
         if (!labels.empty()) {
-            float width = std::min(300.f, plot.w - 16);
-            p.ui.fill({plot.x + 8, plot.y + 8, width, float(labels.size()) * 22 + 12}, Soft, 5);
+            float width = std::max(1.f, std::min(340.f, plot.w - 16));
+            std::vector<float> heights;
+            float height = 12;
+            for (const auto &label : labels) {
+                heights.push_back(std::max(22.f, p.app.paragraphHeight(label, std::max(1.f, width - 16), 12)));
+                height += heights.back();
+            }
+            p.ui.fill({plot.x + 8, plot.y + 8, width, height}, White, 6);
+            p.ui.border({plot.x + 8, plot.y + 8, width, height}, Border, 6);
+            float lineY = plot.y + 14;
             for (std::size_t index = 0; index < labels.size(); ++index) {
-                p.ui.text({plot.x + 16, plot.y + 12 + float(index) * 22, width - 16, 22}, labels[index], 12, Blue);
+                p.ui.text({plot.x + 16, lineY, width - 16, heights[index]}, labels[index], 12, Ink, false, false, true);
+                lineY += heights[index];
             }
         }
     }

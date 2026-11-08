@@ -101,6 +101,38 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
     Ok(o)
 }
 
+/// 悬停读数使用与绘图相同的模型，不把采样点或屏幕坐标当作精确结果。
+pub(crate) fn curve_value(id: &str, i: &Input, x: f64) -> Result<f64, String> {
+    if !x.is_finite() {
+        return Err("横坐标必须是有限数值".into());
+    }
+    match id {
+        "calibration_curve_fit" => {
+            let points = i.points(FIT_POINTS, 2, 200)?;
+            let kind = FitKind::from_index(i.index("model", 0, 4)?);
+            CurveFit::calculate(&points, kind)?.predict(x)
+        }
+        "bspline_interpolation" => spline_model(i)?.1.y_at_x(x),
+        _ => Err("此工具不支持曲线悬停取值".into()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn curve_hover_uses_the_same_fit_and_spline_models() {
+        let input = Input::new("{}").unwrap();
+        let fit = CurveFit::calculate(FIT_POINTS, FitKind::Linear).unwrap();
+        assert!((curve_value("calibration_curve_fit", &input, 12.345).unwrap() - fit.predict(12.345).unwrap()).abs() < 1e-12);
+        let (_, spline, _, _, _, _) = spline_model(&input).unwrap();
+        assert!((curve_value("bspline_interpolation", &input, 1234.5).unwrap() - spline.y_at_x(1234.5).unwrap()).abs() < 1e-9);
+        assert!(curve_value("other", &input, 1.0).is_err());
+        assert!(curve_value("calibration_curve_fit", &input, f64::NAN).is_err());
+    }
+}
+
 fn spline_model(
     i: &Input,
 ) -> Result<(Vec<Point>, UniformCubicSpline, f64, f64, f64, usize), String> {

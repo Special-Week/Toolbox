@@ -121,10 +121,10 @@ impl Form {
                 let options = imperial::un_sizes()
                     .into_iter()
                     .map(|s| {
-                        let d = imperial::un_diameter(&s).unwrap_or(f64::NAN);
-                        json!({"value":s,"label":format!("{s}（{} inch / {} mm）",
-                            crate::calculators::format::format_number(d),
-                            crate::calculators::format::format_number(d*25.4))})
+                        let columns = imperial::un_option_columns(&s)
+                            .unwrap_or_else(|_| [s.clone(), String::new(), String::new()]);
+                        let label = format!("{} ({} / {})", columns[0], columns[1], columns[2]);
+                        json!({"value":s,"label":label,"columns":columns})
                     })
                     .collect();
                 let size = self.text("size", "公称直径 (inch，可填 1/2、1 1/4)", "1/4", options);

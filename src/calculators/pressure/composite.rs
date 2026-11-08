@@ -23,7 +23,7 @@ impl ToolboxApp {
             );
             let mut errors = Vec::new();
             for i in 0..n {
-                ui.group(|ui| {
+                panel(ui, |ui| {
                     ui.label(format!("分量 {}", i + 1));
                     let key = format!("pressure_error.{i}");
                     let source =

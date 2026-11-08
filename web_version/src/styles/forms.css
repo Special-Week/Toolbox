@@ -34,7 +34,7 @@
 .panel {
   background: white;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 24px;
   margin-bottom: 20px;
   min-width: 0;
@@ -54,7 +54,7 @@
 }
 .tool-workspace {
   display: grid;
-  grid-template-columns: minmax(0, 1.14fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
@@ -84,8 +84,8 @@ select,
 textarea {
   min-width: 0;
   width: 100%;
-  border: 1px solid #dce5f1;
-  background: white;
+  border: 1px solid #96a8c0;
+  background: #fafcff;
   border-radius: 6px;
   padding: 0 12px;
   height: 42px;
@@ -101,7 +101,7 @@ textarea:hover {
 input:focus,
 select:focus,
 textarea:focus {
-  border-color: #6e9eea;
+  border-color: var(--blue);
 }
 input:disabled {
   background: #f3f6fa;
@@ -109,6 +109,7 @@ input:disabled {
 }
 input {
   cursor: text;
+  line-height: normal;
 }
 input::placeholder,
 textarea::placeholder {

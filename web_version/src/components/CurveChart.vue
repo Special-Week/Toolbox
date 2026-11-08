@@ -9,6 +9,7 @@ const p = withDefaults(
     xLabel?: string;
     yLabel?: string;
     scatter?: boolean;
+    evaluate?: (x: number) => Promise<number>;
   }>(),
   { points: () => [], xLabel: "x", yLabel: "y", scatter: false },
 );
@@ -18,10 +19,18 @@ const height = 300;
 const hover = ref<[number, number] | null>(null);
 const pinned = ref(false);
 let touchStart: { x: number; y: number } | null = null;
+let hoverRevision = 0;
+let pending = false;
+let queued: { x: number; revision: number } | null = null;
+function clearHover() {
+  ++hoverRevision;
+  queued = null;
+  hover.value = null;
+}
 watch(
   () => [p.curve, p.points],
   () => {
-    hover.value = null;
+    clearHover();
     pinned.value = false;
   },
 );
@@ -32,7 +41,7 @@ onMounted(() => {
   );
   if (host.value) observer.observe(host.value);
 });
-onUnmounted(() => observer?.disconnect());
+onUnmounted(() => { clearHover(); observer?.disconnect(); });
 function axis(values: number[], target = 4) {
   if (!values.length)
     return {
@@ -158,12 +167,37 @@ function move(event: PointerEvent) {
   if (event.pointerType === "touch" || pinned.value) return;
   inspect(event);
 }
+async function evaluateLatest() {
+  if (pending) return;
+  pending = true;
+  try {
+    while (queued) {
+      const request = queued;
+      queued = null;
+      try {
+        const value = await p.evaluate!(request.x);
+        if (request.revision === hoverRevision && Number.isFinite(value))
+          hover.value = [request.x, value];
+      } catch {
+        if (request.revision === hoverRevision) hover.value = null;
+      }
+    }
+  } finally { pending = false; }
+}
 function inspect(event: PointerEvent) {
   const rect = (event.currentTarget as SVGElement).getBoundingClientRect();
   const x = ((event.clientX - rect.left) * width.value) / rect.width;
   const y = ((event.clientY - rect.top) * height) / rect.height;
-  if (x < plot.value.x || x > plot.value.x + plot.value.w) {
-    hover.value = null;
+  if (x < plot.value.x || x > plot.value.x + plot.value.w || y < plot.value.y || y > plot.value.y + plot.value.h) {
+    clearHover();
+    return;
+  }
+  if (!p.scatter && p.evaluate && p.curve.length) {
+    const fraction = (x - plot.value.x) / plot.value.w;
+    const value = xa.value.base + xa.value.factor * ((1 - fraction) * xa.value.min + fraction * xa.value.max);
+    if (value < p.curve[0][0] || value > p.curve[p.curve.length - 1][0]) { clearHover(); return; }
+    queued = { x: value, revision: ++hoverRevision };
+    void evaluateLatest();
     return;
   }
   const candidates = p.scatter ? p.points : p.curve;
@@ -202,7 +236,7 @@ function release(event: PointerEvent) {
       @pointerdown="press"
       @pointerup="release"
       @pointercancel="touchStart = null"
-      @pointerleave="!pinned && (hover = null)"
+      @pointerleave="!pinned && clearHover()"
     >
       <defs>
         <clipPath :id="clipId">
@@ -290,8 +324,8 @@ function release(event: PointerEvent) {
       </g>
     </svg>
     <div v-if="hover" class="chart-readout" aria-live="polite">
-      <span>x = {{ display(hover[0]) }}</span
-      ><span>y = {{ display(hover[1]) }}</span>
+      <span>{{ xLabel }} = {{ display(hover[0]) }}</span
+      ><span>{{ yLabel }} = {{ display(hover[1]) }}</span>
       <button
         v-if="pinned"
         type="button"
@@ -299,7 +333,7 @@ function release(event: PointerEvent) {
         aria-label="关闭图表读数"
         @click="
           pinned = false;
-          hover = null;
+          clearHover();
         "
       >
         关闭

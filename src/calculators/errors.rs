@@ -9,8 +9,8 @@ use eframe::egui::{self, RichText};
 
 impl ToolboxApp {
     pub(crate) fn render_repeatability(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             let defaults = ["10.02", "10.01", "10.03", "10.02", "10.01"];
             let count = self.dynamic_count(ui, tool, "samples", "测量值", 5, 2, 50);
             let values =
@@ -50,8 +50,8 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_range_method(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             let defaults = ["10.02", "10.01", "10.03", "10.02", "10.01"];
             let input_method = self.select_index(
                 ui,
@@ -136,8 +136,8 @@ impl ToolboxApp {
             self.render_pressure_composite(ui, tool);
             return;
         }
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             let count = self.dynamic_count(ui, tool, "components", "误差分量", 3, 1, 50);
             let errors = self.dynamic_values(
                 ui,
@@ -189,8 +189,8 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_error_analysis(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(RichText::new("误差参数").size(14.0).strong().color(INK));
             ui.add_space(5.0);
             self.input(ui, tool, "measured", "测量值 x", "100.02", "测量结果");
@@ -241,8 +241,8 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_simple_uncertainty(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(RichText::new("A 类评定数据").size(14.0).strong().color(INK));
             ui.add_space(4.0);
             let a_count = self.dynamic_count(ui, tool, "a_samples", "重复测量值", 5, 0, 50);

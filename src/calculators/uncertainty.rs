@@ -186,7 +186,7 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_uncertainty(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.set_max_width(820.0);
+        ui.set_max_width(ui.available_width().min(820.0));
         if self.select_index(
             ui,
             tool,
@@ -204,9 +204,7 @@ impl ToolboxApp {
             let mut details = Vec::new();
             for i in 0..count {
                 let key = format!("budget.component.{i}");
-                let data = ui
-                    .group(|ui| self.uncertainty_component(ui, tool, &key, 0))
-                    .inner?;
+                let data = panel(ui, |ui| self.uncertainty_component(ui, tool, &key, 0)).inner?;
                 details.push(data.calculate()?);
                 ui.add_space(8.0);
             }

@@ -1,12 +1,19 @@
 //! 自适应参数区、可折叠取值详情和横向结果表。表格不设内部纵向滚动，避免阻断整页滚轮。
 use super::{imperial, lookup::*, pipe, report::*, smooth, specs, thread, unified};
 use crate::{
-    BLUE, BLUE_SOFT, INK, MUTED,
+    BLUE, INK, MUTED,
     app::ToolboxApp,
     calculators::common::*,
     catalog::{GaugeKind, ToolDef, ToolKind},
 };
 use eframe::egui::{self, RichText, ScrollArea, TextEdit, Vec2};
+
+fn menu_text_width(ui: &egui::Ui, text: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(text.to_owned(), egui::FontId::proportional(14.), INK)
+        .size()
+        .x
+}
 
 /// 展开列表按实际文字测宽，独立于收起按钮；窄屏时允许换行，不挤压规格备注。
 fn size_gauge_menu(ui: &mut egui::Ui, captions: &[String]) {
@@ -30,7 +37,7 @@ fn size_gauge_menu(ui: &mut egui::Ui, captions: &[String]) {
 impl ToolboxApp {
     pub(crate) fn render_gauge(&mut self, ui: &mut egui::Ui, tool: &ToolDef, kind: GaugeKind) {
         egui::Frame::new()
-            .inner_margin(egui::Margin::symmetric(20, 6))
+            .inner_margin(egui::Margin::symmetric(0, 6))
             .show(ui, |ui| {
                 let response = egui::Frame::new()
                     .fill(egui::Color32::WHITE)
@@ -87,6 +94,7 @@ impl ToolboxApp {
                     [width, 36.],
                     TextEdit::singleline(&mut value)
                         .id(egui::Id::new((tool.id, key, "input")))
+                        .vertical_align(egui::Align::Center)
                         .margin(egui::Margin::symmetric(10, 8))
                         .background_color(egui::Color32::WHITE)
                         .frame(true),
@@ -112,35 +120,56 @@ impl ToolboxApp {
                         .height(320.)
                         .selected_text("常用规格")
                         .show_ui(ui, |ui| {
-                            let captions: Vec<_> = choices
-                                .iter()
-                                .map(|item| {
-                                    // UN 的编号和分数规格附实际直径，选择时只写入原规格，保持解析与系列联动。
-                                    let caption = if key == "size"
-                                        && matches!(tool.kind, ToolKind::Gauge(GaugeKind::Unified))
-                                    {
-                                        imperial::un_diameter(item)
-                                            .map(|inch| {
-                                                format!(
-                                                    "{item}（{} inch / {} mm）",
-                                                    format_number(inch),
-                                                    format_number(inch * imperial::INCH),
-                                                )
-                                            })
-                                            .unwrap_or_else(|_| item.clone())
-                                    } else {
-                                        item.clone()
-                                    };
-                                    caption
-                                })
-                                .collect();
-                            size_gauge_menu(ui, &captions);
-                            for (item, caption) in choices.iter().zip(captions) {
-                                ui.selectable_value(
-                                    &mut value,
-                                    item.clone(),
-                                    RichText::new(caption).size(14.),
+                            let unified = key == "size"
+                                && matches!(tool.kind, ToolKind::Gauge(GaugeKind::Unified));
+                            size_gauge_menu(ui, choices);
+                            if unified {
+                                let columns: Vec<_> = choices
+                                    .iter()
+                                    .map(|item| {
+                                        imperial::un_option_columns(item).unwrap_or_else(|_| {
+                                            [item.clone(), String::new(), String::new()]
+                                        })
+                                    })
+                                    .collect();
+                                let widths: [f32; 3] = std::array::from_fn(|i| {
+                                    columns
+                                        .iter()
+                                        .map(|row| menu_text_width(ui, &row[i]))
+                                        .fold(0.0, f32::max)
+                                });
+                                let available = (ui.ctx().screen_rect().width() - 32.).max(120.);
+                                ui.set_width(
+                                    (widths.iter().sum::<f32>() + 76.).max(180.).min(available),
                                 );
+                                for (item, row) in choices.iter().zip(&columns) {
+                                    let mut job = egui::text::LayoutJob::default();
+                                    let format = egui::TextFormat {
+                                        font_id: egui::FontId::proportional(14.),
+                                        color: ui.visuals().text_color(),
+                                        ..Default::default()
+                                    };
+                                    job.append(&row[0], 0., format.clone());
+                                    job.append(
+                                        &row[1],
+                                        widths[0] - menu_text_width(ui, &row[0]) + 16.,
+                                        format.clone(),
+                                    );
+                                    job.append(
+                                        &row[2],
+                                        widths[1] - menu_text_width(ui, &row[1]) + 16.,
+                                        format,
+                                    );
+                                    ui.selectable_value(&mut value, item.clone(), job);
+                                }
+                            } else {
+                                for item in choices {
+                                    ui.selectable_value(
+                                        &mut value,
+                                        item.clone(),
+                                        RichText::new(item).size(14.),
+                                    );
+                                }
                             }
                         });
                 }
@@ -166,12 +195,12 @@ impl ToolboxApp {
         } else {
             options.first().cloned().unwrap_or_default()
         };
-        let narrow = ui.available_width() < 560.;
         let draw_combo = |ui: &mut egui::Ui, value: &mut String| {
             ui.scope(|ui| {
-                ui.spacing_mut().interact_size.y = 32.;
+                ui.spacing_mut().interact_size.y = 36.;
                 egui::ComboBox::from_id_salt((tool.id, key))
-                    .width(ui.available_width().min(270.))
+                    .width(ui.available_width())
+                    .wrap_mode(egui::TextWrapMode::Truncate)
                     .height(320.)
                     .selected_text(if value.is_empty() {
                         "当前参数无可用选项"
@@ -187,18 +216,8 @@ impl ToolboxApp {
             });
         };
         ui.push_id((tool.id, key, "choice_row"), |ui| {
-            if narrow {
-                ui.label(RichText::new(label).size(12.).color(MUTED));
-                draw_combo(ui, &mut value);
-            } else {
-                ui.horizontal(|ui| {
-                    ui.add_sized(
-                        [180., 34.],
-                        egui::Label::new(RichText::new(label).color(MUTED)),
-                    );
-                    draw_combo(ui, &mut value);
-                });
-            }
+            ui.label(RichText::new(label).size(12.).color(MUTED));
+            draw_combo(ui, &mut value);
         });
         // 输入清空、负号等编辑中间态没有可选公差带时，不抹掉此前选择。
         if !options.is_empty() {
@@ -524,14 +543,17 @@ fn render_report(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
             ));
         }
     });
-    for note in &report.notes {
-        egui::Frame::new()
-            .fill(BLUE_SOFT)
-            .corner_radius(5.)
-            .inner_margin(10.)
-            .show(ui, |ui| {
-                ui.add(egui::Label::new(RichText::new(note).size(12.).color(INK)).wrap());
-            });
+    if !report.notes.is_empty() {
+        collapsible_note(
+            ui,
+            (tool.id, "result_notes"),
+            &format!("⚠ 取值说明与适用限制 · {} 项", report.notes.len()),
+            |ui| {
+                for note in &report.notes {
+                    ui.add(egui::Label::new(RichText::new(note).size(12.).color(INK)).wrap());
+                }
+            },
+        );
         ui.add_space(3.);
     }
     let summary: Vec<_> = report
@@ -642,5 +664,76 @@ fn render_report(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
                         }
                     });
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn result_notes_are_collapsed_but_remain_visibly_flagged() {
+        let ctx = egui::Context::default();
+        crate::fonts::configure_fonts(&ctx);
+        crate::configure_style(&ctx);
+        let tool = crate::catalog::TOOLS
+            .iter()
+            .find(|tool| tool.id == "gauge_metric")
+            .unwrap();
+        let mut report = Report::new("测试量规");
+        report.note("采用最近标准螺距，仅作参考。");
+        let render = |events, time| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        [800.0, 800.0].into(),
+                    )),
+                    events,
+                    time: Some(time),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| render_report(ui, tool, &report));
+                },
+            )
+        };
+        let output = render(vec![], 0.0);
+        let header = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text() == "⚠ 取值说明与适用限制 · 1 项" => {
+                    Some(text.pos + egui::vec2(4.0, 4.0))
+                }
+                _ => None,
+            })
+            .expect("结果说明标题应提示取值限制");
+        assert!(!output.shapes.iter().any(|shape| matches!(&shape.shape,
+            egui::Shape::Text(text) if text.galley.text() == "采用最近标准螺距，仅作参考。"
+        )));
+        for (pressed, time) in [(true, 0.1), (false, 0.2)] {
+            render(
+                vec![
+                    egui::Event::PointerMoved(header),
+                    egui::Event::PointerButton {
+                        pos: header,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+                time,
+            );
+        }
+        assert!(
+            render(vec![], 0.5)
+                .shapes
+                .iter()
+                .any(|shape| matches!(&shape.shape,
+                    egui::Shape::Text(text) if text.galley.text() == "采用最近标准螺距，仅作参考。"
+                )),
+            "展开后应显示完整的取值限制"
+        );
     }
 }

@@ -197,7 +197,7 @@ void resultRows(Page &p, const CurveFit &fit, const DataPoints &points) {
             heights.push_back(rowHeight);
             height += rowHeight + 4;
         }
-        p.ui.fill({p.x, p.y, p.w, height}, index % 2 == 0 ? Soft : White, 4);
+        p.ui.fill({p.x, p.y, p.w, height}, index % 2 == 0 ? TableStripe : White, 4);
         float rowY = p.y + 8;
         for (std::size_t row = 0; row < heights.size(); ++row) {
             for (int column = 0; column < columns; ++column) {

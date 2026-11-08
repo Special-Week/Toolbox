@@ -62,6 +62,18 @@ pub(super) fn un_diameter(size: &str) -> Result<f64, String> {
         .map(|r| Ok(n(r, "diameter_in")))
         .unwrap_or_else(|| fraction(size))
 }
+
+/// 规格与两种单位分别提供给界面布局，选择时仍使用原规格值。
+pub(super) fn un_option_columns(size: &str) -> Result<[String; 3], String> {
+    let inch = un_diameter(size)?;
+    let inch_text = crate::calculators::format::format_number(inch);
+    let mm_text = crate::calculators::format::format_number(inch * INCH);
+    Ok([
+        size.to_owned(),
+        format!("{inch_text} inch"),
+        format!("{mm_text} mm"),
+    ])
+}
 pub(super) fn un_sizes() -> Vec<String> {
     let mut list = Vec::new();
     for row in rows(&un_data::data()["series"]) {
@@ -140,4 +152,31 @@ pub(super) fn band(table: &Value, d_in: f64, tpi: f64) -> Option<&Value> {
             && d_in > first(r, &["公称直径>", "公称直径＞"])
             && d_in <= n(r, "公称直径≤")
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn all_unified_suggestions_preserve_values_and_units() {
+        let sizes = un_sizes();
+        assert!(!sizes.is_empty());
+        for size in sizes {
+            let [spec, inch_text, mm_text] = un_option_columns(&size).unwrap();
+            assert_eq!(spec, size);
+            let inch = un_diameter(&size).unwrap();
+            assert_eq!(
+                inch_text,
+                format!("{} inch", crate::calculators::format::format_number(inch))
+            );
+            assert_eq!(
+                mm_text,
+                format!(
+                    "{} mm",
+                    crate::calculators::format::format_number(inch * INCH)
+                )
+            );
+        }
+    }
 }

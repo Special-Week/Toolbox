@@ -1,5 +1,67 @@
 //! 曲线坐标轴：选择整齐步长，并通过基准偏移和数量级缩放控制标签宽度。
 use super::common::format_number;
+use crate::{BLUE, INK};
+use eframe::egui::{self, Color32, FontId, Painter, Pos2, Rect, Stroke};
+
+pub(crate) fn draw_curve_cursor(
+    painter: &Painter,
+    plot: Rect,
+    point: Pos2,
+    labels: (&str, &str),
+    value: (f64, f64),
+    details: Option<&str>,
+) {
+    let painter = painter.with_clip_rect(plot);
+    painter.line_segment(
+        [
+            egui::pos2(point.x, plot.top()),
+            egui::pos2(point.x, plot.bottom()),
+        ],
+        Stroke::new(1.0_f32, Color32::from_rgb(185, 200, 221)),
+    );
+    painter.circle_filled(point, 4.0, BLUE);
+
+    let mut text = format!(
+        "{} = {}\n{} = {}",
+        labels.0,
+        format_number(value.0),
+        labels.1,
+        format_number(value.1)
+    );
+    if let Some(details) = details {
+        text.push_str(details);
+    }
+    let galley = painter.layout(
+        text,
+        FontId::proportional(12.0),
+        INK,
+        (plot.width() - 24.0).max(1.0),
+    );
+    let size = galley.size() + egui::vec2(20.0, 14.0);
+    let x = if point.x + 12.0 + size.x <= plot.right() {
+        point.x + 12.0
+    } else {
+        point.x - 12.0 - size.x
+    };
+    let y = if point.y - 12.0 - size.y >= plot.top() {
+        point.y - 12.0 - size.y
+    } else {
+        point.y + 12.0
+    };
+    let origin = egui::pos2(
+        x.clamp(plot.left(), (plot.right() - size.x).max(plot.left())),
+        y.clamp(plot.top(), (plot.bottom() - size.y).max(plot.top())),
+    );
+    let label = Rect::from_min_size(origin, size);
+    painter.rect_filled(label, 6, Color32::WHITE);
+    painter.rect_stroke(
+        label,
+        6,
+        Stroke::new(1.0_f32, Color32::from_rgb(202, 214, 230)),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(origin + egui::vec2(10.0, 7.0), galley, INK);
+}
 
 pub(crate) struct Tick {
     pub(crate) value: f64,

@@ -209,7 +209,7 @@ void renderPdfDownload(Page &p) {
         button(p.ui, {p.x, p.y, 112, 40}, L"保存 PDF…", [owner = &p.app] { owner->savePdf(); }, false);
         p.y += 52;
     }
-    if (!error.empty()) p.note(error, Red);
+    if (!error.empty()) p.error(error);
     if (!message.empty()) p.note(message);
     const std::vector<std::wstring> lines{
         L"1. 按名称或编号搜索内置目录，选择规范后使用对应详情页链接获取 PDF。",
@@ -220,17 +220,7 @@ void renderPdfDownload(Page &p) {
         L"4. 检查 PDF 格式、已知错误提示文件及实际页数，再按所选位置保存网站返回的原始 PDF。",
         L"以上为网站在线预览使用的接口，网站调整或限流时可能无法获取。仅支持本站 HTTPS 详情页，单个 PDF 上限 100 MB；请按网站的电子文本使用说明使用文件。"
     };
-    float height = 2 * pad + 30;
-    for (const auto &line : lines) height += p.app.paragraphHeight(line, w - 2 * pad, 13) + 8;
-    p.ui.fill({x, p.y, w, height}, Soft, 8);
-    p.ui.text({x + pad, p.y + pad, w - 2 * pad, 24}, L"获取流程与接口说明", 14, Blue, true);
-    p.y += pad + 30;
-    for (const auto &line : lines) {
-        const float h = p.app.paragraphHeight(line, w - 2 * pad, 13);
-        p.ui.text({x + pad, p.y, w - 2 * pad, h}, line, 13, Ink, false, false, true);
-        p.y += h + 8;
-    }
-    p.y += pad;
+    p.details("pdf.acquisition", L"获取流程与接口说明", lines);
 }
 
 void App::renderPdfModal() {

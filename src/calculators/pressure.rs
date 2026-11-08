@@ -21,8 +21,8 @@ impl ToolboxApp {
         ui: &mut egui::Ui,
         tool: &ToolDef,
     ) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(
                 RichText::new("变送器通道参数")
                     .size(14.0)
@@ -193,8 +193,8 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_height_correction(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(
                 RichText::new("高差与传压介质")
                     .size(14.0)
@@ -348,8 +348,8 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_altitude_pressure(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(RichText::new("气压与高度").size(14.0).strong().color(INK));
             ui.add_space(6.0);
             let mode = self.select_index(

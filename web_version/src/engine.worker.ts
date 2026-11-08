@@ -4,6 +4,7 @@ import init, {
   catalog_json,
   gauge_page,
   calculate,
+  curve_value,
   spline_chunk,
   convert_pressure,
 } from "../pkg/toolbox_core";
@@ -32,6 +33,8 @@ self.onmessage = async (event: MessageEvent) => {
         payload.offset,
         payload.limit,
       );
+    else if (method === "curveValue")
+      result = curve_value(payload.tool, JSON.stringify(payload.input), payload.x);
     else if (method === "convertPressure")
       result = JSON.parse(
         convert_pressure(

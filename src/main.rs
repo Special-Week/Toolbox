@@ -16,6 +16,7 @@ use eframe::egui::{self, Color32, Vec2};
 
 pub(crate) const BLUE: Color32 = Color32::from_rgb(39, 105, 220);
 pub(crate) const BLUE_SOFT: Color32 = Color32::from_rgb(234, 242, 255);
+pub(crate) const TABLE_STRIPE: Color32 = Color32::from_rgb(225, 235, 250);
 pub(crate) const INK: Color32 = Color32::from_rgb(35, 48, 67);
 pub(crate) const MUTED: Color32 = Color32::from_rgb(111, 126, 146);
 pub(crate) const PAGE: Color32 = Color32::from_rgb(246, 248, 251);
@@ -46,14 +47,28 @@ fn configure_style(ctx: &egui::Context) {
     style.spacing.item_spacing = Vec2::new(10.0, 10.0);
     style.spacing.button_padding = Vec2::new(12.0, 8.0);
     style.visuals = egui::Visuals::light();
+    style.visuals.faint_bg_color = TABLE_STRIPE;
     style.visuals.widgets.noninteractive.bg_fill = Color32::WHITE;
     style.visuals.widgets.noninteractive.fg_stroke.color = INK;
+    style.visuals.widgets.noninteractive.bg_stroke =
+        egui::Stroke::new(1.0_f32, Color32::from_rgb(220, 229, 241));
+    style.visuals.widgets.noninteractive.corner_radius = 8.into();
     style.visuals.widgets.inactive.bg_fill = Color32::WHITE;
+    style.visuals.widgets.inactive.weak_bg_fill = Color32::WHITE;
     style.visuals.widgets.inactive.fg_stroke.color = INK;
+    style.visuals.widgets.inactive.bg_stroke =
+        egui::Stroke::new(1.0_f32, Color32::from_rgb(202, 214, 230));
+    style.visuals.widgets.inactive.corner_radius = 6.into();
     style.visuals.widgets.hovered.bg_fill = BLUE_SOFT;
+    style.visuals.widgets.hovered.weak_bg_fill = BLUE_SOFT;
     style.visuals.widgets.hovered.fg_stroke.color = BLUE;
+    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, BLUE);
+    style.visuals.widgets.hovered.corner_radius = 6.into();
     style.visuals.widgets.active.bg_fill = BLUE;
+    style.visuals.widgets.active.weak_bg_fill = BLUE;
     style.visuals.widgets.active.fg_stroke.color = Color32::WHITE;
+    style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, BLUE);
+    style.visuals.widgets.active.corner_radius = 6.into();
     style.visuals.selection.bg_fill = BLUE;
     style.visuals.selection.stroke.color = Color32::WHITE;
     ctx.set_style(style);

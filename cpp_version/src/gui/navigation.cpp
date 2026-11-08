@@ -31,12 +31,6 @@ void App::navigation() {
               });
     float y = 124 - sideScroll;
     ui.clip = {8, 122, sw - 16, height - 130};
-    if (!collapsed) {
-        auto &search = state.value("navigation.search", L"");
-        ui.input("navigation.search", {15, y, sw - 30, 34}, search);
-        y += 50;
-    }
-    auto search = state.value("navigation.search", L"");
     for (int g = 0; g < groupCount; ++g) {
         int count = 0;
         for (auto &tool : tools()) {
@@ -65,15 +59,11 @@ void App::navigation() {
                                    refresh();
                                }});
             y += 48;
-            if (expanded[g] || !search.empty()) {
+            if (expanded[g]) {
                 float start = y;
                 for (std::size_t i = 0; i < tools().size(); ++i) {
                     auto &tool = tools()[i];
                     if (int(tool.group) != g) {
-                        continue;
-                    }
-                    if (!search.empty() && tool.name.find(search) == std::wstring::npos &&
-                        tool.description.find(search) == std::wstring::npos) {
                         continue;
                     }
                     Rect row{15, y, sw - 30, 36};
@@ -133,22 +123,12 @@ void App::homepage() {
         bx += bw + 6;
     }
     y += 44;
-    auto &search = state.value("home.search", L"");
-    scene.input("home.search", {x, y, std::min(w, 420.f), 34}, search);
-    if (search.empty()) {
-        scene.text({x + 9, y, std::min(w, 420.f) - 18, 34}, L"搜索名称或功能", 12, Muted);
-    }
-    y += 52;
     int cols = std::clamp(int((w + 14) / 284), 1, 4);
     float cell = (w - 14 * (cols - 1)) / cols;
     int index = 0;
     for (std::size_t i = 0; i < tools().size(); ++i) {
         auto &tool = tools()[i];
         if (filter >= 0 && int(tool.group) != filter) {
-            continue;
-        }
-        if (!search.empty() && tool.name.find(search) == std::wstring::npos &&
-            tool.description.find(search) == std::wstring::npos) {
             continue;
         }
         float cx = x + (index % cols) * (cell + 14), cy = y + (index / cols) * 176;
@@ -165,9 +145,6 @@ void App::homepage() {
         scene.text({cx + 14, cy + 66, cell - 28, 48}, tool.description, 12, Muted);
         scene.button({cx + cell - 130, cy + 116, 116, 34}, L"打开工具 →", [this, i] { open(int(i)); });
         ++index;
-    }
-    if (index == 0) {
-        scene.text({x, y, w, 60}, L"没有找到匹配的工具", 15, Muted, false, true);
     }
     contentHeight_ = y + float((index + cols - 1) / cols) * 176 + scroll - top + 24;
 }

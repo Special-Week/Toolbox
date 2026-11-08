@@ -1,6 +1,9 @@
 //! 拟合曲线与残差图；复用工程刻度轴，图表只悬停取值，不截获滚轮。
 use super::model::CurveFit;
-use crate::calculators::{axis::Axis, common::format_number};
+use crate::calculators::{
+    axis::{Axis, draw_curve_cursor},
+    common::format_number,
+};
 use crate::{BLUE, INK, MUTED, RED};
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Stroke, Vec2};
 
@@ -175,7 +178,7 @@ pub(super) fn draw(
             .enumerate()
             .map(|(index, &point)| (index, to_screen(point).distance(position)))
             .min_by(|a, b| a.1.total_cmp(&b.1));
-        if let Some((index, _)) = closest.filter(|(_, distance)| *distance < 12.0) {
+        if residual && let Some((index, _)) = closest.filter(|(_, distance)| *distance < 12.0) {
             response.on_hover_text(format!(
                 "第 {} 组\nx = {}\ny = {}\n拟合 y = {}\n残差 = {}",
                 index + 1,
@@ -188,19 +191,25 @@ pub(super) fn draw(
             let fraction = ((position.x - plot.left()) / plot.width()) as f64;
             let input = (1.0 - fraction).mul_add(fit.minimum_x, fraction * fit.maximum_x);
             if let Ok(value) = fit.predict(input) {
-                clipped.line_segment(
-                    [
-                        egui::pos2(position.x, plot.top()),
-                        egui::pos2(position.x, plot.bottom()),
-                    ],
-                    Stroke::new(1.0_f32, Color32::from_rgb(185, 200, 221)),
+                let details = closest
+                    .filter(|(_, distance)| *distance < 12.0)
+                    .map(|(index, _)| {
+                        format!(
+                            "\n校准点 {}：x = {}，y = {}\n残差 = {}",
+                            index + 1,
+                            format_number(points[index].0),
+                            format_number(points[index].1),
+                            format_number(fit.residuals[index]),
+                        )
+                    });
+                draw_curve_cursor(
+                    &painter,
+                    plot,
+                    to_screen((input, value)),
+                    (x_label, y_label),
+                    (input, value),
+                    details.as_deref(),
                 );
-                clipped.circle_filled(to_screen((input, value)), 4.0, BLUE);
-                response.on_hover_text(format!(
-                    "x = {}\n拟合 y = {}",
-                    format_number(input),
-                    format_number(value)
-                ));
             }
         }
     }
@@ -216,4 +225,87 @@ pub(super) fn draw(
         ui.colored_label(RED, "● 校准数据点");
     });
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::model::FitKind;
+    use super::*;
+
+    #[test]
+    fn hover_shows_curve_coordinates_independent_of_pointer_height() {
+        let points = [(0.0, 1.0), (5.0, 12.0), (10.0, 21.0)];
+        let fit = CurveFit::calculate(&points, FitKind::Linear).unwrap();
+        let ctx = egui::Context::default();
+        crate::fonts::configure_fonts(&ctx);
+        crate::configure_style(&ctx);
+        let render = |position: egui::Pos2| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, [900.0, 600.0].into())),
+                    events: vec![egui::Event::PointerMoved(position)],
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        draw(ui, &fit, &points, "输入量 x (mm)", "响应 y (V)", false).unwrap();
+                    });
+                },
+            )
+        };
+        render(egui::pos2(440.0, 100.0));
+        let mut labels = Vec::new();
+        for y in [100.0, 250.0] {
+            let output = render(egui::pos2(440.0, y));
+            let label = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text)
+                        if text.galley.text().starts_with("输入量 x (mm) = ") =>
+                    {
+                        Some(text.galley.text().to_owned())
+                    }
+                    _ => None,
+                })
+                .expect("悬停应立即显示曲线坐标");
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Circle(circle) if circle.fill == BLUE && (circle.center.y - y).abs() > 5.0)), "标记应位于曲线而非鼠标位置");
+            labels.push(label);
+        }
+        assert_eq!(labels[0], labels[1]);
+        let values: Vec<f64> = labels[0]
+            .lines()
+            .map(|line| line.split_once(" = ").unwrap().1.parse().unwrap())
+            .collect();
+        assert!((values[1] - fit.predict(values[0]).unwrap()).abs() < 1.0e-7);
+
+        let output = render(egui::pos2(440.0, 100.0));
+        let measured: Vec<_> = output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::Shape::Circle(circle) if circle.fill == RED => Some(circle.center),
+                _ => None,
+            })
+            .collect();
+        let output = render(measured[1]);
+        let label = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.text().starts_with("输入量 x (mm) = ") => {
+                    Some(text.galley.text().to_owned())
+                }
+                _ => None,
+            })
+            .expect("校准点附近也应显示曲线坐标");
+        let values: Vec<f64> = label
+            .lines()
+            .take(2)
+            .map(|line| line.split_once(" = ").unwrap().1.parse().unwrap())
+            .collect();
+        assert!((values[1] - fit.predict(values[0]).unwrap()).abs() < 1.0e-7);
+        assert!((values[1] - points[1].1).abs() > 0.1);
+        assert!(label.contains("校准点 2"), "校准点信息仍应可见");
+    }
 }

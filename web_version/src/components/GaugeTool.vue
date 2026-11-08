@@ -5,10 +5,12 @@ import type { Engine } from "../engine";
 import type { State, Tool } from "../types";
 import ResultTable from "./ResultTable.vue";
 import NumericInput from "./NumericInput.vue";
+import SpecOptions from "./SpecOptions.vue";
 import { download } from "../format";
 interface Option {
   value: string;
   label: string;
+  columns?: [string, string, string];
 }
 interface Field {
   key: string;
@@ -113,10 +115,11 @@ async function copy() {
         <span v-if="busy" class="working-label">计算中…</span>
       </div>
       <div class="form-grid">
-        <label v-for="field in page?.fields" :key="field.key" class="field">
-          <span class="field-label">{{ field.label }}</span>
+        <div v-for="field in page?.fields" :key="field.key" class="field">
+          <label class="field-label" :for="`${tool.id}-${field.key}`">{{ field.label }}</label>
           <select
             v-if="field.type === 'select'"
+            :id="`${tool.id}-${field.key}`"
             :value="state[field.key]"
             @change="
               change(field.key, ($event.target as HTMLSelectElement).value)
@@ -134,11 +137,13 @@ async function copy() {
           <div v-else class="gauge-input-row">
             <NumericInput
               v-if="field.key !== 'size'"
+              :id="`${tool.id}-${field.key}`"
               :model-value="state[field.key]"
               @update:model-value="change(field.key, $event)"
             />
             <input
               v-else
+              :id="`${tool.id}-${field.key}`"
               type="text"
               :value="state[field.key]"
               :aria-label="field.label"
@@ -146,8 +151,14 @@ async function copy() {
                 change(field.key, ($event.target as HTMLInputElement).value)
               "
             />
+            <SpecOptions
+              v-if="tool.id === 'gauge_unified' && field.key === 'size' && field.suggestions?.length"
+              :options="field.suggestions"
+              :selected="String(state[field.key] ?? '')"
+              @select="change(field.key, $event)"
+            />
             <select
-              v-if="field.suggestions?.length"
+              v-else-if="field.suggestions?.length"
               value=""
               aria-label="常用规格"
               @change="
@@ -166,7 +177,7 @@ async function copy() {
               </option>
             </select>
           </div>
-        </label>
+        </div>
       </div>
     </section>
     <p v-if="page?.error" class="calculation-error">{{ page.error }}</p>
@@ -178,9 +189,10 @@ async function copy() {
             复制完整结果
           </button>
         </div>
-        <p v-for="note in page.report.notes" :key="note" class="notice">
-          {{ note }}
-        </p>
+        <details v-if="page.report.notes.length" class="collapsible-note gauge-notes">
+          <summary>⚠ 取值说明与适用限制 · {{ page.report.notes.length }} 项</summary>
+          <p v-for="note in page.report.notes" :key="note">{{ note }}</p>
+        </details>
         <div class="metric-grid gauge-metrics">
           <div
             v-for="m in page.report.metrics.slice(0, 6)"

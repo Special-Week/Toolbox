@@ -63,12 +63,12 @@ const explanationParagraphs = computed(() =>
     .filter(Boolean),
 );
 const filter = ref("全部工具");
-const query = ref("");
 const mobileNav = ref(false);
 const collapsed = ref(false);
 const expanded = reactive(new Set<string>());
 const states = reactive<Record<string, State>>({});
 const result = ref<Result | null>(null);
+let curveSnapshot: { tool: string; input: State } | null = null;
 const busy = ref(false);
 const error = ref("");
 const message = ref("");
@@ -90,10 +90,7 @@ const filtered = computed(
   () =>
     catalog.value?.tools.filter(
       (t) =>
-        (filter.value === "全部工具" || t.group === filter.value) &&
-        `${t.name} ${t.description} ${t.group}`
-          .toLowerCase()
-          .includes(query.value.trim().toLowerCase()),
+        filter.value === "全部工具" || t.group === filter.value,
     ) ?? [],
 );
 const totalUnits = computed(
@@ -164,6 +161,7 @@ function open(tool: Tool | null, hash = true) {
   selected.value = tool;
   inputScroll = null;
   result.value = null;
+  curveSnapshot = null;
   error.value = "";
   message.value = "";
   mobileNav.value = false;
@@ -273,17 +271,20 @@ watch(
     const tool = selected.value;
     timer = setTimeout(async () => {
       try {
+        const input = JSON.parse(JSON.stringify(current.value));
         const value = await engine.request<Result>("calculate", {
           tool: tool.id,
-          input: JSON.parse(JSON.stringify(current.value)),
+          input,
         });
         if (version === revision) {
+          curveSnapshot = { tool: tool.id, input };
           result.value = value;
           error.value = "";
         }
       } catch (e) {
         if (version === revision) {
           result.value = null;
+          curveSnapshot = null;
           error.value = e instanceof Error ? e.message : String(e);
         }
       } finally {
@@ -295,6 +296,12 @@ watch(
   { immediate: true },
 );
 
+async function curveValue(x: number): Promise<number> {
+  const snapshot = curveSnapshot;
+  if (!snapshot) throw new Error("曲线数据不可用");
+  return engine.request<number>("curveValue", { ...snapshot, x });
+}
+
 function reset() {
   if (selected.value?.kind === "pdf") { pdfDownloader.value?.reset(); return; }
   if (selected.value && catalog.value) {
@@ -302,6 +309,7 @@ function reset() {
     ++revision;
     ++inputGeneration.value;
     result.value = null;
+    curveSnapshot = null;
     error.value = "";
     states[selected.value.id] = {};
     initialize(selected.value, states[selected.value.id], catalog.value);
@@ -517,16 +525,6 @@ onUnmounted(() => {
         </svg>
       </button>
     </div>
-    <label v-if="!collapsed" class="sidebar-search"
-      ><svg viewBox="0 0 24 24">
-        <circle cx="10.5" cy="10.5" r="6.5" />
-        <path d="m16 16 4 4" /></svg
-      ><input
-        v-model="query"
-        placeholder="搜索工具"
-        aria-label="搜索工具"
-        @input="selected && open(null)"
-    /></label>
     <nav aria-label="工具分类">
       <div v-for="group in groups" :key="group" class="nav-group">
         <button
@@ -570,7 +568,7 @@ onUnmounted(() => {
         <div v-if="!collapsed && expanded.has(group)" class="nav-tools">
           <button
             v-for="tool in catalog?.tools.filter(
-              (t) => t.group === group && (!query || t.name.includes(query)),
+              (t) => t.group === group,
             )"
             :key="tool.id"
             :class="{ selected: selected?.id === tool.id }"
@@ -624,15 +622,6 @@ onUnmounted(() => {
               }}</span>
             </button>
           </div>
-          <label class="dashboard-search"
-            ><svg viewBox="0 0 24 24">
-              <circle cx="10.5" cy="10.5" r="6.5" />
-              <path d="m16 16 4 4" /></svg
-            ><input
-              v-model="query"
-              placeholder="搜索名称或功能"
-              aria-label="搜索名称或功能"
-          /></label>
         </div>
         <div class="catalog-heading">
           <h2>{{ filter }}</h2>
@@ -654,19 +643,6 @@ onUnmounted(() => {
             </div>
             <p>{{ tool.description }}</p>
             <span class="open-tool">打开工具 <span>→</span></span>
-          </button>
-        </div>
-        <div v-if="!filtered.length" class="empty-state">
-          <h2>没有找到匹配的工具</h2>
-          <p>试试其他名称，或切换到全部工具。</p>
-          <button
-            class="button secondary"
-            @click="
-              query = '';
-              filter = '全部工具';
-            "
-          >
-            显示全部工具
           </button>
         </div>
       </template>
@@ -928,6 +904,7 @@ onUnmounted(() => {
               :points="result.points"
               :x-label="axisX"
               :y-label="axisY"
+              :evaluate="selected.kind === 'fit' || selected.kind === 'spline' ? curveValue : undefined"
             />
           </section>
           <section v-if="result?.residuals.length" class="panel chart-panel">
@@ -963,16 +940,16 @@ onUnmounted(() => {
             :rows="calibrationRows"
           />
         </template>
-        <section v-if="activeNote.note || activeNote.formula" class="panel explanation">
-          <h2>计算说明</h2>
+        <details v-if="activeNote.note || activeNote.formula" :key="selected.id" class="collapsible-note explanation">
+          <summary>计算说明</summary>
           <p v-for="(paragraph, index) in explanationParagraphs" :key="index">
             {{ paragraph }}
           </p>
-          <details v-if="activeNote.formula" :key="selected.id + activeNote.formula">
-            <summary>详细公式与取值</summary>
+          <template v-if="activeNote.formula">
+            <strong>详细公式与取值</strong>
             <p v-for="(line, index) in activeNote.formula.split(/\r?\n/u)" :key="index">{{ line }}</p>
-          </details>
-        </section>
+          </template>
+        </details>
       </template>
     </template>
     <PdfDownload ref="pdfDownloader" v-show="selected?.kind === 'pdf'" :active="selected?.kind === 'pdf'" />

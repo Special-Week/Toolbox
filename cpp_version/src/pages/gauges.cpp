@@ -113,9 +113,7 @@ void drawTable(Page &p, const gauges::Report &report, const gauges::Table &table
             height = std::max(
                 height, 18.f + 18.f * float(1 + std::count(cell.display.begin(), cell.display.end(), '\n')));
         }
-        if (row % 2 == 0) {
-            p.ui.fill({p.x, p.y, p.w, height}, White);
-        }
+        p.ui.fill({p.x, p.y, p.w, height}, row % 2 == 0 ? White : TableStripe);
         x = p.x - offset;
         for (std::size_t i = 0; i < table.rows[row].size(); ++i) {
             p.ui.text({x + 6, p.y, widths[i] - 12, height}, wide(table.rows[row][i].display), 12.5f,
@@ -184,7 +182,8 @@ void renderGauges(Page &p) {
             changed = field.key;
         }
     }
-    auto data = gauges::page(type, std::move(input), changed);
+    if (!changed.empty()) previous = gauges::page(type, std::move(input), changed);
+    const auto &data = previous;
     // 保存规范字段值，避免恢复时把旧下拉索引解释成另一种规格。
     for (const auto &entry : data.state)
         p.state.values[p.key("gauge.input." + entry.first)] = wide(entry.second);
@@ -234,8 +233,10 @@ void renderGauges(Page &p) {
                 MessageBoxW(owner, wide(e.what()).c_str(), L"复制结果", MB_OK | MB_ICONINFORMATION);
             }
         });
-        for (const auto &note : report.notes) {
-            p.note(wide(note));
+        if (!report.notes.empty()) {
+            std::vector<std::wstring> notes;
+            for (const auto &note : report.notes) notes.push_back(wide(note));
+            p.details("gauge.notes", L"⚠ 取值说明与适用限制 · " + std::to_wstring(notes.size()) + L" 项", notes);
         }
         Metrics summary;
         for (std::size_t i = 0; i < std::min<std::size_t>(6, report.metrics.size()); ++i) {
@@ -255,7 +256,6 @@ void renderGauges(Page &p) {
             drawTable(p, report, report.tables[i], i);
         }
     }
-    previous = std::move(data);
 }
 void clearGaugeCache(const std::string &id) { gaugeCache.erase(id); }
 } // namespace toolbox

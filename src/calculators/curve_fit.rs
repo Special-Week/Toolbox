@@ -1,8 +1,10 @@
 //! 分析与测量数据的通用校准曲线页面；不绑定仪器类型、测量对象或单位。
 use crate::app::ToolboxApp;
-use crate::calculators::common::{format_number, info_note, render_error_message, render_metrics};
+use crate::calculators::common::{
+    format_number, info_note, panel, render_error_message, render_metrics,
+};
 use crate::catalog::ToolDef;
-use crate::{BLUE, BLUE_SOFT, INK, MUTED};
+use crate::{BLUE, BLUE_SOFT, INK, MUTED, TABLE_STRIPE};
 use eframe::egui::{self, RichText, Vec2};
 use std::ops::Range;
 
@@ -159,7 +161,7 @@ fn result_table(ui: &mut egui::Ui, fit: &CurveFit, points: &[(f64, f64)]) {
     for index in range {
         egui::Frame::new()
             .fill(if index % 2 == 0 {
-                BLUE_SOFT
+                TABLE_STRIPE
             } else {
                 egui::Color32::WHITE
             })
@@ -422,8 +424,8 @@ fn render_input(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) -> Curv
 impl ToolboxApp {
     pub(crate) fn render_curve_fit(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
         ui.vertical(|ui| {
-            ui.set_max_width(960.0);
-            let input = ui.group(|ui| render_input(self, ui, tool)).inner;
+            ui.set_max_width(ui.available_width().min(960.0));
+            let input = panel(ui, |ui| render_input(self, ui, tool)).inner;
             match input.points.and_then(|points| {
                 CurveFit::calculate(&points, input.kind).map(|fit| (points, fit))
             }) {

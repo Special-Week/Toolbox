@@ -4,8 +4,8 @@ use super::ToolboxApp;
 use crate::catalog::{Group, TOOLS, ToolDef};
 use crate::{BLUE, BLUE_SOFT, INK, MUTED};
 use eframe::egui::{
-    self, Align, Color32, FontId, Galley, Layout, RichText, ScrollArea, Sense, Stroke, TextEdit,
-    TextStyle, TextWrapMode, Vec2, WidgetText,
+    self, Align, Color32, FontId, Galley, Layout, RichText, ScrollArea, Sense, Stroke, TextStyle,
+    TextWrapMode, Vec2, WidgetText,
 };
 use std::sync::Arc;
 
@@ -56,16 +56,9 @@ impl ToolboxApp {
                         let tools: Vec<&ToolDef> = TOOLS
                             .iter()
                             .filter(|tool| {
-                                self.matches(tool)
-                                    && self.selected_group.is_none_or(|group| tool.group == group)
+                                self.selected_group.is_none_or(|group| tool.group == group)
                             })
                             .collect();
-                        if tools.is_empty() {
-                            ui.vertical_centered(|ui| {
-                                ui.add_space(30.0);
-                                ui.label(RichText::new("没有匹配的工具").color(MUTED));
-                            });
-                        }
 
                         let columns = ((ui.available_width() + CARD_GAP) / (270.0 + CARD_GAP))
                             .floor()
@@ -134,10 +127,6 @@ impl ToolboxApp {
                     self.selected_group = Some(group);
                 }
             }
-            ui.add_sized(
-                [210.0_f32.min(ui.max_rect().width()), 32.0],
-                TextEdit::singleline(&mut self.search).hint_text("搜索名称或功能"),
-            );
         });
     }
 }

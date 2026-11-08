@@ -5,7 +5,7 @@ use crate::calculators::spline::ExportJob;
 use crate::catalog::{Dimension, Group, TOOLS, ToolDef, ToolKind, units_for};
 use crate::navigation;
 use crate::{BLUE, BLUE_SOFT, INK, MUTED, PAGE};
-use eframe::egui::{self, Align, Color32, Layout, RichText, ScrollArea, TextEdit, Vec2};
+use eframe::egui::{self, Align, Color32, Layout, RichText, ScrollArea, Vec2};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::TryRecvError;
@@ -18,7 +18,6 @@ use input_history::InputHistory;
 pub(crate) struct ToolboxApp {
     selected: Option<&'static str>,
     selected_group: Option<Group>,
-    search: String,
     // 保留用户输入的原始文本，允许编辑中的空串、负号等暂时无效状态。
     values: HashMap<String, String>,
     history: InputHistory,
@@ -39,7 +38,6 @@ impl Default for ToolboxApp {
         Self {
             selected: None,
             selected_group: None,
-            search: String::new(),
             values: history.values.clone(),
             history,
             opened: None,
@@ -201,22 +199,13 @@ impl ToolboxApp {
                 }
             });
         });
-        ui.add_space(6.0);
-        ui.add(
-            TextEdit::singleline(&mut self.search)
-                .hint_text("搜索工具")
-                .desired_width(ui.available_width()),
-        );
-        ui.add_space(10.0);
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 3.0;
                 for group in Group::ALL {
-                    let tools: Vec<&ToolDef> = TOOLS
-                        .iter()
-                        .filter(|tool| tool.group == group && self.matches(tool))
-                        .collect();
+                    let tools: Vec<&ToolDef> =
+                        TOOLS.iter().filter(|tool| tool.group == group).collect();
                     if tools.is_empty() {
                         continue;
                     }
@@ -333,75 +322,90 @@ impl ToolboxApp {
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                ui.add_space(22.0);
-                ui.horizontal_wrapped(|ui| {
-                    if ui.button(RichText::new("← 工具箱").color(BLUE)).clicked() {
-                        back = true;
-                    }
-                    ui.label(
-                        RichText::new(format!("/ {} / {}", tool.group.title(), tool.name))
-                            .color(MUTED),
-                    );
-                    if tool.remembers_inputs() && self.history.error {
-                        ui.label(RichText::new("输入暂未保存").size(11.0).color(MUTED))
-                            .on_hover_text("本地保存暂时不可用，当前输入仍可使用，稍后自动重试");
-                    }
-                });
-                ui.add_space(13.0);
-                ui.horizontal(|ui| {
-                    // 操作与标题同排，右侧留白；先预留按钮宽度，长标题可在左侧换行。
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        ui.add_space(24.0);
-                        if ui
-                            .add_enabled(
-                                self.spline_export.is_none()
-                                    && !(matches!(tool.kind, ToolKind::PdfDownload)
-                                        && self.pdf_download.busy()),
-                                egui::Button::new(
-                                    RichText::new(if matches!(tool.kind, ToolKind::PdfDownload) {
-                                        "清空"
-                                    } else {
-                                        "恢复示例"
-                                    })
-                                    .size(14.0),
-                                )
-                                .min_size(Vec2::new(104.0, 40.0)),
-                            )
-                            .on_hover_text(if matches!(tool.kind, ToolKind::PdfDownload) {
-                                "清空链接和本次下载结果"
-                            } else {
-                                "将当前工具的全部输入恢复为示例值"
-                            })
-                            .clicked()
-                        {
-                            self.clear_tool_inputs(tool);
-                            if matches!(tool.kind, ToolKind::PdfDownload) {
-                                self.pdf_download.clear();
+                egui::Frame::new()
+                    .inner_margin(egui::Margin::symmetric(20, 0))
+                    .show(ui, |ui| {
+                        ui.add_space(22.0);
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button(RichText::new("← 工具箱").color(BLUE)).clicked() {
+                                back = true;
                             }
-                            self.example_revision += 1;
-                        }
-                        ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                            if !tool.icon.is_empty() {
-                                ui.add_sized(
-                                    [46.0, 46.0],
-                                    egui::Button::new(
-                                        RichText::new(tool.icon).size(18.0).strong().color(BLUE),
+                            ui.label(
+                                RichText::new(format!("/ {} / {}", tool.group.title(), tool.name))
+                                    .color(MUTED),
+                            );
+                            if tool.remembers_inputs() && self.history.error {
+                                ui.label(RichText::new("输入暂未保存").size(11.0).color(MUTED))
+                                    .on_hover_text(
+                                        "本地保存暂时不可用，当前输入仍可使用，稍后自动重试",
+                                    );
+                            }
+                        });
+                        ui.add_space(13.0);
+                        ui.horizontal(|ui| {
+                            // 操作与标题同排，右侧留白；先预留按钮宽度，长标题可在左侧换行。
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                if ui
+                                    .add_enabled(
+                                        self.spline_export.is_none()
+                                            && !(matches!(tool.kind, ToolKind::PdfDownload)
+                                                && self.pdf_download.busy()),
+                                        egui::Button::new(
+                                            RichText::new(
+                                                if matches!(tool.kind, ToolKind::PdfDownload) {
+                                                    "清空"
+                                                } else {
+                                                    "恢复示例"
+                                                },
+                                            )
+                                            .size(14.0),
+                                        )
+                                        .min_size(Vec2::new(104.0, 40.0)),
                                     )
-                                    .fill(BLUE_SOFT),
-                                );
-                            }
-                            ui.vertical(|ui| {
-                                ui.label(RichText::new(tool.name).size(26.0).strong().color(INK));
-                                ui.label(RichText::new(tool.description).size(12.5).color(MUTED));
+                                    .on_hover_text(if matches!(tool.kind, ToolKind::PdfDownload) {
+                                        "清空链接和本次下载结果"
+                                    } else {
+                                        "将当前工具的全部输入恢复为示例值"
+                                    })
+                                    .clicked()
+                                {
+                                    self.clear_tool_inputs(tool);
+                                    if matches!(tool.kind, ToolKind::PdfDownload) {
+                                        self.pdf_download.clear();
+                                    }
+                                    self.example_revision += 1;
+                                }
+                                ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
+                                    if !tool.icon.is_empty() {
+                                        ui.add_sized(
+                                            [46.0, 46.0],
+                                            egui::Button::new(
+                                                RichText::new(tool.icon)
+                                                    .size(18.0)
+                                                    .strong()
+                                                    .color(BLUE),
+                                            )
+                                            .fill(BLUE_SOFT),
+                                        );
+                                    }
+                                    ui.vertical(|ui| {
+                                        ui.label(
+                                            RichText::new(tool.name).size(26.0).strong().color(INK),
+                                        );
+                                        ui.label(
+                                            RichText::new(tool.description).size(12.5).color(MUTED),
+                                        );
+                                    });
+                                });
                             });
                         });
+                        ui.add_space(17.0);
+                        ui.push_id((tool.id, self.example_revision), |ui| match tool.kind {
+                            ToolKind::Unit(dimension) => self.render_unit_page(ui, tool, dimension),
+                            kind => self.render_calculator(ui, tool, kind),
+                        });
+                        ui.add_space(28.0);
                     });
-                });
-                ui.add_space(17.0);
-                ui.push_id((tool.id, self.example_revision), |ui| match tool.kind {
-                    ToolKind::Unit(dimension) => self.render_unit_page(ui, tool, dimension),
-                    kind => self.render_calculator(ui, tool, kind),
-                });
             });
         self.history.observe(tool, &self.values);
         if back {
@@ -412,13 +416,6 @@ impl ToolboxApp {
     fn clear_tool_inputs(&mut self, tool: &ToolDef) {
         let prefix = format!("{}.", tool.id);
         self.values.retain(|key, _| !key.starts_with(&prefix));
-    }
-
-    fn matches(&self, tool: &ToolDef) -> bool {
-        let query = self.search.trim().to_lowercase();
-        query.is_empty()
-            || tool.name.to_lowercase().contains(&query)
-            || tool.description.to_lowercase().contains(&query)
     }
 
     fn storage_key(tool: &ToolDef, key: &str) -> String {
@@ -470,11 +467,7 @@ impl ToolboxApp {
             .values
             .entry(storage_key)
             .or_insert_with(|| default.to_owned());
-        ui.add_sized(
-            [width.max(52.0), 36.0],
-            TextEdit::singleline(value).hint_text(hint),
-        )
-        .changed()
+        text_input(ui, value, width.max(52.0), hint).changed()
     }
 
     /// 调整项目数量时保留已有字段值；重新增加项目可恢复本次运行中的输入。
@@ -573,14 +566,12 @@ impl ToolboxApp {
             .parse::<usize>()
             .unwrap_or(default)
             .min(labels.len() - 1);
-        ui.horizontal(|ui| {
-            ui.add_sized(
-                [132.0, 29.0],
-                egui::Label::new(RichText::new(label).color(MUTED)),
-            );
+        form_row(ui, label, |ui| {
+            ui.spacing_mut().interact_size.y = 36.0;
             egui::ComboBox::from_id_salt(format!("{}-{key}", tool.id))
                 .selected_text(labels[index])
-                .width(ui.available_width().min(270.0))
+                .width(ui.available_width())
+                .wrap_mode(egui::TextWrapMode::Truncate)
                 .show_ui(ui, |ui| {
                     for (i, item) in labels.iter().enumerate() {
                         ui.selectable_value(&mut index, i, *item);
@@ -597,7 +588,7 @@ impl ToolboxApp {
             .iter()
             .map(|unit| format!("{} · {}", unit.name, unit.code))
             .collect::<Vec<_>>();
-        ui.group(|ui| {
+        panel(ui, |ui| {
             ui.set_max_width(ui.available_width().min(830.0));
             ui.label(RichText::new("换算参数").size(14.0).strong().color(INK));
             ui.add_space(8.0);

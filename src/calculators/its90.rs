@@ -21,8 +21,8 @@ impl ToolboxApp {
             self.render_standard_thermocouple(ui, tool);
             return;
         }
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(RichText::new("热电偶参数").size(14.0).strong().color(INK));
             ui.add_space(7.0);
             let types = [
@@ -160,7 +160,7 @@ impl ToolboxApp {
                 for tolerance in
                     crate::calculators::thermocouple::tolerance::calculate(type_code, t)
                 {
-                    ui.group(|ui| {
+                    panel(ui, |ui| {
                         ui.label(RichText::new(tolerance.name).strong());
                         if let Some(d) = tolerance.delta {
                             ui.label(format!(
@@ -211,8 +211,8 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_cvd_fit(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(
                 RichText::new("标准铂电阻系数拟合")
                     .size(14.0)
@@ -284,8 +284,8 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_beta_thermistor(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(RichText::new("热敏电阻参数").size(14.0).strong().color(INK));
             ui.add_space(7.0);
             let mode = self.select_index(

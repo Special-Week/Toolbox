@@ -11,6 +11,7 @@
 #include <map>
 #include <mutex>
 #include <memory>
+#include <set>
 #include <thread>
 #include <windows.h>
 
@@ -30,6 +31,7 @@ struct Color {
 };
 inline const Color Ink{35 / 255.f, 48 / 255.f, 67 / 255.f}, Muted{111 / 255.f, 126 / 255.f, 146 / 255.f},
     Blue{39 / 255.f, 105 / 255.f, 220 / 255.f}, Soft{234 / 255.f, 242 / 255.f, 1},
+    TableStripe{225 / 255.f, 235 / 255.f, 250 / 255.f},
     Background{246 / 255.f, 248 / 255.f, 251 / 255.f}, White{1, 1, 1}, Border{.84f, .88f, .94f},
     Green{.114f, .545f, .38f}, Red{.72f, .28f, .27f};
 struct Draw {
@@ -104,6 +106,8 @@ class Page {
     std::string key(const std::string &field) const;
     void heading(const std::wstring &title);
     void note(const std::wstring &text, Color color = Muted);
+    void error(const std::wstring &text);
+    void details(const std::string &field, const std::wstring &title, const std::vector<std::wstring> &lines);
     void explain();
     double number(const std::string &field, const std::wstring &label, double initial);
     std::wstring textInput(const std::string &field, const std::wstring &label, const std::wstring &initial);
@@ -145,8 +149,13 @@ class App {
         HWND window = nullptr;
         bool combo = false, seen = false;
         std::string key;
+        std::vector<std::wstring> options;
+        std::vector<std::array<std::wstring, 3>> optionRows;
         int optionTextWidth = 0;
+        std::array<int, 3> optionColumns{};
         float optionDpi = 0;
+        Rect layoutRect, layoutClip;
+        bool layoutValid = false;
     };
     HWND window_ = nullptr;
     float dpi_ = 96;
@@ -163,11 +172,11 @@ class App {
     InputHistory inputHistory_;
     void clearToolInputs(const Tool &tool);
     void restoreExample();
-    void synchronizeControls();
+    void synchronizeControls(bool scrolling);
     void paint();
     void releaseTarget();
     void loadIconBitmap();
-    void rebuild();
+    void rebuild(bool scrolling = false);
     LRESULT message(UINT message, WPARAM w, LPARAM l);
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
 
@@ -175,6 +184,7 @@ class App {
     float mouseX = -1, mouseY = -1;
     Rect chartArea;
     State state;
+    std::set<std::string> openDetails;
     Scene scene;
     int selected = -1, filter = -1;
     bool collapsed = false;

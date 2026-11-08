@@ -21,8 +21,8 @@
   transition: opacity 0.15s;
 }
 .metric {
-  background: #f7f9fe;
-  border: 1px solid #e9eef8;
+  background: #f7faff;
+  border: 1px solid #dce5f1;
   border-radius: 8px;
   padding: 14px;
   min-height: 86px;
@@ -342,6 +342,9 @@ td {
   overflow-wrap: anywhere;
   max-width: 350px;
 }
+.result-table-panel tbody > tr:nth-child(even) {
+  background: #e1ebfa;
+}
 tr:last-child td {
   border-bottom: 0;
 }
@@ -362,26 +365,41 @@ tr:last-child td {
   color: #9aa9bd;
   padding: 30px;
 }
-.explanation summary {
+.collapsible-note {
+  background: #eaf2ff;
+  border-radius: 8px;
+  padding: 18px;
+  margin: 16px 0 28px;
+  color: #233043;
+}
+.collapsible-note > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   font-size: 14px;
   font-weight: 600;
   cursor: pointer;
-  color: #4e6485;
+  color: var(--blue);
   min-height: 22px;
   line-height: 1.6;
 }
-.explanation h2 {
-  margin: 0;
-  font-size: 14px;
+.collapsible-note > summary::-webkit-details-marker { display: none; }
+.collapsible-note > summary::before {
+  content: "▸";
+  flex: none;
 }
-.explanation details {
+.collapsible-note[open] > summary::before { content: "▾"; }
+.collapsible-note > strong {
+  display: block;
   margin-top: 12px;
+  font-size: 12px;
 }
-.explanation p {
+.collapsible-note p {
   white-space: pre-line;
   line-height: 1.8;
   font-size: 12px;
-  color: #8392a9;
+  color: #233043;
   margin: 10px 0 0;
   overflow-wrap: anywhere;
 }

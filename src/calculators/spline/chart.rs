@@ -1,10 +1,9 @@
 //! 样条绘图与悬停取值；依据标签实际宽度调整留白和刻度数量，曲线裁剪到绘图区。
 use super::{Point, UniformCubicSpline};
-use crate::calculators::common::format_number;
 use crate::{BLUE, INK, MUTED, RED};
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Stroke, Vec2};
 
-use crate::calculators::axis::Axis;
+use crate::calculators::axis::{Axis, draw_curve_cursor};
 
 pub(super) fn draw_chart(
     ui: &mut egui::Ui,
@@ -187,22 +186,78 @@ pub(super) fn draw_chart(
         && plot.contains(position)
     {
         let fraction = ((position.x - plot.left()) / plot.width()) as f64;
-        let x = fraction.mul_add(maximum - minimum, minimum);
+        let x = (1.0 - fraction).mul_add(minimum, fraction * maximum);
         if let Ok(y) = spline.y_at_x(x) {
-            curve_painter.line_segment(
-                [
-                    egui::pos2(position.x, plot.top()),
-                    egui::pos2(position.x, plot.bottom()),
-                ],
-                Stroke::new(1.0_f32, Color32::from_rgb(185, 200, 221)),
+            draw_curve_cursor(
+                &painter,
+                plot,
+                to_screen(Point { x, y }),
+                ("x", "y"),
+                (x, y),
+                None,
             );
-            curve_painter.circle_filled(to_screen(Point { x, y }), 4.0, BLUE);
-            response.on_hover_text(format!(
-                "x = {}\ny = {}",
-                format_number(x),
-                format_number(y)
-            ));
         }
     }
     rect
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hover_displays_interpolated_coordinates_independent_of_pointer_height() {
+        let points = [
+            Point { x: 0.0, y: 1.0 },
+            Point { x: 10.0, y: 21.0 },
+            Point { x: 20.0, y: 41.0 },
+        ];
+        let spline = UniformCubicSpline::interpolate(&points).unwrap();
+        let curve: Vec<_> = (0..=20)
+            .map(|n| Point {
+                x: n as f64,
+                y: spline.y_at_x(n as f64).unwrap(),
+            })
+            .collect();
+        let ctx = egui::Context::default();
+        crate::fonts::configure_fonts(&ctx);
+        crate::configure_style(&ctx);
+        let render = |position: egui::Pos2| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, [900.0, 600.0].into())),
+                    events: vec![egui::Event::PointerMoved(position)],
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        draw_chart(ui, &spline, &points, &curve, 0.0, 20.0);
+                    });
+                },
+            )
+        };
+        render(egui::pos2(440.0, 100.0));
+        let mut labels = Vec::new();
+        for y in [100.0, 250.0] {
+            let output = render(egui::pos2(440.0, y));
+            let label = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.text().starts_with("x = ") => {
+                        Some(text.galley.text().to_owned())
+                    }
+                    _ => None,
+                })
+                .expect("悬停应立即显示插值曲线坐标");
+            assert!(output.shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Circle(circle) if circle.fill == BLUE && (circle.center.y - y).abs() > 5.0)), "标记应位于曲线而非鼠标位置");
+            labels.push(label);
+        }
+        assert_eq!(labels[0], labels[1]);
+        let values: Vec<f64> = labels[0]
+            .lines()
+            .map(|line| line.split_once(" = ").unwrap().1.parse().unwrap())
+            .collect();
+        assert!((values[1] - spline.y_at_x(values[0]).unwrap()).abs() < 1.0e-7);
+    }
 }

@@ -10,8 +10,8 @@ use model::Transmitter;
 
 impl ToolboxApp {
     pub(crate) fn render_transmitter(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.group(|ui| {
-            ui.set_max_width(820.0);
+        panel(ui, |ui| {
+            ui.set_max_width(ui.available_width().min(820.0));
             ui.label(
                 RichText::new("变送器量程换算")
                     .size(15.0)

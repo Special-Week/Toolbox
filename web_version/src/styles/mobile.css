@@ -378,6 +378,9 @@
     padding: 12px 6px;
     border-bottom: 1px solid var(--border);
   }
+  .mobile-unit-row:nth-child(even) {
+    background: #e1ebfa;
+  }
   .mobile-unit-row strong {
     display: block;
     font-size: 13px;

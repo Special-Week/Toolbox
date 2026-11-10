@@ -403,6 +403,7 @@
   .metric > span {
     font-size: 12px;
   }
+  .point-header,
   .point-row {
     gap: 6px;
     grid-template-columns: 22px minmax(0, 1fr) minmax(0, 1fr);

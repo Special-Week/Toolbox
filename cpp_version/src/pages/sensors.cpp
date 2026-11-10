@@ -28,6 +28,8 @@ static void toleranceCards(Page &p, const std::vector<Tolerance> &list, double t
     }
 }
 void renderSensors(Page &p) {
+    if (p.tool.kind == Kind::StandardThermocouple || p.tool.kind == Kind::StandardPlatinumResistor)
+        p.app.calibrationControls(p);
     switch (p.tool.kind) {
     case Kind::StandardThermocouple:
         standardCouplePage(p);

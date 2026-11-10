@@ -6,6 +6,8 @@ use eframe::egui;
 impl ToolboxApp {
     pub(crate) fn render_standard_thermocouple(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
         ui.set_max_width(ui.available_width().min(820.0));
+        let archive_save = self.calibration_archive_controls(ui, tool);
+        let mut archive_required = None;
         let mut table = None;
         let result = panel(ui, |ui| {
             let k = self.select_index(ui, tool, "stc.type", "分度号", &["S 型", "B 型"], 0);
@@ -19,6 +21,7 @@ impl ToolboxApp {
                 &["固定点实测热电势", "温区多项式系数"],
                 0,
             );
+            let mut required = vec!["stc.type".to_owned(), "stc.calibration".to_owned()];
             let mut model = StandardCouple {
                 kind,
                 points: Vec::new(),
@@ -38,6 +41,7 @@ impl ToolboxApp {
                 };
                 for (i, &(t, e)) in defaults.iter().enumerate() {
                     let key = format!("stc.{kind}.cal.{i}");
+                    required.push(key.clone());
                     let d = e.to_string();
                     self.input(
                         ui,
@@ -64,6 +68,7 @@ impl ToolboxApp {
                     0,
                 );
                 zone_id = z;
+                required.push(format!("stc.{kind}.zone"));
                 let mut zone = ranges[z].clone();
                 let fit = self.select_index(
                     ui,
@@ -73,13 +78,17 @@ impl ToolboxApp {
                     &["手动输入系数", "校准点拟合"],
                     0,
                 ) == 1;
+                required.push("stc.coefficient_source".to_owned());
                 if fit {
                     let count = self.dynamic_count(ui, tool, "stc.fit.points", "校准点", 3, 2, 30);
+                    required.push("stc.fit.points.count".to_owned());
                     let mut points = Vec::new();
                     for i in 0..count {
                         let t = zone.0 + (zone.1 - zone.0) * (i + 1) as f64 / (count + 1) as f64;
                         let e = crate::calculators::calibration::polynomial(&zone.2, t);
                         let key = format!("stc.fit.{kind}.{z}.{i}");
+                        required.push(format!("{key}.t"));
+                        required.push(format!("{key}.e"));
                         self.input(
                             ui,
                             tool,
@@ -119,6 +128,7 @@ impl ToolboxApp {
                 } else {
                     for (i, c) in zone.2.iter_mut().enumerate() {
                         let key = format!("stc.{kind}.{z}.c.{i}");
+                        required.push(key.clone());
                         let d = c.to_string();
                         self.input(
                             ui,
@@ -133,6 +143,7 @@ impl ToolboxApp {
                 }
                 model.zone = Some(zone);
             }
+            archive_required = Some(required);
             let u = TemperatureUnit(self.select_index(
                 ui,
                 tool,
@@ -223,6 +234,7 @@ impl ToolboxApp {
             ])
         })
         .inner;
+        self.finish_calibration_save(tool, archive_save, archive_required);
         show_result_or_error(ui, "换算结果", result);
         if let Some((model, u, lo, hi, cold, z)) = table {
             self.render_division_table(

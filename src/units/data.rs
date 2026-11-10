@@ -1,4 +1,4 @@
-//! 256 项静态单位目录：保存名称、符号及由基本单位定义推导的换算系数。
+//! 257 项静态单位目录：保存名称、符号及由基本单位定义推导的换算系数。
 use super::UnitDef;
 use crate::catalog::Dimension;
 
@@ -399,6 +399,7 @@ const TORQUE: &[UnitDef] = &[
 
 const CONCENTRATION: &[UnitDef] = &[
     unit!(1423, "百万分之一", "ppm", 1.0, 0.0),
+    unit!(50891, "亿分之一", "pphm", 0.01, 0.0),
     unit!(1424, "十亿分之一", "ppb", 0.001, 0.0),
     unit!(1425, "万亿分之一", "ppt", 1e-6, 0.0),
     unit!(

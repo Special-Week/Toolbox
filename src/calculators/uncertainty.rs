@@ -3,9 +3,38 @@ pub(crate) mod model;
 use crate::calculators::common::*;
 use crate::{app::ToolboxApp, catalog::ToolDef};
 use eframe::egui;
-use model::{Component, Detail, Kind};
+use model::{Component, Detail, Kind, Rounding};
 
 impl ToolboxApp {
+    pub(crate) fn uncertainty_rounding(
+        &mut self,
+        ui: &mut egui::Ui,
+        tool: &ToolDef,
+        key: &str,
+        label: &str,
+    ) -> Result<Rounding, String> {
+        let digits_key = format!("{key}.digits");
+        self.input(
+            ui,
+            tool,
+            &digits_key,
+            &format!("{label}有效数字"),
+            "",
+            "留空保留原始计算精度（1～17 位）",
+        );
+        let carry = self.select_index(
+            ui,
+            tool,
+            &format!("{key}.rounding"),
+            &format!("{label}修约方式"),
+            &["四舍六入", "进位"],
+            1,
+        ) == 1;
+        Ok(Rounding {
+            digits: model::significant_digits(&self.value(tool, &digits_key, ""))?,
+            carry,
+        })
+    }
     fn uncertainty_component(
         &mut self,
         ui: &mut egui::Ui,
@@ -31,6 +60,7 @@ impl ToolboxApp {
         let sk = format!("{key}.sensitivity");
         self.input(ui, tool, &sk, "灵敏系数", "1", "折算至相同输出单位");
         let sensitivity = self.number(tool, &sk, "1")?;
+        let rounding = self.uncertainty_rounding(ui, tool, key, "")?;
         let kind = match kind {
             0 => {
                 let range_method = self.select_index(
@@ -59,9 +89,17 @@ impl ToolboxApp {
                     &["10.02", "10.01", "10.03", "10.02", "10.01"],
                     "输入测量值",
                 )?;
+                let average_count = if range_method {
+                    None
+                } else {
+                    let field = format!("{key}.average_count");
+                    self.input(ui, tool, &field, "取测量次数 n", "", "留空默认 1 次");
+                    model::average_count(&self.value(tool, &field, ""))?
+                };
                 Kind::TypeA {
                     values,
                     range_method,
+                    average_count,
                 }
             }
             2 => {
@@ -127,6 +165,7 @@ impl ToolboxApp {
             name,
             sensitivity,
             kind,
+            rounding: Some(rounding),
         })
     }
 
@@ -158,6 +197,15 @@ impl ToolboxApp {
                 Kind::TypeA {
                     values,
                     range_method,
+                    average_count: if range_method {
+                        None
+                    } else {
+                        model::average_count(&self.value(
+                            tool,
+                            &format!("{key}.average_count"),
+                            "",
+                        ))?
+                    },
                 }
             }
             2 if depth < 4 => {
@@ -182,11 +230,36 @@ impl ToolboxApp {
             name: self.value(tool, &format!("{key}.name"), "分量"),
             sensitivity: self.number(tool, &format!("{key}.sensitivity"), "1")?,
             kind,
+            rounding: Some(Rounding {
+                digits: model::significant_digits(&self.value(tool, &format!("{key}.digits"), ""))?,
+                carry: idx(self, "rounding", "1").min(1) == 1,
+            }),
         })
     }
 
+    fn uncertainty_component_card(
+        &mut self,
+        ui: &mut egui::Ui,
+        tool: &ToolDef,
+        index: usize,
+    ) -> Result<Detail, String> {
+        let key = format!("budget.component.{index}");
+        panel(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(format!("分量 {}", index + 1))
+                    .size(14.0)
+                    .strong(),
+            );
+            ui.add_space(4.0);
+            self.uncertainty_component(ui, tool, &key, 0)
+        })
+        .inner?
+        .calculate()
+    }
+
     pub(crate) fn render_uncertainty(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.set_max_width(ui.available_width().min(820.0));
+        ui.set_max_width(ui.available_width().min(960.0));
         if self.select_index(
             ui,
             tool,
@@ -201,13 +274,11 @@ impl ToolboxApp {
         }
         let result = (|| {
             let count = self.dynamic_count(ui, tool, "budget.components", "不确定度分量", 2, 1, 20);
-            let mut details = Vec::new();
-            for i in 0..count {
-                let key = format!("budget.component.{i}");
-                let data = panel(ui, |ui| self.uncertainty_component(ui, tool, &key, 0)).inner?;
-                details.push(data.calculate()?);
-                ui.add_space(8.0);
-            }
+            let mut results = Vec::with_capacity(count);
+            balanced_columns(ui, "uncertainty_component_columns", count, |ui, i| {
+                results.push(self.uncertainty_component_card(ui, tool, i));
+            });
+            let details = results.into_iter().collect::<Result<Vec<_>, _>>()?;
             let maximum = self.select_index(
                 ui,
                 tool,
@@ -225,17 +296,17 @@ impl ToolboxApp {
                 ui,
                 tool,
                 "budget.digits",
-                "有效数字",
+                "合成结果有效数字",
                 &["1 位", "2 位", "3 位", "4 位"],
                 1,
             ) + 1;
             let carry = self.select_index(
                 ui,
                 tool,
-                "budget.rounding",
-                "修约方式",
-                &["四舍五入", "进位"],
-                0,
+                "budget.rounding_v2",
+                "合成结果修约方式",
+                &["四舍六入", "进位"],
+                1,
             ) == 1;
             let uc = model::combine(
                 &details.iter().map(|d| d.contribution).collect::<Vec<_>>(),
@@ -243,19 +314,14 @@ impl ToolboxApp {
             )?;
             let expanded = uc * k;
             super::numerics::finite(&[expanded])?;
-            let maximum = uc.max(expanded);
-            let places = if maximum == 0.0 {
-                digits as i32 - 1
-            } else {
-                (digits as i32 - maximum.log10().floor() as i32 - 1).max(0)
-            };
-            let rounded = model::rounded(uc, places, carry);
+            let (rounded, rounded_expanded) = model::rounded_combined(uc, k, digits, carry)?;
             fn show(ui: &mut egui::Ui, items: &[Detail]) {
                 for d in items {
                     ui.label(format!(
-                        "{}：u={}，c={}，贡献={}",
+                        "{}：u={}，修约后 u={}，c={}，贡献={}",
                         d.name,
-                        format_number(d.standard),
+                        format_number(d.raw_standard),
+                        model::format_rounded(d.standard, d.rounding),
                         format_number(d.sensitivity),
                         format_number(d.contribution)
                     ));
@@ -269,7 +335,7 @@ impl ToolboxApp {
                 ("合成标准不确定度 u_c", format_number(uc)),
                 ("扩展不确定度 U", format_number(expanded)),
                 ("修约后标准不确定度", format_number(rounded)),
-                ("修约后扩展不确定度", format_number(rounded * k)),
+                ("修约后扩展不确定度", format_number(rounded_expanded)),
                 ("包含因子 k", format_number(k)),
             ])
         })();

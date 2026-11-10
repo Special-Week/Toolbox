@@ -65,6 +65,9 @@ struct State {
 };
 // 每个工具一个本地快照，停止输入后保存；快捷换算不进入持久化范围。
 bool remembersInputs(const Tool &tool);
+std::wstring calibrationPath();
+bool readCalibrationJson(const std::wstring &path, State &state);
+bool writeCalibrationJson(const std::wstring &path, const State &state);
 class InputHistory {
     std::wstring path_;
     State saved_;
@@ -181,6 +184,13 @@ class App {
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
 
   public:
+    std::array<std::vector<int>, 2> uncertaintyColumns;
+    State calibrationSnapshot;
+    bool calibrationValid = false;
+    std::map<std::string, std::wstring> calibrationSelection;
+    void calibrationControls(Page &page);
+    void captureCalibration(Page &page, std::size_t firstControl);
+    void selectCalibration(int index);
     float mouseX = -1, mouseY = -1;
     Rect chartArea;
     State state;

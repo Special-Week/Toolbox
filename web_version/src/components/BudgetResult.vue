@@ -2,7 +2,9 @@
 import { display } from "../format";
 export interface Detail {
   name: string;
+  rawStandard: number;
   standard: number;
+  formattedStandard: string;
   sensitivity: number;
   contribution: number;
   children: Detail[];
@@ -15,7 +17,9 @@ defineProps<{ nodes: Detail[] }>();
       <strong>{{ node.name }}</strong>
       <div class="budget-numbers">
         <span
-          >标准不确定度 <b>{{ display(node.standard) }}</b></span
+          >标准不确定度 <b>{{ display(node.rawStandard) }}</b></span
+        ><span
+          >修约后 <b>{{ node.formattedStandard }}</b></span
         ><span
           >灵敏系数 <b>{{ display(node.sensitivity) }}</b></span
         ><span

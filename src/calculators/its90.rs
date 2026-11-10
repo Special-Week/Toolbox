@@ -210,8 +210,8 @@ impl ToolboxApp {
         self.calculation_note(ui, tool);
     }
 
-    pub(crate) fn render_cvd_fit(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        panel(ui, |ui| {
+    pub(crate) fn render_cvd_fit(&mut self, ui: &mut egui::Ui, tool: &ToolDef) -> bool {
+        let valid = panel(ui, |ui| {
             ui.set_max_width(ui.available_width().min(820.0));
             ui.label(
                 RichText::new("标准铂电阻系数拟合")
@@ -278,9 +278,13 @@ impl ToolboxApp {
                     ("最大残差", format!("{} Ω", format_number(check))),
                 ])
             })();
+            let valid = result.is_ok();
             show_result_or_error(ui, "拟合结果", result);
-        });
+            valid
+        })
+        .inner;
         self.calculation_note(ui, tool);
+        valid
     }
 
     pub(crate) fn render_beta_thermistor(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {

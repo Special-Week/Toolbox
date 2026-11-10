@@ -1,6 +1,6 @@
 # 工具箱 C++ 版
 
-**Toolbox** 的 Windows 桌面版，使用 C++17、Win32、Direct2D 和 DirectWrite，提供 **7 个分类、50 个工具**。支持窗口缩放、工具搜索和分类折叠，采用系统字体与 DPI 适配。
+**Toolbox** 的 Windows 桌面版，使用 C++17、Win32、Direct2D 和 DirectWrite，提供 **7 个分类、50 个工具**。支持窗口缩放和分类折叠，采用系统字体与 DPI 适配。
 
 完整功能清单和通用计算约定见 [主项目 README](../README.md#功能分类)。本目录可独立构建。
 
@@ -113,21 +113,22 @@ cpp_version/
 │       ├── window.cpp        # 窗口消息、输入控件、焦点与滚动处理
 │       ├── scene.cpp         # 界面布局及 Direct2D 绘制
 │       ├── text_layout.cpp   # DirectWrite 文字测量、换行与排版
-│       ├── navigation.cpp    # 首页、工具搜索及分类导航
+│       ├── navigation.cpp    # 首页与分类导航
 │       ├── icon.cpp          # 图标资源加载
 │       ├── export.cpp        # CSV 导出与后台任务
 │       ├── input_history.cpp # 最近输入的本地 JSON 保存与恢复
+│       ├── calibration_archive.cpp # 标准热电偶与标准铂电阻系数档案
 │       └── licenses.cpp      # 程序内许可查看
 ├── resources/
 │   ├── Toolbox.rc            # 图标、版本、程序清单、数据和许可资源入口
 │   ├── Toolbox.manifest      # DPI、系统兼容和权限声明
 │   ├── toolbox.ico           # 多尺寸程序图标
+│   ├── standards.json        # 内置计量规范目录
 │   └── gauges/
 │       ├── tables.json       # 量规尺寸、公差、偏差和长度表
 │       └── unified.json      # UN 系列及中径制造公差 U
 ├── licenses/                 # 第三方许可原文及内嵌许可汇总
 ├── scripts/build-pdf.ps1     # 按当前 MinGW 架构编译 PDF 依赖
-├── tests/pdf_download.cpp    # PDF 下载与校验测试
 └── third_party/
     ├── README.md             # 第三方源码说明
     ├── double-conversion/    # 十进制解析与格式化组件
@@ -143,6 +144,7 @@ cpp_version/
 
 - 计算使用 `double`，适用温区、单位、允差和模型条件见各页“计算说明”。量规模型与数据边界见 [量规数据说明](../data/gauges/README.md)。
 - 部分需要反复录入的工具自动保存最近输入，默认使用 `%LOCALAPPDATA%\Toolbox\cpp\inputs-v1.json`，可用“恢复示例”重置。单位换算等快捷工具和 PDF 下载链接不保存。
+- 标准热电偶和标准铂电阻的证书参数可保存为命名档案，默认存放在 `%LOCALAPPDATA%\Toolbox\cpp\calibrations-v1.json`。
 - “其他工具 → 计量规范 PDF 下载”支持按规范名称或编号搜索内置的 2,882 条规范，分页展示类型、状态及日期，选择条目后由本机下载 PDF、检查实际页数并选择位置保存。下载前显示提示，保存成功后显示确认；单文件上限 100 MB，请按网站的电子文本使用说明使用文件。
 - 分度表和样条支持 CSV 导出；量规支持复制完整结果。
 

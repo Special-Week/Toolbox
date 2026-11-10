@@ -332,7 +332,7 @@ pub(crate) const TOOLS: &[ToolDef] = &[
         Units,
         ToolKind::Unit(Dimension::Concentration),
         "c",
-        "ppm、ppb、ppt、体积比、质量比和等密度基准浓度换算。"
+        "ppm、pphm、ppb、ppt、体积比、质量比和等密度基准浓度换算。"
     ),
     tool!(
         "working_thermocouple",

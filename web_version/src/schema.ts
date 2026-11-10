@@ -28,6 +28,9 @@ export function newBudget(name = "分量"): Budget {
     sensitivity: "1",
     values: [...samples],
     method: "0",
+    averageCount: "",
+    digits: "",
+    rounding: "1",
     halfWidth: "0.02",
     distribution: "0",
     combine: "0",
@@ -605,13 +608,19 @@ export function schema(t: Tool, s: State, c: Catalog): Section[] {
       });
     else
       f.push(
-        vector("aValues", "A 类重复测量数据", samples, 2, 50),
+        vector("aValues", "A 类重复测量数据", samples, 0, 50),
+        n(
+          "aAverageCount", "取测量次数 n", "",
+          "留空默认 1 次。",
+        ),
         n("aSensitivity", "A 类灵敏系数", 1),
+        n("aDigits", "A 类有效数字", "", "留空保留原始计算精度（1～17 位）"),
+        sel("aRounding", "A 类修约方式", ["四舍六入", "进位"], 1),
         {
           key: "bComponents",
           label: "B 类分量",
           type: "budget",
-          min: 1,
+          min: 0,
           max: 50,
           budgetKinds: ["1"],
           // 兼容旧版快速评定的半宽列表，保留输入值和原先共用的分布。
@@ -627,8 +636,8 @@ export function schema(t: Tool, s: State, c: Catalog): Section[] {
     f.push(
       sel("combine", "合成方法", ["平方和根", "最大绝对贡献"]),
       n("coverage", "包含因子 k", 2),
-      sel("digits", "修约有效数字", ["1 位", "2 位", "3 位", "4 位"], 1),
-      sel("rounding", "修约方式", ["四舍五入", "进位"]),
+      sel("digits", "合成有效数字", ["1 位", "2 位", "3 位", "4 位"], 1),
+      sel("roundingV2", "合成修约方式", ["四舍六入", "进位"], 1),
     );
     return [section("不确定度评定", ...f)];
   }

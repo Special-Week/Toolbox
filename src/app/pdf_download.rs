@@ -5,7 +5,7 @@ use eframe::egui::{self, RichText, TextEdit, Vec2};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::Duration;
 
-fn action_button(label: &str, primary: bool) -> egui::Button<'_> {
+pub(super) fn action_button(label: &str, primary: bool) -> egui::Button<'_> {
     egui::Button::new(RichText::new(label).size(14.0).color(if primary {
         egui::Color32::WHITE
     } else {

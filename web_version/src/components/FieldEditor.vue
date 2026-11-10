@@ -4,6 +4,7 @@ import { computed, ref } from "vue";
 import type { Catalog, Field, Budget, BudgetDetail } from "../types";
 import BudgetNode from "./BudgetNode.vue";
 import PressureComponents from "./PressureComponents.vue";
+import MasonryCards from "./MasonryCards.vue";
 import { newBudget } from "../schema";
 const p = defineProps<{
   field: Field;
@@ -12,6 +13,7 @@ const p = defineProps<{
   budgetDetails?: BudgetDetail[];
 }>();
 const emit = defineEmits<{ "update:modelValue": [value: unknown] }>();
+const masonry = ref<InstanceType<typeof MasonryCards>>();
 const page = ref(1);
 const pasteOpen = ref(false);
 const pasteText = ref("");
@@ -75,6 +77,10 @@ function addBudget() {
       ...rows.value,
       newBudget(`分量 ${rows.value.length + 1}`),
     ]);
+}
+function removeBudget(index: number) {
+  masonry.value?.remove(index);
+  emit("update:modelValue", rows.value.filter((_, j) => j !== index));
 }
 </script>
 
@@ -234,9 +240,10 @@ function addBudget() {
         ＋ 添加分量
       </button>
     </div>
-    <div v-for="(node, j) in rows" :key="j" class="budget-root">
+    <MasonryCards ref="masonry" :count="rows.length" v-slot="{ index: j }">
+    <div class="budget-root">
       <BudgetNode
-        :model-value="node as Budget"
+        :model-value="rows[j] as Budget"
         :depth="0"
         :kinds="field.budgetKinds"
         :detail="budgetDetails?.[j]"
@@ -244,17 +251,13 @@ function addBudget() {
         @update:model-value="updateBudget(j, $event)"
       /><button
         class="button danger-text"
-        :disabled="rows.length <= 1"
-        @click="
-          emit(
-            'update:modelValue',
-            rows.filter((_, index) => index !== j),
-          )
-        "
+        :disabled="rows.length <= (field.min ?? 1)"
+        @click="removeBudget(j)"
       >
         删除此分量
       </button>
     </div>
+    </MasonryCards>
   </div>
   <PressureComponents
     v-else-if="field.type === 'pressure'"

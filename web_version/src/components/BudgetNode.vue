@@ -103,6 +103,15 @@ function child(j: number, value: Budget) {
             :model-value="modelValue.sensitivity"
             @update:model-value="change('sensitivity', $event)"
         /></label>
+        <label class="field"><span class="field-label">有效数字</span>
+          <NumericInput :model-value="modelValue.digits ?? ''" @update:model-value="change('digits', $event)" />
+          <small>留空保留原始计算精度（1～17 位）。</small>
+        </label>
+        <label class="field"><span class="field-label">修约方式</span>
+          <select :value="modelValue.rounding ?? '1'" @change="change('rounding', ($event.target as HTMLSelectElement).value)" @wheel="($event.currentTarget as HTMLSelectElement).blur()">
+            <option value="0">四舍六入</option><option value="1">进位</option>
+          </select>
+        </label>
         <template v-if="modelValue.kind === '1'">
           <label class="field"
             ><span class="field-label">{{
@@ -173,6 +182,14 @@ function child(j: number, value: Budget) {
         >
       </div>
       <template v-if="modelValue.kind === '0'">
+        <label v-if="modelValue.method !== '1'" class="field">
+          <span class="field-label">取测量次数 n</span>
+          <NumericInput
+            :model-value="modelValue.averageCount ?? ''"
+            @update:model-value="change('averageCount', $event)"
+          />
+          <small>留空默认 1 次。</small>
+        </label>
         <div class="array-toolbar">
           <span class="muted">测量值 · {{ modelValue.values.length }} 项</span>
           <div class="toolbar-actions">

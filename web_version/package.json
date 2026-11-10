@@ -9,6 +9,7 @@
     "test:pdf": "node --test scripts/pdf-download.test.mjs server/pdf-cache.test.mjs server/http.test.mjs",
     "test:curve": "node --test scripts/curve-chart.test.mjs",
     "test:spec-menu": "node --test scripts/spec-options.test.mjs",
+    "test:uncertainty": "node --test scripts/masonry.test.mjs scripts/uncertainty-ui.test.cjs",
     "start": "node server/index.mjs",
     "dev": "npm run build:wasm && vite --host 127.0.0.1",
     "build": "npm run build:wasm && vue-tsc --noEmit && node scripts/clean-dist.mjs && vite build && node scripts/package-server.mjs",

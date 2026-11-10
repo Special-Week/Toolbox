@@ -2,8 +2,11 @@
 #include "sensors.hpp"
 namespace toolbox {
 void sprtPage(Page &p) {
+    const auto calibrationStart = p.ui.controls.size();
     if (p.select("model", L"计算模型", {L"标准铂电阻（SPRT 换算）", L"CVD 系数拟合"}) == 1) {
         cvdPage(p);
+        p.check();
+        p.app.captureCalibration(p, calibrationStart);
         return;
     }
     int hr = p.select("hr", L"高温分段",
@@ -108,6 +111,7 @@ void sprtPage(Page &p) {
     }
     p.check();
     m.validate();
+    p.app.captureCalibration(p, calibrationStart);
     TemperatureUnit unit{p.select("unit", L"温度单位", {L"°C", L"K", L"°F"})};
     int direction = p.select("direction", L"计算方式", {L"温度 → 电阻", L"电阻 → 温度"});
     double dt = hr == 6 ? -20 : 20;

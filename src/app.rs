@@ -10,9 +10,11 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
+pub(crate) mod calibration_archive;
 mod dashboard;
 mod input_history;
 mod pdf_download;
+use calibration_archive::CalibrationArchives;
 use input_history::InputHistory;
 
 pub(crate) struct ToolboxApp {
@@ -21,6 +23,7 @@ pub(crate) struct ToolboxApp {
     // 保留用户输入的原始文本，允许编辑中的空串、负号等暂时无效状态。
     values: HashMap<String, String>,
     history: InputHistory,
+    archives: CalibrationArchives,
     opened: Option<&'static str>,
     example_revision: u64,
     sidebar_collapsed: bool,
@@ -35,11 +38,13 @@ pub(crate) struct ToolboxApp {
 impl Default for ToolboxApp {
     fn default() -> Self {
         let history = InputHistory::new();
+        let archives = CalibrationArchives::load(history.sibling_path("calibrations-v1.json"));
         Self {
             selected: None,
             selected_group: None,
             values: history.values.clone(),
             history,
+            archives,
             opened: None,
             example_revision: 0,
             sidebar_collapsed: false,
@@ -111,6 +116,24 @@ impl eframe::App for ToolboxApp {
 }
 
 impl ToolboxApp {
+    pub(crate) fn calibration_archive_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        tool: &ToolDef,
+    ) -> Option<calibration_archive::SaveRequest> {
+        self.archives.show(ui, tool.id, &mut self.values)
+    }
+
+    pub(crate) fn finish_calibration_save(
+        &mut self,
+        tool: &ToolDef,
+        request: Option<calibration_archive::SaveRequest>,
+        required: Option<Vec<String>>,
+    ) {
+        self.archives
+            .finish_save(tool.id, &self.values, request, required);
+    }
+
     fn poll_spline_export(&mut self, ctx: &egui::Context) {
         // UI 线程只轮询消息，文件写入交给后台线程，避免大规模采样冻结窗口。
         let Some(job) = self.spline_export.as_ref() else {
@@ -416,6 +439,7 @@ impl ToolboxApp {
     fn clear_tool_inputs(&mut self, tool: &ToolDef) {
         let prefix = format!("{}.", tool.id);
         self.values.retain(|key, _| !key.starts_with(&prefix));
+        self.archives.clear_selection(tool.id);
     }
 
     fn storage_key(tool: &ToolDef, key: &str) -> String {

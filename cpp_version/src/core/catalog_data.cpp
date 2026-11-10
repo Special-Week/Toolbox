@@ -36,7 +36,7 @@ const std::vector<Tool> &tools() {
          Dimension::HeatTransferRate},
         {"unit_torque", L"扭矩", Group::Units, Kind::Unit, L"τ", L"扭矩单位换算。", Dimension::Torque},
         {"unit_concentration", L"浓度", Group::Units, Kind::Unit, L"c",
-         L"ppm、ppb、ppt、体积比、质量比和等密度基准浓度换算。", Dimension::Concentration},
+         L"ppm、pphm、ppb、ppt、体积比、质量比和等密度基准浓度换算。", Dimension::Concentration},
         {"working_thermocouple", L"工业热电偶", Group::Its90, Kind::WorkingThermocouple, L"TC",
          L"15 种分度号双向换算、参考端补偿、等级允差与分度表。"},
         {"industrial_thermal_resistance", L"工业热电阻", Group::Its90, Kind::IndustrialResistance, L"RTD",
@@ -453,6 +453,7 @@ const std::vector<Unit> &units(Dimension dimension) {
     case Dimension::Concentration: {
         static const std::vector<Unit> data{
             {1423, L"百万分之一", L"ppm", 1.0, 0.0},
+            {50891, L"亿分之一", L"pphm", 0.01, 0.0},
             {1424, L"十亿分之一", L"ppb", 0.001, 0.0},
             {1425, L"万亿分之一", L"ppt", 1e-6, 0.0},
             {50869, L"液量盎司 / 加仑(UK)", L"fl.oz/gallon(UK)", 1e6 / 160.0, 0.0},
@@ -527,7 +528,7 @@ std::wstring unitNotes(Dimension dimension) {
     case Dimension::SurfaceTension:
         return LR"COPY(kgf、gf 按标准重力定义；lbf 表示磅力。)COPY";
     case Dimension::Concentration:
-        return LR"COPY(ppm、ppb、ppt 分别表示 10⁻⁶、10⁻⁹、10⁻¹²；滴按 20 滴/mL。
+        return LR"COPY(ppm、pphm、ppb、ppt 分别表示 10⁻⁶、10⁻⁸、10⁻⁹、10⁻¹²；滴按 20 滴/mL。
 质量比、体积比及质量浓度按等密度基准列示，溶液与溶质密度均取 1000 kg/m³。实际物质互换须使用实际密度。)COPY";
     case Dimension::Mass:
         return LR"COPY(市担=50 kg，市斤=0.5 kg；lb 为常衡磅。英吨/英担为 2240/112 lb，美吨/美担为 2000/100 lb。)COPY";

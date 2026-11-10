@@ -6,6 +6,17 @@ pub(crate) struct LowRange {
     pub fixed_points: &'static [f64],
 }
 
+pub(crate) fn high_fixed_points(range: usize) -> &'static [f64] {
+    match range {
+        0 | 1 => &[231.928, 419.527, 660.323],
+        2 => &[231.928, 419.527],
+        3 => &[156.599, 231.928],
+        4 => &[156.599],
+        5 => &[29.765],
+        _ => &[],
+    }
+}
+
 pub(crate) const LOW_RANGES: [LowRange; 3] = [
     LowRange {
         label: "a4, b4（−189.344～0 °C）",

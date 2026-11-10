@@ -17,6 +17,43 @@ pub(crate) fn panel<R>(
         .show(ui, contents)
 }
 
+/// 保持已有卡片的列位置，新增卡片放入当前较短的一列。
+pub(crate) fn balanced_columns(
+    ui: &mut egui::Ui,
+    id: &str,
+    count: usize,
+    mut card: impl FnMut(&mut egui::Ui, usize),
+) {
+    let layout_id = ui.make_persistent_id(id);
+    let mut assignments = ui
+        .data_mut(|data| data.get_temp::<Vec<usize>>(layout_id))
+        .unwrap_or_default();
+    assignments.truncate(count);
+    if count > 1 && ui.available_width() >= 760.0 {
+        ui.columns(2, |columns| {
+            for i in 0..count {
+                let column = if let Some(&column) = assignments.get(i) {
+                    column
+                } else {
+                    let column = usize::from(
+                        columns[1].next_widget_position().y < columns[0].next_widget_position().y,
+                    );
+                    assignments.push(column);
+                    column
+                };
+                card(&mut columns[column], i);
+                columns[column].add_space(8.0);
+            }
+        });
+    } else {
+        for i in 0..count {
+            card(ui, i);
+            ui.add_space(8.0);
+        }
+    }
+    ui.data_mut(|data| data.insert_temp(layout_id, assignments));
+}
+
 pub(crate) fn form_row<R>(
     ui: &mut egui::Ui,
     label: &str,
@@ -168,7 +205,10 @@ pub(crate) fn collapsible_note(
 
 /// 计算说明与公式一起展开，切换模型时保留展开状态。
 pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
-    let (summary, formula) = super::explanations::selected(kind, mode);
+    let (summary, mut formula) = super::explanations::selected(kind, mode);
+    if matches!(kind, ToolKind::Uncertainty) && mode == 0 {
+        formula = formula.replace("最低为整数位", "可修约至十位、百位等");
+    }
     if summary.is_empty() && formula.is_empty() {
         return;
     }
@@ -185,6 +225,24 @@ pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
                     .color(INK),
             );
             ui.add(egui::Label::new(RichText::new(formula).size(12.0).color(INK)).wrap());
+            if matches!(kind, ToolKind::Uncertainty) {
+                ui.add(egui::Label::new(RichText::new("贝塞尔法先用全部测量值计算样本标准差 s，再按 u=s/√n 计算；取测量次数 n 留空时默认为 1。")
+                    .size(12.0).color(INK)).wrap());
+                ui.add(egui::Label::new(RichText::new("分量填写有效数字后先按所选方式修约，再乘灵敏系数参与合成；留空保留原始计算精度。四舍六入按五成双处理。")
+                    .size(12.0).color(INK)).wrap());
+                if mode == 1 {
+                    ui.add(
+                        egui::Label::new(
+                            RichText::new(
+                                "合成结果按 uc 和 U 较大值确定修约位数；修约后 U=k×修约后的 uc。",
+                            )
+                            .size(12.0)
+                            .color(INK),
+                        )
+                        .wrap(),
+                    );
+                }
+            }
         }
     });
 }

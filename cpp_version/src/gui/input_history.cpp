@@ -226,7 +226,7 @@ class Reader {
 
   public:
     explicit Reader(const std::string &text) : text_(text) {}
-    State read() {
+    State read(bool filter = true) {
         State state;
         bool version = false, values = false, choices = false;
         object([&](const std::string &key) {
@@ -248,17 +248,19 @@ class Reader {
         });
         skip();
         require(version && values && choices && position_ == text_.size(), "输入记录结构不完整");
-        for (auto it = state.values.begin(); it != state.values.end();)
-            if (!rememberedField(it->first)) it = state.values.erase(it);
-            else ++it;
-        for (auto it = state.choices.begin(); it != state.choices.end();)
-            if (!rememberedField(it->first)) it = state.choices.erase(it);
-            else ++it;
+        if (filter) {
+            for (auto it = state.values.begin(); it != state.values.end();)
+                if (!rememberedField(it->first)) it = state.values.erase(it);
+                else ++it;
+            for (auto it = state.choices.begin(); it != state.choices.end();)
+                if (!rememberedField(it->first)) it = state.choices.erase(it);
+                else ++it;
+        }
         return state;
     }
 };
 
-bool readJson(const std::wstring &path, State &state) {
+bool readJson(const std::wstring &path, State &state, bool filter = true) {
     File file;
     file.value = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE,
                              nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -273,7 +275,7 @@ bool readJson(const std::wstring &path, State &state) {
     if (text.empty() || !MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, text.data(),
                                             int(text.size()), nullptr, 0)) return false;
     try {
-        state = Reader(text).read();
+        state = Reader(text).read(filter);
         return true;
     } catch (const std::exception &) {
         return false;
@@ -307,6 +309,25 @@ bool writeJson(const std::wstring &path, const State &state) {
     return false;
 }
 } // namespace
+
+std::wstring calibrationPath() {
+    auto base = environment(L"LOCALAPPDATA");
+    if (base.empty()) base = environment(L"APPDATA");
+    return base.empty() ? L"" : base + L"\\Toolbox\\cpp\\calibrations-v1.json";
+}
+bool readCalibrationJson(const std::wstring &path, State &state) {
+    if (path.empty()) return false;
+    const DWORD attributes = GetFileAttributesW(path.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES) {
+        const DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND) { state = {}; return true; }
+        return false;
+    }
+    return !(attributes & FILE_ATTRIBUTE_DIRECTORY) && readJson(path, state, false);
+}
+bool writeCalibrationJson(const std::wstring &path, const State &state) {
+    try { return writeJson(path, state); } catch (const std::exception &) { return false; }
+}
 
 bool remembersInputs(const Tool &tool) {
     switch (tool.kind) {

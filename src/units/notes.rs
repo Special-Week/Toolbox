@@ -38,7 +38,7 @@ pub(crate) fn for_dimension(dimension: Dimension) -> &'static str {
         Dimension::DynamicViscosity => "reyn 与 lbf·s/in² 等值；lb 表示质量磅，lbf 表示磅力。",
         Dimension::SurfaceTension => "kgf、gf 按标准重力定义；lbf 表示磅力。",
         Dimension::Concentration => {
-            "ppm、ppb、ppt 分别表示 10⁻⁶、10⁻⁹、10⁻¹²；滴按 20 滴/mL。\n质量比、体积比及质量浓度按等密度基准列示，溶液与溶质密度均取 1000 kg/m³。实际物质互换须使用实际密度。"
+            "ppm、pphm、ppb、ppt 分别表示 10⁻⁶、10⁻⁸、10⁻⁹、10⁻¹²；滴按 20 滴/mL。\n质量比、体积比及质量浓度按等密度基准列示，溶液与溶质密度均取 1000 kg/m³。实际物质互换须使用实际密度。"
         }
         Dimension::Mass => {
             "市担=50 kg，市斤=0.5 kg；lb 为常衡磅。英吨/英担为 2240/112 lb，美吨/美担为 2000/100 lb。"

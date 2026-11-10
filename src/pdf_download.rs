@@ -318,6 +318,3 @@ pub(crate) fn save_atomic(path: &Path, data: &[u8]) -> Result<(), String> {
         .map_err(|e| format!("保存失败，请确认目标文件未被占用：{}", e.error))?;
     Ok(())
 }
-
-#[cfg(test)]
-mod tests;

@@ -152,21 +152,31 @@ class Spectrum {
 // 分量树先计算各子项贡献，再合成并应用父项灵敏系数，防止重复乘系数。
 struct UncertaintyDetail {
     std::wstring name;
-    double standard, sensitivity, contribution;
+    double rawStandard, standard, sensitivity, contribution;
     std::vector<UncertaintyDetail> children;
+    std::optional<int> digits;
 };
+struct UncertaintyRounding { std::optional<int> digits; bool carry = true; };
 struct Component {
     std::wstring name = L"分量";
     double sensitivity = 1, halfWidth = 0.02;
     int kind = 1, distribution = 0;
     bool useRange = false, maximum = false;
+    std::optional<std::size_t> averageCount;
+    UncertaintyRounding rounding;
     Values values;
     std::vector<Component> children;
     UncertaintyDetail calculate() const;
 };
+std::optional<std::size_t> parseAverageCount(const std::wstring &text);
+std::optional<int> parseSignificantDigits(const std::wstring &text);
+int uncertaintyExponent(double value);
+double roundSignificant(double value, UncertaintyRounding rounding);
+std::wstring formatRoundedUncertainty(double value, std::optional<int> digits);
 double distributionDivisor(int distribution);
 double combineUncertainty(const Values &values, bool maximum);
 double roundedUncertainty(double value, int places, bool carry);
+std::pair<double, double> roundedCombinedUncertainty(double uc, double k, int digits, bool carry);
 
 struct Point {
     double x = 0, y = 0;

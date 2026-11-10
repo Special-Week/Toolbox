@@ -35,6 +35,7 @@ src/models/gauges/notes.cpp
 
 src/gui/window.cpp
 src/gui/input_history.cpp
+src/gui/calibration_archive.cpp
 src/gui/icon.cpp
 src/gui/scene.cpp
 src/gui/text_layout.cpp

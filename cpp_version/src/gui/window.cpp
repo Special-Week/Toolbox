@@ -154,6 +154,8 @@ void App::restoreExample() {
         pdfSavePending = false;
     }
     clearToolInputs(tool);
+    if (tool.kind == Kind::Uncertainty) uncertaintyColumns = {};
+    calibrationSelection.erase(tool.id);
     inputHistory_.observe(tool, state);
     inputHistory_.flush(true);
     refresh();
@@ -449,6 +451,10 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
                         if (suggestion && notification == CBN_SELCHANGE &&
                             SendMessageW(child, CB_GETDROPPEDSTATE, 0, 0)) return 0;
                         const int selection = int(SendMessageW(child, CB_GETCURSEL, 0, 0));
+                        if (it->second == "__calibration.selection") {
+                            selectCalibration(selection);
+                            return 0;
+                        }
                         if (!suggestion || (selection >= 0 && state.choices[it->second] != selection)) {
                             state.choices[it->second] = selection;
                             refresh();
@@ -677,6 +683,7 @@ void App::rebuild(bool scrolling) {
     if (!window_ || width < 10 || height < 10) {
         return;
     }
+    calibrationValid = false;
     scene = Scene{};
     chartArea = {};
     scene.clip = {0, 0, width, height};
@@ -699,7 +706,7 @@ void App::rebuild(bool scrolling) {
               w = std::min(width - left - 48, tool.group == Group::Gauges ||
                                                       tool.kind == Kind::BSplineInterpolation ||
                                                       tool.kind == Kind::CalibrationCurveFit
-                                                      || tool.kind == Kind::PdfDownload
+                                                      || tool.kind == Kind::PdfDownload || tool.kind == Kind::Uncertainty
                                                   ? 960.f
                                                   : 820.f),
               y = top + 10 - scroll;

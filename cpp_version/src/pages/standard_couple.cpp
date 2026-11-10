@@ -2,6 +2,7 @@
 #include "sensors.hpp"
 namespace toolbox {
 void standardCouplePage(Page &p) {
+    const auto calibrationStart = p.ui.controls.size();
     int type = p.select("type", L"分度号", {L"S 型", L"B 型"}),
         mode = p.select("calibration", L"校准方式", {L"固定点实测热电势", L"温区多项式系数"});
     StandardCouple model;
@@ -58,6 +59,8 @@ void standardCouplePage(Page &p) {
         }
         model.zone = zone;
     }
+    p.check();
+    p.app.captureCalibration(p, calibrationStart);
     TemperatureUnit unit{p.select("unit", L"温度单位", {L"°C", L"K", L"°F"})};
     int direction = p.select("direction", L"计算方式", {L"温度 → 热电势", L"热电势 → 温度"});
     p.check();

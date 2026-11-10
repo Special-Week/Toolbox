@@ -13,6 +13,10 @@ import { resultCsv } from "./export";
 import { calculationNote } from "./notes";
 import { INPUT_STORAGE_KEY, rememberedInputs } from "./input-history";
 import FieldEditor from "./components/FieldEditor.vue";
+import QuickUncertainty from "./components/QuickUncertainty.vue";
+import ResultantComponents from "./components/ResultantComponents.vue";
+import CalibrationArchives from "./components/CalibrationArchives.vue";
+import { applyCalibration, type CalibrationArchive } from "./calibration-archives";
 import CurveChart from "./components/CurveChart.vue";
 import ResultTable from "./components/ResultTable.vue";
 import BudgetResult, { type Detail } from "./components/BudgetResult.vue";
@@ -316,6 +320,11 @@ function reset() {
     saveNow();
     message.value = "已恢复示例输入。";
   }
+}
+function useCalibration(archive: CalibrationArchive) {
+  if (!selected.value || !catalog.value) return;
+  applyCalibration(selected.value, current.value, archive);
+  initialize(selected.value, current.value, catalog.value);
 }
 function reload() {
   window.location.reload();
@@ -667,6 +676,15 @@ onUnmounted(() => {
             {{ selected.kind === "pdf" ? "清空" : "恢复示例" }}
           </button>
         </div>
+        <CalibrationArchives
+          v-if="selected.kind === 'standard_couple' || selected.kind === 'sprt'"
+          :key="`${selected.id}:${inputGeneration}`"
+          :tool="selected"
+          :state="current"
+          :catalog="catalog"
+          :engine="engine"
+          @apply="useCalibration"
+        />
         <GaugeTool
           v-if="selected.kind === 'gauge'"
           :key="selected.id + ':' + inputGeneration"
@@ -688,28 +706,41 @@ onUnmounted(() => {
                   <span v-if="busy" class="working-label">计算中…</span>
                 </div>
                 <div class="form-grid">
-                  <FieldEditor
-                    v-for="field in section.fields"
-                    :key="selected.id + field.key"
-                    :class="{
-                      'full-width': !['number', 'text', 'select'].includes(
-                        field.type,
-                      ),
-                    }"
-                    :field="field"
-                    :model-value="current[field.key]"
-                    :catalog="catalog"
-                    :budget-details="
-                      busy
-                        ? []
-                        : field.key === 'components'
-                          ? budget
-                          : field.key === 'bComponents'
-                            ? budget.slice(1)
-                            : []
-                    "
-                    @update:model-value="change(field.key, $event)"
-                  />
+                  <template v-for="field in section.fields" :key="selected.id + field.key">
+                    <h3 v-if="selected.kind === 'uncertainty' && Number(current.mode) === 1 && field.key === 'combine'" class="full-width">合成设置</h3>
+                    <ResultantComponents
+                      v-if="selected.kind === 'resultant' && field.key === 'values'"
+                      :values="current.values"
+                      :sensitivities="current.sensitivities"
+                      @update:values="change('values', $event)"
+                      @update:sensitivities="change('sensitivities', $event)"
+                    />
+                    <QuickUncertainty
+                      v-else-if="selected.kind === 'uncertainty' && Number(current.mode) === 1 && field.key === 'aValues'"
+                      :state="current" :fields="section.fields" :catalog="catalog" :details="busy ? [] : budget"
+                      @change="change"
+                    />
+                    <FieldEditor
+                      v-else-if="(selected.kind !== 'resultant' || field.key !== 'sensitivities') && !(selected.kind === 'uncertainty' && Number(current.mode) === 1 && ['aAverageCount', 'aSensitivity', 'aDigits', 'aRounding', 'bComponents'].includes(field.key))"
+                      :class="{
+                        'full-width': !['number', 'text', 'select'].includes(field.type) ||
+                          (selected.kind === 'uncertainty' && ['mode', 'combine', 'coverage', 'digits', 'roundingV2'].includes(field.key)),
+                      }"
+                      :field="field"
+                      :model-value="current[field.key]"
+                      :catalog="catalog"
+                      :budget-details="
+                        busy
+                          ? []
+                          : field.key === 'components'
+                            ? budget
+                            : field.key === 'bComponents'
+                              ? budget.slice(1)
+                              : []
+                      "
+                      @update:model-value="change(field.key, $event)"
+                    />
+                  </template>
                 </div>
                 <details v-if="section.advanced" class="advanced-settings">
                   <summary>

@@ -1,7 +1,7 @@
 //! 标准铂电阻页面；按子区间限制计算温区，并分离证书系数和固定点拟合输入。
 mod curves;
 pub(crate) mod model;
-mod ranges;
+pub(crate) mod ranges;
 use crate::calculators::{calibration::TemperatureUnit, common::*};
 use crate::{app::ToolboxApp, catalog::ToolDef};
 use eframe::egui;
@@ -10,6 +10,7 @@ use ranges::LOW_RANGES;
 impl ToolboxApp {
     pub(crate) fn render_standard_resistance(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
         ui.set_max_width(ui.available_width().min(820.0));
+        let archive_save = self.calibration_archive_controls(ui, tool);
         if self.select_index(
             ui,
             tool,
@@ -19,11 +20,30 @@ impl ToolboxApp {
             0,
         ) == 1
         {
-            self.render_cvd_fit(ui, tool);
+            let valid = self.render_cvd_fit(ui, tool);
+            let required = valid.then(|| {
+                ["sprt.model", "r0", "t1", "r1", "t2", "r2", "t3", "r3"]
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect()
+            });
+            self.finish_calibration_save(tool, archive_save, required);
             return;
         }
+        let mut archive_required = None;
         let mut table = None;
         let result = panel(ui, |ui| {
+            let mut required = [
+                "sprt.model",
+                "sprt.hr",
+                "sprt.lr",
+                "sprt.deviation",
+                "sprt.source",
+                "sprt.rtp",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
             let hr = self.select_index(
                 ui,
                 tool,
@@ -92,6 +112,7 @@ impl ToolboxApp {
                     ]
                 } {
                     let k = format!("sprt.coefficient.{key}");
+                    required.push(k.clone());
                     let d = item.to_string();
                     self.input(ui, tool, &k, label, &d, "证书系数");
                     *item = self.number(tool, &k, &d)?;
@@ -99,12 +120,17 @@ impl ToolboxApp {
                 if let Some([a_label, b_label]) = low_range.coefficients {
                     for (label, item) in [(a_label, &mut m.a4), (b_label, &mut m.b4)] {
                         let k = format!("sprt.coefficient.{label}");
+                        required.push(k.clone());
                         let d = item.to_string();
                         self.input(ui, tool, &k, label, &d, "所选低温分区的证书系数");
                         *item = self.number(tool, &k, &d)?;
                     }
                 }
                 if full && hr == 0 {
+                    required.extend([
+                        "sprt.coefficient.d".to_owned(),
+                        "sprt.coefficient.w660".to_owned(),
+                    ]);
                     let w = m.resistance(660.323)? / m.rtp;
                     self.input(ui, tool, "sprt.coefficient.d", "d6", "0", "银点偏差系数");
                     self.input(
@@ -122,22 +148,13 @@ impl ToolboxApp {
                     }
                 }
             } else {
-                let highs: Vec<f64> = match hr {
-                    0 | 1 => vec![231.928, 419.527, 660.323],
-                    2 => vec![231.928, 419.527],
-                    3 => vec![156.599, 231.928],
-                    4 => vec![156.599],
-                    5 => vec![29.765],
-                    _ => vec![],
-                };
+                let highs = ranges::high_fixed_points(hr);
                 let mut hp = Vec::new();
                 let mut lp = Vec::new();
-                for (list, out) in [
-                    (highs.as_slice(), &mut hp),
-                    (low_range.fixed_points, &mut lp),
-                ] {
+                for (list, out) in [(highs, &mut hp), (low_range.fixed_points, &mut lp)] {
                     for &t in list {
                         let key = format!("sprt.fixed.{t}");
+                        required.push(key.clone());
                         let d = m.resistance(t)?.to_string();
                         self.input(
                             ui,
@@ -162,6 +179,7 @@ impl ToolboxApp {
                     },
                 )?;
                 if full && hr == 0 {
+                    required.push("sprt.fixed.961.78".to_owned());
                     m.w660 = hp
                         .iter()
                         .find(|(t, _)| *t == 660.323)
@@ -210,6 +228,7 @@ impl ToolboxApp {
                 });
             }
             m.validate()?;
+            archive_required = Some(required);
             let u = TemperatureUnit(self.select_index(
                 ui,
                 tool,
@@ -296,6 +315,7 @@ impl ToolboxApp {
             ])
         })
         .inner;
+        self.finish_calibration_save(tool, archive_save, archive_required);
         show_result_or_error(ui, "换算结果", result);
         if let Some((m, u, min, max, hr, lr)) = table {
             self.render_division_table(

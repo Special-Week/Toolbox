@@ -86,6 +86,9 @@ export interface Budget {
   sensitivity: string;
   values: string[];
   method: string;
+  averageCount?: string;
+  digits?: string;
+  rounding?: string;
   halfWidth: string;
   distribution: string;
   combine: string;
@@ -93,7 +96,9 @@ export interface Budget {
 }
 export interface BudgetDetail {
   name: string;
+  rawStandard: number;
   standard: number;
+  formattedStandard: string;
   sensitivity: number;
   contribution: number;
   children: BudgetDetail[];

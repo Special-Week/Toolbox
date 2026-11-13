@@ -2,7 +2,11 @@
 import type { Result, Tool } from "./types";
 import { csvCell, decimal } from "./format";
 
-export function resultCsv(tool: Tool, result: Result, note = { note: tool.note, formula: tool.formula }): string {
+export function resultCsv(
+  tool: Tool,
+  result: Result,
+  note = { note: tool.note, formula: tool.formula },
+): string {
   const rows: unknown[][] = [
     ["工具", tool.name],
     [],

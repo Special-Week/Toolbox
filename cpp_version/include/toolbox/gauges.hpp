@@ -125,4 +125,4 @@ struct PageData {
 PageData page(Type type, State state, const std::string &changed);
 std::string explanation(Type type);
 std::string convention(Type type);
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

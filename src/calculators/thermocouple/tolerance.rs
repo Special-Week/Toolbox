@@ -1,4 +1,4 @@
-//! IEC 60584-1 classes, checked against WIKA IN 00.23.
+//! IEC 60584-1 等级允差，并与 WIKA IN 00.23 核对。
 //! 等级范围独立于分度曲线范围；没有内置标准数据的型号返回空列表。
 pub(crate) struct Tolerance {
     pub name: &'static str,

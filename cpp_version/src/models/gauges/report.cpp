@@ -152,4 +152,4 @@ void positiveGeometry(double d, double p, double d2, double d1) {
             "直径和螺距须为有效正数，并形成大径＞中径＞小径＞0 的几何关系");
     require(d > d2 && d2 > d1, "当前直径与螺距不能形成有效牙型");
 }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

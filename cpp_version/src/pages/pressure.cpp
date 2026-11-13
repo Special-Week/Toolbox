@@ -1,9 +1,7 @@
 // 标准器核验、量程推荐及高差换算；切换单位时同步转换已填量程。
 #include "toolbox/gui.hpp"
 namespace toolbox {
-static std::wstring judgement(bool good) {
-    return good ? L"符合" : L"不符合";
-}
+static std::wstring judgement(bool good) { return good ? L"符合" : L"不符合"; }
 static void legacy(Page &p) {
     p.heading(L"变送器通道参数");
     double dl = p.number("dut_low", L"被检压力下限", 0), dh = p.number("dut_high", L"被检压力上限", 1),
@@ -200,4 +198,4 @@ void renderPressure(Page &p) {
                {L"等效水柱（4 °C）", format(dp / 9.80638) + L" mmH₂O"},
                {L"修正方向", h > 0 ? L"被检表高于标准器" : (h < 0 ? L"被检表低于标准器" : L"无高差")}});
 }
-} // namespace toolbox
+} // 命名空间 toolbox

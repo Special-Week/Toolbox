@@ -201,14 +201,16 @@ mod tests {
         assert_eq!(rounded_decimal(0.01, 2, true).unwrap(), 0.01);
         assert_eq!(rounded_decimal(0.01001, 2, true).unwrap(), 0.02);
         assert_eq!(rounded_decimal(1234.0, -2, true).unwrap(), 1300.0);
-        assert!(round_significant(
-            f64::MAX,
-            Rounding {
-                digits: Some(2),
-                carry: true
-            }
-        )
-        .is_err());
+        assert!(
+            round_significant(
+                f64::MAX,
+                Rounding {
+                    digits: Some(2),
+                    carry: true
+                }
+            )
+            .is_err()
+        );
         let tiny = f64::from_bits(1);
         assert_eq!(
             round_significant(

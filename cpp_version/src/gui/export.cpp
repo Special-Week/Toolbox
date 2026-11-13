@@ -157,4 +157,4 @@ void Page::division(const std::string &field, std::pair<double, double> bounds, 
     }
     chart(plot, {}, [value](double x) { return value(x).first; });
 }
-} // namespace toolbox
+} // 命名空间 toolbox

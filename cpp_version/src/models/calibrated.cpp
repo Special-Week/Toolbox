@@ -146,18 +146,14 @@ double Sprt::temperatureBranch(double r, bool high) const {
     finite({t});
     return t;
 }
-double Sprt::temperature(double r) const {
-    return temperatureBranch(r, r >= rtp);
-}
+double Sprt::temperature(double r) const { return temperatureBranch(r, r >= rtp); }
 double Sprt::resistanceBranch(double t, bool high) const {
     validate();
     require(std::isfinite(t) && t >= -200 && t <= 961.78, "SPRT 换算范围为 −200～961.78 °C");
     return rtp * inverse([&](double w) { return temperatureBranch(w * rtp, high); }, t, high ? .99 : .01,
                          (high || (lowQuadratic && t >= 0)) ? 4.5 : 1.01);
 }
-double Sprt::resistance(double t) const {
-    return resistanceBranch(t, t >= 0);
-}
+double Sprt::resistance(double t) const { return resistanceBranch(t, t >= 0); }
 void Sprt::fit(const std::vector<std::pair<double, double>> &high,
                const std::vector<std::pair<double, double>> &low, int terms) {
     validate();
@@ -275,4 +271,4 @@ PolynomialThermistor PolynomialThermistor::fit(const std::vector<std::pair<doubl
     }
     return model;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

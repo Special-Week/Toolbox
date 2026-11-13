@@ -4,7 +4,6 @@
 #include "toolbox/gui.hpp"
 
 namespace toolbox {
-void drawCurveFitChart(Page &page, const CurveFit &fit,
-                       const std::vector<std::pair<double, double>> &points,
+void drawCurveFitChart(Page &page, const CurveFit &fit, const std::vector<std::pair<double, double>> &points,
                        const std::wstring &xLabel, const std::wstring &yLabel, bool residual);
-} // namespace toolbox
+} // 命名空间 toolbox

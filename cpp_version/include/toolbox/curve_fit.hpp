@@ -28,4 +28,4 @@ struct CurveFit {
     static Normalization normalization(const Values &values, bool centered);
     static Values originalCoefficients(const Values &coefficients, Normalization x, Normalization y);
 };
-} // namespace toolbox
+} // 命名空间 toolbox

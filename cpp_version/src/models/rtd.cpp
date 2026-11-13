@@ -143,4 +143,4 @@ std::vector<Tolerance> rtdTolerances(RtdTolerance kind, double t, bool film) {
     }
     return out;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

@@ -277,4 +277,4 @@ RMSE=√(Σe²/n)，残差标准差=√[Σe²/(n−p)]，p 为估计参数个数
     }
     return {};
 }
-} // namespace toolbox
+} // 命名空间 toolbox

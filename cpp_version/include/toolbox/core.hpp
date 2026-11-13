@@ -143,4 +143,4 @@ struct Axis {
     double fraction(double value) const;
     double tickFraction(double value) const;
 };
-} // namespace toolbox
+} // 命名空间 toolbox

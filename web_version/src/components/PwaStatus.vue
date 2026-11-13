@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 监听离线安装、网络状态和新版本，并在更新前通知页面保存输入。
 import { onMounted, onUnmounted, ref } from "vue";
 defineProps<{ busy: boolean }>();
 const emit = defineEmits<{ beforeUpdate: [] }>();

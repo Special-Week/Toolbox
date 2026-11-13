@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 数字输入保留编辑中的原始文本，回车时移动到下一项。
 import { advanceNumeric } from "../mobile-input";
 defineProps<{ modelValue?: unknown; disabled?: boolean }>();
 const emit = defineEmits<{ "update:modelValue": [value: string] }>();

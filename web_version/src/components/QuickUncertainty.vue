@@ -1,28 +1,63 @@
 <script setup lang="ts">
+// 组织快速不确定度输入与 B 类分量卡片。
 import { computed, ref } from "vue";
 import type { Budget, BudgetDetail, Catalog, Field, State } from "../types";
 import { newBudget } from "../schema";
 import FieldEditor from "./FieldEditor.vue";
 import BudgetNode from "./BudgetNode.vue";
 import MasonryCards from "./MasonryCards.vue";
-const props = defineProps<{ state: State; fields: Field[]; catalog: Catalog; details: BudgetDetail[] }>();
+const props = defineProps<{
+  state: State;
+  fields: Field[];
+  catalog: Catalog;
+  details: BudgetDetail[];
+}>();
 const emit = defineEmits<{ change: [key: string, value: unknown] }>();
 const masonry = ref<InstanceType<typeof MasonryCards>>();
-const rows = computed(() => Array.isArray(props.state.bComponents) ? props.state.bComponents as Budget[] : []);
-const samples = computed(() => Array.isArray(props.state.aValues) ? props.state.aValues.length : 0);
-const aFields = computed(() => props.fields.filter(field => ["aValues", "aAverageCount", "aSensitivity", "aDigits", "aRounding"].includes(field.key)
-  && (samples.value > 0 || !["aAverageCount", "aDigits", "aRounding"].includes(field.key))));
+const rows = computed(() =>
+  Array.isArray(props.state.bComponents)
+    ? (props.state.bComponents as Budget[])
+    : [],
+);
+const samples = computed(() =>
+  Array.isArray(props.state.aValues) ? props.state.aValues.length : 0,
+);
+const aFields = computed(() =>
+  props.fields.filter(
+    (field) =>
+      [
+        "aValues",
+        "aAverageCount",
+        "aSensitivity",
+        "aDigits",
+        "aRounding",
+      ].includes(field.key) &&
+      (samples.value > 0 ||
+        !["aAverageCount", "aDigits", "aRounding"].includes(field.key)),
+  ),
+);
 function update(index: number, value: Budget) {
-  const next = [...rows.value]; next[index] = value; emit("change", "bComponents", next);
+  const next = [...rows.value];
+  next[index] = value;
+  emit("change", "bComponents", next);
 }
 function add() {
-  if (rows.value.length < 50) emit("change", "bComponents", [...rows.value, newBudget(`B 类分量 ${rows.value.length + 1}`)]);
+  if (rows.value.length < 50)
+    emit("change", "bComponents", [
+      ...rows.value,
+      newBudget(`B 类分量 ${rows.value.length + 1}`),
+    ]);
 }
 function remove(index: number) {
   masonry.value?.remove(index + 1);
-  emit("change", "bComponents", rows.value.filter((_, j) => j !== index));
+  emit(
+    "change",
+    "bComponents",
+    rows.value.filter((_, j) => j !== index),
+  );
 }
 </script>
+<!-- prettier-ignore -->
 <template>
   <div class="quick-uncertainty full-width">
     <div class="array-toolbar"><strong>B 类分量 · {{ rows.length }} 项</strong>
@@ -45,4 +80,8 @@ function remove(index: number) {
     </MasonryCards>
   </div>
 </template>
-<style scoped>.quick-fields { margin-top: 16px; }</style>
+<style scoped>
+.quick-fields {
+  margin-top: 16px;
+}
+</style>

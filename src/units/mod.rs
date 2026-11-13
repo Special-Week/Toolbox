@@ -10,8 +10,8 @@ pub(crate) struct UnitDef {
     pub(crate) reference_id: u32,
     pub(crate) name: &'static str,
     pub(crate) code: &'static str,
-    // base = value * factor + offset; kelvin for temperature, ppm for
-    // concentration under the declared equal-density website convention.
+    // base = value * factor + offset；温度基准为开尔文，
+    // 浓度基准为 ppm，遵循页面声明的等密度约定。
     factor: f64,
     offset: f64,
 }
@@ -43,12 +43,12 @@ pub(crate) fn convert_unit(
             return Err("绝对温度不能低于 0 K".to_owned());
         }
     }
-    // Use a direct ratio for linear units: an unnecessary SI intermediate can
-    // overflow or underflow even when the final result is representable.
+    // 线性单位直接按系数比换算，避免 SI 中间值溢出或下溢，
+    // 即使最终结果本身可以表示也不能忽略这一问题。
     let result = if source == target {
         value
     } else if temperature {
-        // Clamp only arithmetic cancellation at a validated absolute-zero input.
+        // 仅对已验证的绝对零度输入修正相消误差。
         let kelvin = value.mul_add(from.factor, from.offset).max(0.0);
         (kelvin - to.offset) / to.factor
     } else {

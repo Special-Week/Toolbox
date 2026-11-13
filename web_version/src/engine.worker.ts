@@ -34,7 +34,11 @@ self.onmessage = async (event: MessageEvent) => {
         payload.limit,
       );
     else if (method === "curveValue")
-      result = curve_value(payload.tool, JSON.stringify(payload.input), payload.x);
+      result = curve_value(
+        payload.tool,
+        JSON.stringify(payload.input),
+        payload.x,
+      );
     else if (method === "convertPressure")
       result = JSON.parse(
         convert_pressure(

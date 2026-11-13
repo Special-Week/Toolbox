@@ -167,8 +167,8 @@ impl ToolboxApp {
                                 background,
                             )?
                         };
-                        // The page rounds the temperature difference to 0.01 °C
-                        // before adding it to the indicated temperature.
+                        // 页面先将温差修约至 0.01 °C，
+                        // 再加到示值温度上。
                         let delta = (delta * 100.0).round() / 100.0;
                         return Ok(if mode == 1 {
                             vec![

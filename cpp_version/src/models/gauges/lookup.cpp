@@ -17,7 +17,7 @@ double nearest(std::vector<double> values, double target) {
     }
     return best;
 }
-} // namespace
+} // 命名空间
 const Data *closestPitch(const Data &table, double p) {
     const Data *best = nullptr;
     for (const auto &row : table.array) {
@@ -269,4 +269,4 @@ MetricLengths metricLengths(double d, double p, std::vector<std::string> &notes)
     const auto &pair = t6 ? (*t6)[key] : empty;
     return {number(pair[0]), number(pair[1]), number((*t5)[key]), handle + "#"};
 }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

@@ -107,6 +107,7 @@ async function copy() {
 }
 </script>
 
+<!-- prettier-ignore -->
 <template>
   <div class="gauge-tool">
     <section class="panel">

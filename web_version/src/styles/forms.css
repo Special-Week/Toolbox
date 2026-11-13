@@ -181,7 +181,9 @@ textarea {
   color: var(--blue);
   background: var(--soft);
   border-color: #b8cff3;
-  transition: background-color 0.15s, border-color 0.15s;
+  transition:
+    background-color 0.15s,
+    border-color 0.15s;
 }
 .reset-button:hover:not(:disabled) {
   background: #e0ebfe;

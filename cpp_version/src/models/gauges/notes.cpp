@@ -71,4 +71,4 @@ JS/js 对称布置。需要等级相关 Δ 修正但未收录规则的组合不�
     }
     return "";
 }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

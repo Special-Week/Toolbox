@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 结果表支持筛选和分页，单位表使用独立分页大小。
 import { computed, ref, watch } from "vue";
 import { display } from "../format";
 const p = withDefaults(

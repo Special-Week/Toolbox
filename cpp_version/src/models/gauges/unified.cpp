@@ -50,7 +50,7 @@ double manufacturing(double d, double tpi) {
     require(valid(u) && u > 0, "该牙数与直径组合的中径制造公差 U 未定义，请核对规格");
     return u * inch;
 }
-} // namespace
+} // 命名空间
 double fraction(const std::string &text) {
     auto cleaned = trim(text);
     require(cleaned.empty() || cleaned[0] != '-', "公称直径须大于零");
@@ -239,4 +239,4 @@ Report unified(const std::string &size, double tpi, const std::string &grade) {
     out.checked();
     return out;
 }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

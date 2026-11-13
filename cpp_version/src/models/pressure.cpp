@@ -5,9 +5,7 @@ Range::Range(double lower, double upper) : low(lower), high(upper), span(upper -
     finite({low, high, span});
     require(span > 0, "量程上限必须大于下限");
 }
-bool Range::covers(const Range &other) const {
-    return low <= other.low && high >= other.high;
-}
+bool Range::covers(const Range &other) const { return low <= other.low && high >= other.high; }
 Selection selectStandard(Range dut, Range reference, double da, double ra, double required, bool piston) {
     finite({da, ra, required});
     require(da > 0 && ra > 0 && required > 0, "准确度和量传比须大于 0");
@@ -69,4 +67,4 @@ std::pair<double, double> transmitterInverse(Range process, Range output, bool r
     finite({processValue, fraction});
     return {processValue, fraction};
 }
-} // namespace toolbox
+} // 命名空间 toolbox

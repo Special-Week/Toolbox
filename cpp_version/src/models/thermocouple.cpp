@@ -88,12 +88,8 @@ static const ThermoSegment &segment(const std::string &kind, double t) {
     }
     throw std::runtime_error("温度超出所选分度号范围");
 }
-double thermoEmf(const std::string &kind, double t) {
-    return segment(kind, t).evaluate(t).first;
-}
-double thermoSlope(const std::string &kind, double t) {
-    return segment(kind, t).evaluate(t).second;
-}
+double thermoEmf(const std::string &kind, double t) { return segment(kind, t).evaluate(t).first; }
+double thermoSlope(const std::string &kind, double t) { return segment(kind, t).evaluate(t).second; }
 double thermoTemperature(const std::string &kind, double e) {
     finite({e});
     auto bounds = thermoBounds(kind);
@@ -169,4 +165,4 @@ std::vector<Tolerance> thermoTolerances(const std::string &kind, double t) {
     }
     return out;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

@@ -1,4 +1,4 @@
-//! NIST Monograph 175 / SRD 60 forward reference functions, in °C and mV.
+//! NIST Monograph 175 / SRD 60 正向参考函数，单位为 °C 和 mV。
 //! 只嵌入高精度正向函数系数，不使用三位小数表或近似逆函数参与计算。
 use std::sync::OnceLock;
 #[path = "thermocouple/extra.rs"]
@@ -166,8 +166,8 @@ pub(crate) fn thermocouple_temperature(kind: &str, emf: f64) -> Result<f64, Stri
     let mut lower = reference.segments[0].min;
     let mut upper = reference.segments.last().unwrap().max;
     if kind == "B" {
-        // Type B has a minimum near 21 °C. Negative/zero emf can have two
-        // temperatures; positive emf is invertible without a 250 °C cutoff.
+        // B 型曲线在约 21 °C 处有最小值；负电势或零电势可能对应两个温度，
+        // 正电势可以反算，无需设置 250 °C 的截断点。
         if emf <= 0.0 {
             return Err("B 型在低温区有转折，此非正热电势无法唯一反算温度".to_owned());
         }

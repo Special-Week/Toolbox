@@ -150,4 +150,4 @@ void cvdPage(Page &p) {
                             {L"系数 C", format(c[2])},
                             {L"最大残差", format(residual) + L" Ω"}});
 }
-} // namespace toolbox
+} // 命名空间 toolbox

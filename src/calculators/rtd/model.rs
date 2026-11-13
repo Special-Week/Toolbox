@@ -316,8 +316,8 @@ impl RtdModel {
         if resistance == high_r {
             return Ok(high);
         }
-        // Bounded bisection also handles B=0 CVDs, negative temperatures and
-        // the source's copper/nickel piecewise curves without Newton overflow.
+        // 有界二分法也能处理 B=0 的 CVD 曲线、负温度及
+        // 原始铜镍分段曲线，避免牛顿迭代溢出。
         for _ in 0..80 {
             let mid = low + (high - low) * 0.5;
             if self.resistance(mid)? < resistance {

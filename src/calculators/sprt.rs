@@ -291,7 +291,7 @@ impl ToolboxApp {
                     format_number(max)
                 ));
             }
-            // At endpoints use a one-sided difference within the model domain.
+            // 端点使用模型定义域内的单侧差分。
             let lo = (t - 1.0).max(min);
             let hi = (t + 1.0).min(max);
             let curve = |t| m.resistance_branch(t, hr != 6 && t >= 0.0);

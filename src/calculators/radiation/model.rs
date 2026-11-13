@@ -1,7 +1,7 @@
 //! Planck 辐射平衡与灰体反射；对外温度用 °C，辐射计算内部使用 K、波长用 μm。
 use crate::calculators::numerics::finite;
 
-// c2 = h*c/k, using the exact SI defining constants, expressed in µm·K.
+// c2 = h*c/k，采用 SI 精确定义常数，单位为 µm·K。
 const C2: f64 = 6.62607015e-34 * 299792458.0 / 1.380649e-23 * 1e6;
 
 pub(crate) enum Response {
@@ -17,7 +17,7 @@ impl Spectrum {
         let nodes = match response {
             Response::Single(w) if valid(w) => vec![(w, -5.0 * w.ln())],
             Response::Band(low, high) if valid(low) && valid(high) && low < high => {
-                // Composite Simpson quadrature with flat spectral response.
+                // 光谱响应视为平坦，采用复合辛普森积分。
                 let intervals = 256;
                 let h = (high - low) / intervals as f64;
                 (0..=intervals)
@@ -170,8 +170,8 @@ pub(crate) fn ear_blackbody(
     let blackbody = kelvin(blackbody_c)?;
     let probe = kelvin(probe_c)?;
     let scale = blackbody.max(probe);
-    // Sum repeated grey-surface reflections. A one-reflection truncation loses
-    // energy and gives a nonzero correction even when both surfaces are isothermal.
+    // 累加灰体表面之间的多次反射；只算一次会损失能量，
+    // 并在两个表面等温时错误地产生非零修正值。
     let denominator = blackbody_e + (1.0 - blackbody_e) * probe_e;
     let blackbody_weight = blackbody_e / denominator;
     let probe_weight = (1.0 - blackbody_e) * probe_e / denominator;

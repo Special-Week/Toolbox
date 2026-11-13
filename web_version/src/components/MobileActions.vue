@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 移动端输入辅助栏负责焦点、数字操作和页面跳转。
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { advanceNumeric, nextNumeric, toggleSign } from "../mobile-input";
 const p = defineProps<{ selected: boolean; hidden?: boolean }>();

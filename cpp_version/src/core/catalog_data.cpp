@@ -543,4 +543,4 @@ std::wstring unitNotes(Dimension dimension) {
     }
     return L"";
 }
-} // namespace toolbox
+} // 命名空间 toolbox

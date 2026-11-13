@@ -15,8 +15,8 @@ pub(crate) enum Curve {
 
 pub(crate) const PT385: [f64; 3] = [3.9083e-3, -5.775e-7, -4.183e-12];
 
-/// Returns R(t)/R0 and its analytic derivative with respect to degrees Celsius.
-/// Horner evaluation calculates both using the same polynomial coefficients.
+/// 返回 R(t)/R0 及其对摄氏温度的解析导数。
+/// 两者使用相同的多项式系数，通过秦九韶法求值。
 fn polynomial(coefficients: &[f64], t: f64) -> (f64, f64) {
     let mut value = 0.0;
     let mut derivative = 0.0;
@@ -82,8 +82,8 @@ impl Curve {
         }
     }
 
-    /// CVD inversion needs a strictly increasing, positive characteristic over
-    /// the entire supported range. Check the extrema of dR/dt analytically.
+    /// CVD 反算要求特性曲线在整个支持范围内为正且严格递增。
+    /// 通过解析求解 dR/dt 的极值检查这一条件。
     pub(crate) fn validate(self, min: f64, max: f64) -> Result<(), String> {
         if let Self::Cvd([a, b, c]) = self {
             if ![a, b, c].iter().all(|v| v.is_finite()) {
@@ -120,8 +120,8 @@ impl Curve {
     }
 }
 
-// Piecewise cubic fits for Ni120 with alpha = 0.00672. Each row is
-// ([constant, t, t², t³], upper temperature). The lower limit is -80 °C.
+// alpha = 0.00672 的 Ni120 分段三次拟合；每行为
+// （[常数、t、t²、t³ 的系数]，温度上限），总下限为 -80 °C。
 const NI672: [([f64; 4], f64); 12] = [
     (
         [0.9980384367, 0.005779005438, 4.519218356e-6, 1.883007648e-8],

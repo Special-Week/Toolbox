@@ -1,10 +1,10 @@
 //! 重复性、极差法、合成误差、误差分析及快速不确定度页面。
 //! 统计以样本标准差为基础；绝对误差保留符号，不与误差绝对值混用。
+use crate::INK;
 use crate::app::ToolboxApp;
 use crate::calculators::common::*;
 use crate::calculators::numerics::{finite, rss, statistics};
 use crate::catalog::ToolDef;
-use crate::INK;
 use eframe::egui::{self, RichText};
 
 impl ToolboxApp {

@@ -495,4 +495,4 @@ const std::vector<std::pair<double, double>> &extendedRanges() {
     };
     return data;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

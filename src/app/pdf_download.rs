@@ -1,3 +1,4 @@
+//! 规范目录查询与 PDF 下载界面；耗时任务通过通道返回结果，避免阻塞界面。
 use crate::calculators::common::{collapsible_note, render_error_message, render_metrics};
 use crate::pdf_download::{self, Download};
 use crate::{BLUE, BLUE_SOFT, INK, MUTED};

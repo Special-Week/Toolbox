@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 应用入口负责工具导航、输入状态、计算结果及导出。
 import GaugeTool from "./components/GaugeTool.vue";
 import PdfDownload from "./components/PdfDownload.vue";
 import NumericInput from "./components/NumericInput.vue";
@@ -16,7 +17,10 @@ import FieldEditor from "./components/FieldEditor.vue";
 import QuickUncertainty from "./components/QuickUncertainty.vue";
 import ResultantComponents from "./components/ResultantComponents.vue";
 import CalibrationArchives from "./components/CalibrationArchives.vue";
-import { applyCalibration, type CalibrationArchive } from "./calibration-archives";
+import {
+  applyCalibration,
+  type CalibrationArchive,
+} from "./calibration-archives";
 import CurveChart from "./components/CurveChart.vue";
 import ResultTable from "./components/ResultTable.vue";
 import BudgetResult, { type Detail } from "./components/BudgetResult.vue";
@@ -57,9 +61,11 @@ function jumpInputs() {
     });
 }
 // 简要说明与公式共用当前模型的文案，复制和导出沿用同一口径。
-const activeNote = computed(() => selected.value
-  ? calculationNote(selected.value, current.value)
-  : { note: "", formula: "" });
+const activeNote = computed(() =>
+  selected.value
+    ? calculationNote(selected.value, current.value)
+    : { note: "", formula: "" },
+);
 const explanationParagraphs = computed(() =>
   activeNote.value.note
     .split(/\r?\n/u)
@@ -93,8 +99,7 @@ const sections = computed(() =>
 const filtered = computed(
   () =>
     catalog.value?.tools.filter(
-      (t) =>
-        filter.value === "全部工具" || t.group === filter.value,
+      (t) => filter.value === "全部工具" || t.group === filter.value,
     ) ?? [],
 );
 const totalUnits = computed(
@@ -129,7 +134,8 @@ const budget = computed(
 const coefficients = computed(
   () =>
     result.value?.details?.coefficients as
-      Record<string, number | number[]> | undefined,
+      | Record<string, number | number[]>
+      | undefined,
 );
 const calibrationRows = computed(
   () => (result.value?.details?.calibrationResiduals ?? []) as unknown[][],
@@ -260,7 +266,10 @@ watch(
   // 工具切换和恢复示例均触发重算，即使恢复前后的输入文本完全相同。
   () =>
     selected.value
-      ? selected.value.id + ":" + inputGeneration.value + JSON.stringify(current.value)
+      ? selected.value.id +
+        ":" +
+        inputGeneration.value +
+        JSON.stringify(current.value)
       : "",
   () => {
     clearTimeout(timer);
@@ -307,7 +316,10 @@ async function curveValue(x: number): Promise<number> {
 }
 
 function reset() {
-  if (selected.value?.kind === "pdf") { pdfDownloader.value?.reset(); return; }
+  if (selected.value?.kind === "pdf") {
+    pdfDownloader.value?.reset();
+    return;
+  }
   if (selected.value && catalog.value) {
     clearTimeout(timer);
     ++revision;
@@ -373,7 +385,8 @@ function report() {
     );
   if (r.warnings.length) lines.push("", ...r.warnings);
   lines.push("", "计算说明", activeNote.value.note);
-  if (activeNote.value.formula) lines.push("", "详细公式与取值", activeNote.value.formula);
+  if (activeNote.value.formula)
+    lines.push("", "详细公式与取值", activeNote.value.formula);
   return lines.join("\n");
 }
 async function copy() {
@@ -411,7 +424,9 @@ async function exportCsv() {
   try {
     if (tool.kind !== "spline") {
       download(
-        new Blob([resultCsv(tool, r, activeNote.value)], { type: "text/csv;charset=utf-8" }),
+        new Blob([resultCsv(tool, r, activeNote.value)], {
+          type: "text/csv;charset=utf-8",
+        }),
         tool.id + ".csv",
       );
       message.value = "完整结果 CSV 已下载。";
@@ -498,6 +513,7 @@ onUnmounted(() => {
 });
 </script>
 
+<!-- prettier-ignore -->
 <template>
   <header class="site-header">
     <div class="brand">

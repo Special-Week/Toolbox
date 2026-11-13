@@ -258,4 +258,4 @@ Report rebar(int angle, std::size_t index, int lines) {
     out.checked();
     return out;
 }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

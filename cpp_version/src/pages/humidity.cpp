@@ -98,4 +98,4 @@ void renderHumidity(Page &p) {
     }
     p.metrics(L"计算结果", m);
 }
-} // namespace toolbox
+} // 命名空间 toolbox

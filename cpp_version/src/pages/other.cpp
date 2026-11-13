@@ -125,4 +125,4 @@ void renderOther(Page &p) {
     p.table({L"x", L"y"}, rows);
     p.chart(curve, points, [spline](double x) { return spline->y(x); });
 }
-} // namespace toolbox
+} // 命名空间 toolbox

@@ -148,7 +148,7 @@ void drawTable(Page &p, const gauges::Report &report, const gauges::Table &table
     }
     p.y += 8;
 }
-} // namespace
+} // 命名空间
 void renderGauges(Page &p) {
     auto type = typeOf(p.tool.kind);
     if (gaugeCache.find(p.tool.id) == gaugeCache.end()) {
@@ -182,7 +182,8 @@ void renderGauges(Page &p) {
             changed = field.key;
         }
     }
-    if (!changed.empty()) previous = gauges::page(type, std::move(input), changed);
+    if (!changed.empty())
+        previous = gauges::page(type, std::move(input), changed);
     const auto &data = previous;
     // 保存规范字段值，避免恢复时把旧下拉索引解释成另一种规格。
     for (const auto &entry : data.state)
@@ -235,8 +236,10 @@ void renderGauges(Page &p) {
         });
         if (!report.notes.empty()) {
             std::vector<std::wstring> notes;
-            for (const auto &note : report.notes) notes.push_back(wide(note));
-            p.details("gauge.notes", L"⚠ 取值说明与适用限制 · " + std::to_wstring(notes.size()) + L" 项", notes);
+            for (const auto &note : report.notes)
+                notes.push_back(wide(note));
+            p.details("gauge.notes", L"⚠ 取值说明与适用限制 · " + std::to_wstring(notes.size()) + L" 项",
+                      notes);
         }
         Metrics summary;
         for (std::size_t i = 0; i < std::min<std::size_t>(6, report.metrics.size()); ++i) {
@@ -258,4 +261,4 @@ void renderGauges(Page &p) {
     }
 }
 void clearGaugeCache(const std::string &id) { gaugeCache.erase(id); }
-} // namespace toolbox
+} // 命名空间 toolbox

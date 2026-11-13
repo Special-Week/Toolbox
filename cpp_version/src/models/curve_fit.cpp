@@ -8,8 +8,7 @@ double compensatedSum(const Values &values) {
     double total = 0, correction = 0;
     for (double value : values) {
         double next = total + value;
-        correction += std::abs(total) >= std::abs(value) ? (total - next) + value
-                                                       : (value - next) + total;
+        correction += std::abs(total) >= std::abs(value) ? (total - next) + value : (value - next) + total;
         total = next;
     }
     return total + correction;
@@ -22,7 +21,7 @@ double evaluate(const Values &coefficients, double input) {
     }
     return value;
 }
-} // namespace
+} // 命名空间
 
 int CurveFit::degree(CurveFitKind model) {
     return model == CurveFitKind::Quadratic ? 2 : (model == CurveFitKind::Cubic ? 3 : 1);
@@ -32,9 +31,7 @@ std::size_t CurveFit::parameterCount(CurveFitKind model) {
     return model == CurveFitKind::ThroughOrigin ? 1 : std::size_t(degree(model) + 1);
 }
 
-double CurveFit::Normalization::normalize(double value) const {
-    return (value - origin) / scale;
-}
+double CurveFit::Normalization::normalize(double value) const { return (value - origin) / scale; }
 
 CurveFit::Normalization CurveFit::normalization(const Values &values, bool centered) {
     double minimum = *std::min_element(values.begin(), values.end());
@@ -57,8 +54,7 @@ CurveFit::Normalization CurveFit::normalization(const Values &values, bool cente
 Values CurveFit::originalCoefficients(const Values &coefficients, Normalization x, Normalization y) {
     // 将 ys·P((x−x0)/xs)+y0 逐项展开；这里不使用界面显示的修约值。
     Values expanded{coefficients.back() * y.scale};
-    require(coefficients.back() == 0 || expanded[0] != 0,
-            "系数换算发生数值下溢，请调整输入量或响应量的单位");
+    require(coefficients.back() == 0 || expanded[0] != 0, "系数换算发生数值下溢，请调整输入量或响应量的单位");
     for (std::size_t j = coefficients.size() - 1; j-- > 0;) {
         Values next(expanded.size() + 1);
         for (std::size_t index = 0; index < expanded.size(); ++index) {
@@ -178,4 +174,4 @@ double CurveFit::predict(double input) const {
     finite({value});
     return value;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

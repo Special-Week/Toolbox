@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 递归编辑不确定度分量；折叠仅影响显示，不丢弃子分量。
 import NumericInput from "./NumericInput.vue";
 import { computed, onMounted, ref } from "vue";
 import type { Budget, BudgetDetail } from "../types";
@@ -103,13 +104,25 @@ function child(j: number, value: Budget) {
             :model-value="modelValue.sensitivity"
             @update:model-value="change('sensitivity', $event)"
         /></label>
-        <label class="field"><span class="field-label">有效数字</span>
-          <NumericInput :model-value="modelValue.digits ?? ''" @update:model-value="change('digits', $event)" />
+        <label class="field"
+          ><span class="field-label">有效数字</span>
+          <NumericInput
+            :model-value="modelValue.digits ?? ''"
+            @update:model-value="change('digits', $event)"
+          />
           <small>留空保留原始计算精度（1～17 位）。</small>
         </label>
-        <label class="field"><span class="field-label">修约方式</span>
-          <select :value="modelValue.rounding ?? '1'" @change="change('rounding', ($event.target as HTMLSelectElement).value)" @wheel="($event.currentTarget as HTMLSelectElement).blur()">
-            <option value="0">四舍六入</option><option value="1">进位</option>
+        <label class="field"
+          ><span class="field-label">修约方式</span>
+          <select
+            :value="modelValue.rounding ?? '1'"
+            @change="
+              change('rounding', ($event.target as HTMLSelectElement).value)
+            "
+            @wheel="($event.currentTarget as HTMLSelectElement).blur()"
+          >
+            <option value="0">四舍六入</option>
+            <option value="1">进位</option>
           </select>
         </label>
         <template v-if="modelValue.kind === '1'">

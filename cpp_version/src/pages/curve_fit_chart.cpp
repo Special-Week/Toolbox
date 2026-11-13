@@ -2,8 +2,7 @@
 #include "curve_fit.hpp"
 
 namespace toolbox {
-void drawCurveFitChart(Page &p, const CurveFit &fit,
-                       const std::vector<std::pair<double, double>> &points,
+void drawCurveFitChart(Page &p, const CurveFit &fit, const std::vector<std::pair<double, double>> &points,
                        const std::wstring &xLabel, const std::wstring &yLabel, bool residual) {
     std::vector<Point> curve, plotted;
     if (!residual) {
@@ -66,8 +65,8 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
     for (const auto &tick : xa.ticks) {
         float x = plot.x + plot.w * float(xa.tickFraction(tick.value));
         p.ui.line(x, plot.y, x, plot.y + plot.h, Border);
-        p.ui.text({x - tickWidth / 2 - 2, plot.y + plot.h + 10, tickWidth + 4, 24}, tick.label,
-                  12, Muted, false, true);
+        p.ui.text({x - tickWidth / 2 - 2, plot.y + plot.h + 10, tickWidth + 4, 24}, tick.label, 12, Muted,
+                  false, true);
     }
     p.ui.line(plot.x, plot.y, plot.x, plot.y + plot.h, Muted, 1.2f);
     p.ui.line(plot.x, plot.y + plot.h, plot.x + plot.w, plot.y + plot.h, Muted, 1.2f);
@@ -75,13 +74,13 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
     p.ui.text({plot.x, p.y + height - 28, plot.w, 24}, xa.caption, 12, Ink, false, true);
 
     auto at = [&](Point point) {
-        return Point{plot.x + plot.w * xa.fraction(point.x),
-                     plot.y + plot.h * (1 - ya.fraction(point.y))};
+        return Point{plot.x + plot.w * xa.fraction(point.x), plot.y + plot.h * (1 - ya.fraction(point.y))};
     };
     auto oldClip = p.ui.clip;
-    p.ui.clip = {std::max(oldClip.x, plot.x), std::max(oldClip.y, plot.y),
-                 std::max(0.f, std::min(oldClip.x + oldClip.w, plot.x + plot.w) - std::max(oldClip.x, plot.x)),
-                 std::max(0.f, std::min(oldClip.y + oldClip.h, plot.y + plot.h) - std::max(oldClip.y, plot.y))};
+    p.ui.clip = {
+        std::max(oldClip.x, plot.x), std::max(oldClip.y, plot.y),
+        std::max(0.f, std::min(oldClip.x + oldClip.w, plot.x + plot.w) - std::max(oldClip.x, plot.x)),
+        std::max(0.f, std::min(oldClip.y + oldClip.h, plot.y + plot.h) - std::max(oldClip.y, plot.y))};
     if (residual) {
         float zero = float(at({fit.minimumX, 0}).y);
         p.ui.line(plot.x, zero, plot.x + plot.w, zero, Blue, 1.4f);
@@ -103,7 +102,7 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
     } else {
         float x = std::min(hoverArea.x, plot.x), y = std::min(hoverArea.y, plot.y);
         hoverArea = {x, y, std::max(hoverArea.x + hoverArea.w, plot.x + plot.w) - x,
-                           std::max(hoverArea.y + hoverArea.h, plot.y + plot.h) - y};
+                     std::max(hoverArea.y + hoverArea.h, plot.y + plot.h) - y};
     }
     if (plot.contains(p.app.mouseX, p.app.mouseY) && oldClip.contains(p.app.mouseX, p.app.mouseY)) {
         std::size_t closest = 0;
@@ -118,9 +117,9 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
         }
         std::vector<std::wstring> labels;
         if (residual && distance < 12) {
-            labels = {L"第 " + std::to_wstring(closest + 1) + L" 组",
-                      L"x = " + format(points[closest].first), L"y = " + format(points[closest].second),
-                      L"拟合 y = " + format(fit.fitted[closest]), L"残差 = " + format(fit.residuals[closest])};
+            labels = {L"第 " + std::to_wstring(closest + 1) + L" 组", L"x = " + format(points[closest].first),
+                      L"y = " + format(points[closest].second), L"拟合 y = " + format(fit.fitted[closest]),
+                      L"残差 = " + format(fit.residuals[closest])};
         } else if (!residual) {
             double fraction = (p.app.mouseX - plot.x) / plot.w;
             double x = std::fma(1 - fraction, fit.minimumX, fraction * fit.maximumX);
@@ -130,8 +129,10 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
             p.ui.fill({float(position.x) - 4, float(position.y) - 4, 8, 8}, Blue, 4);
             labels = {xLabel + L" = " + format(x), yLabel + L" = " + format(y)};
             if (distance < 12) {
-                labels.push_back(L"校准点 " + std::to_wstring(closest + 1) + L"：x = " + format(points[closest].first));
-                labels.push_back(L"实测 y = " + format(points[closest].second) + L"，残差 = " + format(fit.residuals[closest]));
+                labels.push_back(L"校准点 " + std::to_wstring(closest + 1) + L"：x = " +
+                                 format(points[closest].first));
+                labels.push_back(L"实测 y = " + format(points[closest].second) + L"，残差 = " +
+                                 format(fit.residuals[closest]));
             }
         }
         if (!labels.empty()) {
@@ -139,14 +140,16 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
             std::vector<float> heights;
             float height = 12;
             for (const auto &label : labels) {
-                heights.push_back(std::max(22.f, p.app.paragraphHeight(label, std::max(1.f, width - 16), 12)));
+                heights.push_back(
+                    std::max(22.f, p.app.paragraphHeight(label, std::max(1.f, width - 16), 12)));
                 height += heights.back();
             }
             p.ui.fill({plot.x + 8, plot.y + 8, width, height}, White, 6);
             p.ui.border({plot.x + 8, plot.y + 8, width, height}, Border, 6);
             float lineY = plot.y + 14;
             for (std::size_t index = 0; index < labels.size(); ++index) {
-                p.ui.text({plot.x + 16, lineY, width - 16, heights[index]}, labels[index], 12, Ink, false, false, true);
+                p.ui.text({plot.x + 16, lineY, width - 16, heights[index]}, labels[index], 12, Ink, false,
+                          false, true);
                 lineY += heights[index];
             }
         }
@@ -159,4 +162,4 @@ void drawCurveFitChart(Page &p, const CurveFit &fit,
     p.ui.text({p.x + 198, p.y, p.w - 198, 24}, L"校准数据点", 12, Ink);
     p.y += 34;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

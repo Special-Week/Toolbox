@@ -156,7 +156,10 @@ struct UncertaintyDetail {
     std::vector<UncertaintyDetail> children;
     std::optional<int> digits;
 };
-struct UncertaintyRounding { std::optional<int> digits; bool carry = true; };
+struct UncertaintyRounding {
+    std::optional<int> digits;
+    bool carry = true;
+};
 struct Component {
     std::wstring name = L"分量";
     double sensitivity = 1, halfWidth = 0.02;
@@ -206,4 +209,4 @@ class Spline {
 std::size_t sampleCount(double minimum, double maximum, double step);
 double sampleX(double minimum, double maximum, double step, std::size_t count, std::size_t index);
 Values divisionPoints(double start, double end, double step);
-} // namespace toolbox
+} // 命名空间 toolbox

@@ -95,20 +95,25 @@ void Page::details(const std::string &field, const std::wstring &title,
     const bool open = app.openDetails.count(k) != 0;
     const float padding = 18, inner = std::max(1.f, w - 2 * padding);
     float height = 60;
-    if (open) for (const auto &line : lines) height += app.paragraphHeight(line, inner, 13) + 8;
+    if (open)
+        for (const auto &line : lines)
+            height += app.paragraphHeight(line, inner, 13) + 8;
     ui.fill({x, y, w, height}, Soft, 8);
     ui.text({x + padding, y + 12, inner, 36}, (open ? L"▾  " : L"▸  ") + title, 14, Blue, true);
     ui.hits.push_back({{x, y, w, 60}, ui.clip, [owner = &app, k] {
-        if (owner->openDetails.count(k)) owner->openDetails.erase(k);
-        else owner->openDetails.insert(k);
-        owner->refresh();
-    }});
+                           if (owner->openDetails.count(k))
+                               owner->openDetails.erase(k);
+                           else
+                               owner->openDetails.insert(k);
+                           owner->refresh();
+                       }});
     float lineY = y + 52;
-    if (open) for (const auto &line : lines) {
-        const float lineHeight = app.paragraphHeight(line, inner, 13);
-        ui.text({x + padding, lineY, inner, lineHeight}, line, 13, Ink, false, false, true);
-        lineY += lineHeight + 8;
-    }
+    if (open)
+        for (const auto &line : lines) {
+            const float lineHeight = app.paragraphHeight(line, inner, 13);
+            ui.text({x + padding, lineY, inner, lineHeight}, line, 13, Ink, false, false, true);
+            lineY += lineHeight + 8;
+        }
     y += height + 12;
 }
 void Page::explain() {
@@ -392,4 +397,4 @@ void Page::chart(const std::vector<Point> &curve, const std::vector<Point> &poin
     ui.clip = old;
     y += 324;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

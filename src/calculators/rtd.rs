@@ -111,8 +111,8 @@ impl ToolboxApp {
                     coefficients,
                 )
             })();
-            // Units, directions and graduations have separate storage keys:
-            // selecting Pt1000 cannot retain Pt100's R0 or a temperature as ohms.
+            // 温标、换算方向和分度号分别使用独立存储键，
+            // 避免切换到 Pt1000 后沿用 Pt100 的 R0，或将温度误作电阻。
             let temperature_key = format!("rtd.temperature.{unit_index}");
             let resistance_key = graduation.field_key("resistance");
             let default_t = unit.display_temperature(100.0).to_string();
@@ -144,7 +144,7 @@ impl ToolboxApp {
             let model = model?;
             let (temperature, resistance) = if direction == 0 {
                 let mut t = unit.to_celsius(self.number(tool, &temperature_key, &default_t)?);
-                // Unit offsets can introduce a few ULPs at range endpoints.
+                // 单位偏移可能使量程端点产生几个末位精度单位的误差。
                 for endpoint in [graduation.min, graduation.max] {
                     if (t - endpoint).abs() < 1e-10 {
                         t = endpoint;

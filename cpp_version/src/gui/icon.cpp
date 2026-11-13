@@ -9,8 +9,8 @@ void App::loadIconBitmap() {
     if (!target_ || iconBitmap_) {
         return;
     }
-    auto icon = static_cast<HICON>(LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(TOOLBOX_ICON),
-                                             IMAGE_ICON, 256, 256, 0));
+    auto icon = static_cast<HICON>(
+        LoadImageW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(TOOLBOX_ICON), IMAGE_ICON, 256, 256, 0));
     if (!icon) {
         return;
     }
@@ -18,11 +18,11 @@ void App::loadIconBitmap() {
     IWICBitmap *source = nullptr;
     IWICFormatConverter *converter = nullptr;
     if (SUCCEEDED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-                                    IID_IWICImagingFactory, reinterpret_cast<void **>(&imaging))) &&
+                                   IID_IWICImagingFactory, reinterpret_cast<void **>(&imaging))) &&
         SUCCEEDED(imaging->CreateBitmapFromHICON(icon, &source)) &&
         SUCCEEDED(imaging->CreateFormatConverter(&converter)) &&
         SUCCEEDED(converter->Initialize(source, GUID_WICPixelFormat32bppPBGRA, WICBitmapDitherTypeNone,
-                                         nullptr, 0, WICBitmapPaletteTypeCustom))) {
+                                        nullptr, 0, WICBitmapPaletteTypeCustom))) {
         // 预乘透明度可避免透明圆角在浅色背景上出现黑边。
         target_->CreateBitmapFromWicBitmap(converter, nullptr, &iconBitmap_);
     }
@@ -37,4 +37,4 @@ void App::loadIconBitmap() {
     }
     DestroyIcon(icon);
 }
-} // namespace toolbox
+} // 命名空间 toolbox

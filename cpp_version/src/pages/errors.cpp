@@ -8,9 +8,11 @@ static const std::vector<std::wstring> distributions{L"均匀分布", L"三角�
 static std::optional<std::size_t> averageCountInput(Page &p, const std::string &key) {
     const auto text = p.textInput(key, L"取测量次数 n", L"");
     p.note(L"留空默认 1 次。");
-    try { return parseAverageCount(text); }
-    catch (const std::exception &e) {
-        if (p.inputError.empty()) p.inputError = wide(e.what());
+    try {
+        return parseAverageCount(text);
+    } catch (const std::exception &e) {
+        if (p.inputError.empty())
+            p.inputError = wide(e.what());
         return std::nullopt;
     }
 }
@@ -18,9 +20,11 @@ static UncertaintyRounding roundingInput(Page &p, const std::string &key) {
     const auto text = p.textInput(key + ".digits", L"有效数字", L"");
     p.note(L"留空保留原始计算精度（1～17 位）。");
     const bool carry = p.select(key + ".rounding", L"修约方式", {L"四舍六入", L"进位"}, 1) == 1;
-    try { return {parseSignificantDigits(text), carry}; }
-    catch (const std::exception &e) {
-        if (p.inputError.empty()) p.inputError = wide(e.what());
+    try {
+        return {parseSignificantDigits(text), carry};
+    } catch (const std::exception &e) {
+        if (p.inputError.empty())
+            p.inputError = wide(e.what());
         return {std::nullopt, carry};
     }
 }
@@ -40,14 +44,18 @@ static void componentCards(Page &p, int count, std::vector<int> &assignments,
         auto fill = p.ui.draws.size();
         p.ui.fill({cardX, cardY, cardWidth, 0}, White, 8);
         p.ui.border({cardX, cardY, cardWidth, 0}, Border, 8);
-        p.x = cardX + 16; p.y = cardY + 16; p.w = cardWidth - 32;
+        p.x = cardX + 16;
+        p.y = cardY + 16;
+        p.w = cardWidth - 32;
         render(p, i);
         const float bottom = p.y + 16;
         p.ui.draws[fill].rect.h = bottom - cardY;
         p.ui.draws[fill + 1].rect.h = bottom - cardY;
         heights[column] = bottom + 8;
     }
-    p.x = left; p.w = width; p.y = std::max(heights[0], heights[1]);
+    p.x = left;
+    p.w = width;
+    p.y = std::max(heights[0], heights[1]);
 }
 static Component component(Page &p, const std::string &key, int depth) {
     Component c;
@@ -62,7 +70,8 @@ static Component component(Page &p, const std::string &key, int depth) {
         c.useRange = p.select(key + ".a_method", L"A 类计算方法", {L"贝塞尔法", L"极差法"}) == 1;
         int count = p.count(key + ".count", L"测量数据", 5, 2, c.useRange ? 9 : 50);
         c.values = p.values(key + ".sample", L"测量值", count, sampleDefaults);
-        if (!c.useRange) c.averageCount = averageCountInput(p, key + ".average_count");
+        if (!c.useRange)
+            c.averageCount = averageCountInput(p, key + ".average_count");
     } else if (c.kind == 1) {
         c.distribution = p.select(key + ".distribution", L"分布类型", distributions);
         c.halfWidth =
@@ -112,20 +121,24 @@ static void uncertainty(Page &p) {
                 card.heading(L"A 类评定数据");
                 an = card.count("quick.a.count", L"重复测量值", 5, 0, 50);
                 av = card.values("quick.a.value", L"测量值", an, sampleDefaults);
-                if (an) averageCount = averageCountInput(card, "quick.a.average_count");
+                if (an)
+                    averageCount = averageCountInput(card, "quick.a.average_count");
                 ac = card.number("quick.a.c", L"A 类灵敏系数", 1);
-                if (an) aRounding = roundingInput(card, "quick.a");
+                if (an)
+                    aRounding = roundingInput(card, "quick.a");
             } else {
                 int i = index - 1;
                 card.heading(L"B 类分量 " + std::to_wstring(i + 1));
                 auto label = distribution == 2 || distribution == 3 ? L"扩展不确定度 U" : L"半宽";
-                bv.push_back(card.number("quick.b.value." + std::to_string(i), label, i == 0 ? .02 : (i == 1 ? .03 : 0)));
+                bv.push_back(card.number("quick.b.value." + std::to_string(i), label,
+                                         i == 0 ? .02 : (i == 1 ? .03 : 0)));
                 bRounding.push_back(roundingInput(card, "quick.b." + std::to_string(i)));
             }
         });
         p.heading(L"合成设置");
         double k = p.number("quick.k", L"包含因子 k", 2);
-        int digits = p.select("quick.result.digits", L"合成有效数字", {L"1 位", L"2 位", L"3 位", L"4 位"}, 1) + 1;
+        int digits =
+            p.select("quick.result.digits", L"合成有效数字", {L"1 位", L"2 位", L"3 位", L"4 位"}, 1) + 1;
         bool carry = p.select("quick.result.rounding", L"合成修约方式", {L"四舍六入", L"进位"}, 1) == 1;
         p.check();
         require(an + bn > 0, "至少需要一组 A 类数据或一个 B 类分量");
@@ -150,17 +163,18 @@ static void uncertainty(Page &p) {
         auto [rounded, roundedExpanded] = roundedCombinedUncertainty(uc, k, digits, carry);
         if (!bv.empty() && p.collapse("quick.details", L"B 类分量修约明细")) {
             for (std::size_t i = 0; i < bv.size(); ++i)
-                p.note(L"B 类分量 " + std::to_wstring(i + 1) + L"：u=" + format(bRaw[i]) +
-                       L"，修约后 u=" + formatRoundedUncertainty(bv[i], bRounding[i].digits));
+                p.note(L"B 类分量 " + std::to_wstring(i + 1) + L"：u=" + format(bRaw[i]) + L"，修约后 u=" +
+                       formatRoundedUncertainty(bv[i], bRounding[i].digits));
         }
-        p.metrics(L"不确定度结果", {{L"A 类标准不确定度", format(rawUa)},
-                                    {L"A 类修约后标准不确定度", formatRoundedUncertainty(ua, aRounding.digits)},
-                                    {L"B 类合成标准不确定度", format(ub)},
-                                    {L"合成标准不确定度 u_c", format(uc)},
-                                    {L"扩展不确定度 U", format(k * uc)},
-                                    {L"修约后标准不确定度", format(rounded)},
-                                    {L"修约后扩展不确定度", format(roundedExpanded)},
-                                    {L"包含因子 k", format(k)}});
+        p.metrics(L"不确定度结果",
+                  {{L"A 类标准不确定度", format(rawUa)},
+                   {L"A 类修约后标准不确定度", formatRoundedUncertainty(ua, aRounding.digits)},
+                   {L"B 类合成标准不确定度", format(ub)},
+                   {L"合成标准不确定度 u_c", format(uc)},
+                   {L"扩展不确定度 U", format(k * uc)},
+                   {L"修约后标准不确定度", format(rounded)},
+                   {L"修约后扩展不确定度", format(roundedExpanded)},
+                   {L"包含因子 k", format(k)}});
         return;
     }
     int n = p.count("budget.count", L"不确定度分量", 2, 1, 20);
@@ -275,7 +289,8 @@ void renderErrors(Page &p) {
         for (int i = 0; i < n; ++i) {
             const float oldX = p.x, oldY = p.y, oldW = p.w;
             const bool columns = oldW >= 360;
-            if (columns) p.w = (oldW - 16) / 2;
+            if (columns)
+                p.w = (oldW - 16) / 2;
             errors.push_back(p.number("error." + std::to_string(i), L"误差分量 " + std::to_wstring(i + 1),
                                       i < int(defaults.size()) ? defaults[i] : 0));
             const float nextY = p.y;
@@ -283,8 +298,8 @@ void renderErrors(Page &p) {
                 p.x = oldX + p.w + 16;
                 p.y = oldY;
             }
-            sensitivity.push_back(p.number("sensitivity." + std::to_string(i), L"灵敏系数 " + std::to_wstring(i + 1),
-                                           i < 3 ? 1 : 0));
+            sensitivity.push_back(p.number("sensitivity." + std::to_string(i),
+                                           L"灵敏系数 " + std::to_wstring(i + 1), i < 3 ? 1 : 0));
             p.x = oldX;
             p.w = oldW;
             p.y = std::max(p.y, nextY);
@@ -334,4 +349,4 @@ void renderErrors(Page &p) {
     }
     p.metrics(L"合成结果", metrics);
 }
-} // namespace toolbox
+} // 命名空间 toolbox

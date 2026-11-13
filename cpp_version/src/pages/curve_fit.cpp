@@ -209,7 +209,7 @@ void resultRows(Page &p, const CurveFit &fit, const DataPoints &points) {
         p.y += height + 6;
     }
 }
-} // namespace
+} // 命名空间
 
 void renderCurveFit(Page &p) {
     p.heading(L"拟合设置与校准数据");
@@ -267,4 +267,4 @@ void renderCurveFit(Page &p) {
     }
     resultRows(p, fit, points);
 }
-} // namespace toolbox
+} // 命名空间 toolbox

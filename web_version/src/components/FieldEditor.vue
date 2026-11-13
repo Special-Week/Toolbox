@@ -80,7 +80,10 @@ function addBudget() {
 }
 function removeBudget(index: number) {
   masonry.value?.remove(index);
-  emit("update:modelValue", rows.value.filter((_, j) => j !== index));
+  emit(
+    "update:modelValue",
+    rows.value.filter((_, j) => j !== index),
+  );
 }
 </script>
 
@@ -241,22 +244,22 @@ function removeBudget(index: number) {
       </button>
     </div>
     <MasonryCards ref="masonry" :count="rows.length" v-slot="{ index: j }">
-    <div class="budget-root">
-      <BudgetNode
-        :model-value="rows[j] as Budget"
-        :depth="0"
-        :kinds="field.budgetKinds"
-        :detail="budgetDetails?.[j]"
-        :initially-open="j === 0"
-        @update:model-value="updateBudget(j, $event)"
-      /><button
-        class="button danger-text"
-        :disabled="rows.length <= (field.min ?? 1)"
-        @click="removeBudget(j)"
-      >
-        删除此分量
-      </button>
-    </div>
+      <div class="budget-root">
+        <BudgetNode
+          :model-value="rows[j] as Budget"
+          :depth="0"
+          :kinds="field.budgetKinds"
+          :detail="budgetDetails?.[j]"
+          :initially-open="j === 0"
+          @update:model-value="updateBudget(j, $event)"
+        /><button
+          class="button danger-text"
+          :disabled="rows.length <= (field.min ?? 1)"
+          @click="removeBudget(j)"
+        >
+          删除此分量
+        </button>
+      </div>
     </MasonryCards>
   </div>
   <PressureComponents

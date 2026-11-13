@@ -93,4 +93,4 @@ Report smooth(double d, int mode, const std::string &letter, int grade) {
     out.checked();
     return out;
 }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

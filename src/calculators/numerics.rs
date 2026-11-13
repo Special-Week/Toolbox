@@ -56,8 +56,8 @@ pub(crate) fn statistics(values: &[f64]) -> Result<Statistics, String> {
     let count = values.len() as f64;
     let min = values.iter().copied().fold(f64::INFINITY, f64::min);
     let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-    // Centre the usual case to retain small differences on a large offset.
-    // Opposite extreme values need scaling to avoid x - origin overflow.
+    // 一般情况先中心化，保留大偏移量中的细小差异。
+    // 符号相反的极端值需要缩放，避免 x - origin 溢出。
     let origin = values[0];
     let differences: Vec<_> = values.iter().map(|x| x - origin).collect();
     let (mean, residuals) = if differences.iter().all(|x| x.is_finite()) {

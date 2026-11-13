@@ -2,12 +2,8 @@
 #include "toolbox/models.hpp"
 namespace toolbox {
 static constexpr double eps = std::numeric_limits<double>::epsilon();
-double Spline::Cubic::value(double u) const {
-    return std::fma(std::fma(std::fma(d, u, c), u, b), u, a);
-}
-double Spline::Cubic::derivative(double u) const {
-    return std::fma(std::fma(3 * d, u, 2 * c), u, b);
-}
+double Spline::Cubic::value(double u) const { return std::fma(std::fma(std::fma(d, u, c), u, b), u, a); }
+double Spline::Cubic::derivative(double u) const { return std::fma(std::fma(3 * d, u, 2 * c), u, b); }
 double Spline::Cubic::minimumDerivative() const {
     double m = std::min(derivative(0), derivative(1));
     if (d > 0) {
@@ -193,4 +189,4 @@ Values divisionPoints(double start, double end, double step) {
     require(p.size() <= 50000, "分度表最多 50000 行");
     return p;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

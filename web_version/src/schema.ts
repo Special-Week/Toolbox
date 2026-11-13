@@ -609,10 +609,7 @@ export function schema(t: Tool, s: State, c: Catalog): Section[] {
     else
       f.push(
         vector("aValues", "A 类重复测量数据", samples, 0, 50),
-        n(
-          "aAverageCount", "取测量次数 n", "",
-          "留空默认 1 次。",
-        ),
+        n("aAverageCount", "取测量次数 n", "", "留空默认 1 次。"),
         n("aSensitivity", "A 类灵敏系数", 1),
         n("aDigits", "A 类有效数字", "", "留空保留原始计算精度（1～17 位）"),
         sel("aRounding", "A 类修约方式", ["四舍六入", "进位"], 1),

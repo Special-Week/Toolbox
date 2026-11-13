@@ -41,7 +41,10 @@ onMounted(() => {
   );
   if (host.value) observer.observe(host.value);
 });
-onUnmounted(() => { clearHover(); observer?.disconnect(); });
+onUnmounted(() => {
+  clearHover();
+  observer?.disconnect();
+});
 function axis(values: number[], target = 4) {
   if (!values.length)
     return {
@@ -182,20 +185,33 @@ async function evaluateLatest() {
         if (request.revision === hoverRevision) hover.value = null;
       }
     }
-  } finally { pending = false; }
+  } finally {
+    pending = false;
+  }
 }
 function inspect(event: PointerEvent) {
   const rect = (event.currentTarget as SVGElement).getBoundingClientRect();
   const x = ((event.clientX - rect.left) * width.value) / rect.width;
   const y = ((event.clientY - rect.top) * height) / rect.height;
-  if (x < plot.value.x || x > plot.value.x + plot.value.w || y < plot.value.y || y > plot.value.y + plot.value.h) {
+  if (
+    x < plot.value.x ||
+    x > plot.value.x + plot.value.w ||
+    y < plot.value.y ||
+    y > plot.value.y + plot.value.h
+  ) {
     clearHover();
     return;
   }
   if (!p.scatter && p.evaluate && p.curve.length) {
     const fraction = (x - plot.value.x) / plot.value.w;
-    const value = xa.value.base + xa.value.factor * ((1 - fraction) * xa.value.min + fraction * xa.value.max);
-    if (value < p.curve[0][0] || value > p.curve[p.curve.length - 1][0]) { clearHover(); return; }
+    const value =
+      xa.value.base +
+      xa.value.factor *
+        ((1 - fraction) * xa.value.min + fraction * xa.value.max);
+    if (value < p.curve[0][0] || value > p.curve[p.curve.length - 1][0]) {
+      clearHover();
+      return;
+    }
     queued = { x: value, revision: ++hoverRevision };
     void evaluateLatest();
     return;

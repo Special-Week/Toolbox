@@ -195,7 +195,7 @@ std::string resource(unsigned id) {
     require(bytes != nullptr, "无法读取内置量规数据");
     return {bytes, SizeofResource(module, item)};
 }
-} // namespace
+} // 命名空间
 Data Data::parse(const std::string &text) { return Reader(text).read(); }
 const Data &database() {
     static const Data data = [] {
@@ -255,4 +255,4 @@ double first(const Data &r, std::initializer_list<const char *> keys) {
 }
 bool valid(double v) { return std::isfinite(v) && v != 99999. && v != -100000.; }
 bool same(double a, double b) { return std::abs(a - b) < 1e-9; }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

@@ -26,7 +26,7 @@ impl BetaThermistor {
         if !resistance.is_finite() || resistance <= 0.0 {
             return Err("电阻必须是大于 0 的有限数字".to_owned());
         }
-        // Difference of logarithms avoids an overflowing/underflowing R/R0.
+        // 两个对数相减可避免直接计算 R/R0 时上溢或下溢。
         let inverse = 1.0 / self.t0 + (resistance.ln() - self.r0.ln()) / self.beta;
         if inverse <= 0.0 {
             return Err("电阻对应的温度超出 β 模型范围".to_owned());

@@ -72,8 +72,8 @@ impl ToolboxApp {
                                 .iter()
                                 .map(|tool| CardText::new(ui, tool, inner_width))
                                 .collect();
-                            // Measure the complete row first, so optional icons and wrapped
-                            // descriptions cannot move one card's action above another's.
+                            // 先测量整行高度，避免可选图标和换行说明
+                            // 使卡片按钮错位。
                             let header_height = text
                                 .iter()
                                 .map(CardText::header_height)

@@ -7,7 +7,7 @@ use crate::calculators::{
 };
 use crate::catalog::{Dimension, ToolKind};
 use crate::units::{convert_unit, units_for};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 const SAMPLES: &[f64] = &[10.02, 10.01, 10.03, 10.02, 10.01];
 fn average_count(i: &Input, key: &str) -> Result<Option<usize>, String> {

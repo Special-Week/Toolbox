@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 编辑合成误差与灵敏系数，并支持批量粘贴。
 import { computed, ref } from "vue";
 import NumericInput from "./NumericInput.vue";
 
@@ -7,8 +8,12 @@ const emit = defineEmits<{
   "update:values": [value: unknown[]];
   "update:sensitivities": [value: unknown[]];
 }>();
-const values = computed(() => Array.isArray(props.values) ? props.values : []);
-const sensitivities = computed(() => Array.isArray(props.sensitivities) ? props.sensitivities : []);
+const values = computed(() =>
+  Array.isArray(props.values) ? props.values : [],
+);
+const sensitivities = computed(() =>
+  Array.isArray(props.sensitivities) ? props.sensitivities : [],
+);
 const page = ref(1);
 const pages = computed(() => Math.max(1, Math.ceil(values.value.length / 10)));
 const current = computed(() => Math.min(page.value, pages.value));
@@ -18,9 +23,14 @@ const pasteColumn = ref<"values" | "sensitivities" | null>(null);
 const pasteText = ref("");
 const pasteError = ref("");
 
-function write(column: "values" | "sensitivities", index: number, value: string) {
+function write(
+  column: "values" | "sensitivities",
+  index: number,
+  value: string,
+) {
   const next = [...(column === "values" ? values.value : sensitivities.value)];
-  while (column === "sensitivities" && next.length < values.value.length) next.push("1");
+  while (column === "sensitivities" && next.length < values.value.length)
+    next.push("1");
   next[index] = value;
   if (column === "values") emit("update:values", next);
   else emit("update:sensitivities", next);
@@ -34,7 +44,10 @@ function resize(delta: number) {
   if (delta > 0) page.value = Math.ceil(next.length / 10);
 }
 function synchronize() {
-  emit("update:sensitivities", values.value.map((_, i) => sensitivities.value[i] ?? "1"));
+  emit(
+    "update:sensitivities",
+    values.value.map((_, i) => sensitivities.value[i] ?? "1"),
+  );
 }
 function openPaste(column: "values" | "sensitivities") {
   pasteColumn.value = pasteColumn.value === column ? null : column;
@@ -43,7 +56,11 @@ function openPaste(column: "values" | "sensitivities") {
 }
 function paste() {
   const parsed = pasteText.value.trim().split(/[\s,;，；]+/);
-  if (parsed.length < 1 || parsed.length > 50 || parsed.some(v => !v || !Number.isFinite(Number(v)))) {
+  if (
+    parsed.length < 1 ||
+    parsed.length > 50 ||
+    parsed.some((v) => !v || !Number.isFinite(Number(v)))
+  ) {
     pasteError.value = "请粘贴 1～50 个有效数值";
     return;
   }
@@ -61,6 +78,7 @@ function paste() {
 }
 </script>
 
+<!-- prettier-ignore -->
 <template>
   <div class="array-editor">
     <div class="array-toolbar">

@@ -384,12 +384,16 @@ tr:last-child td {
   min-height: 22px;
   line-height: 1.6;
 }
-.collapsible-note > summary::-webkit-details-marker { display: none; }
+.collapsible-note > summary::-webkit-details-marker {
+  display: none;
+}
 .collapsible-note > summary::before {
   content: "▸";
   flex: none;
 }
-.collapsible-note[open] > summary::before { content: "▾"; }
+.collapsible-note[open] > summary::before {
+  content: "▾";
+}
 .collapsible-note > strong {
   display: block;
   margin-top: 12px;

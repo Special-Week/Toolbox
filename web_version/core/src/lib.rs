@@ -121,8 +121,12 @@ pub fn spline_chunk(input: &str, offset: usize, limit: usize) -> Result<String, 
 
 #[wasm_bindgen]
 pub fn curve_value(id: &str, input: &str, x: f64) -> Result<f64, JsValue> {
-    curves::curve_value(id, &Input::new(input).map_err(|e| JsValue::from_str(&e))?, x)
-        .map_err(|e| JsValue::from_str(&e))
+    curves::curve_value(
+        id,
+        &Input::new(input).map_err(|e| JsValue::from_str(&e))?,
+        x,
+    )
+    .map_err(|e| JsValue::from_str(&e))
 }
 
 /// 压力单位切换保持原量程的物理意义，由共享换算函数转换所有相关字段。

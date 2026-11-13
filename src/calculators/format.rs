@@ -24,10 +24,10 @@ pub(crate) fn format_number(value: f64) -> String {
         return "0".to_owned();
     }
     if value.abs() >= 1.0e10 || value.abs() < 1.0e-4 {
-        // Retain the previous eleven significant digits. Display expands the
-        // rounded value as a plain decimal, including very small coefficients.
+        // 保留原先的 11 位有效数字；显示时将修约结果
+        // 展开为普通小数，包括极小系数。
         let rounded = format!("{value:.10e}").parse::<f64>().unwrap_or(value);
-        // Rounding a value near f64::MAX can overflow; keep that finite value.
+        // 接近 f64::MAX 的值修约时可能溢出，此时保留原来的有限值。
         return if rounded.is_finite() { rounded } else { value }.to_string();
     }
     format!("{value:.8}")

@@ -5,9 +5,7 @@ static double kelvin(double t) {
     require(std::isfinite(t) && t > -273.15, "温度必须高于绝对零度");
     return t + 273.15;
 }
-static void emissivity(double e) {
-    require(std::isfinite(e) && e > 0 && e <= 1, "发射率须满足 0 < ε ≤ 1");
-}
+static void emissivity(double e) { require(std::isfinite(e) && e > 0 && e <= 1, "发射率须满足 0 < ε ≤ 1"); }
 double effectiveWavelength(int response, double wavelength, double t) {
     return response == 1 ? 9.6 + 221 / (t + 273.15) : (response == 2 ? 8.7 + 525 / (t + 273.15) : wavelength);
 }
@@ -109,4 +107,4 @@ double Spectrum::corrected(double t, double bg, double instrument, double source
     emissivity(source);
     return transform(t, bg, instrument / source);
 }
-} // namespace toolbox
+} // 命名空间 toolbox

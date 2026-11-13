@@ -1,9 +1,17 @@
+// 验证卡片分列和已有位置的保持。
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { build } from "esbuild";
 
-const { outputFiles } = await build({ entryPoints: ["src/masonry.ts"], bundle: true, write: false, format: "esm" });
-const { placeCards } = await import(`data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`);
+const { outputFiles } = await build({
+  entryPoints: ["src/masonry.ts"],
+  bundle: true,
+  write: false,
+  format: "esm",
+});
+const { placeCards } = await import(
+  `data:text/javascript;base64,${Buffer.from(outputFiles[0].contents).toString("base64")}`
+);
 
 test("new cards use the shorter column without moving existing cards", () => {
   const initial = placeCards([700, 200], [], 2);
@@ -20,11 +28,15 @@ test("new cards use the shorter column without moving existing cards", () => {
 test("single column keeps order and restores prior placement on expansion", () => {
   const wide = placeCards([400, 100, 120], [], 2);
   const narrow = placeCards([400, 100, 120, 80], wide.assignments, 1);
-  assert.deepEqual(narrow.positions.map(p => p.column), [0, 0, 0, 0]);
+  assert.deepEqual(
+    narrow.positions.map((p) => p.column),
+    [0, 0, 0, 0],
+  );
   assert.deepEqual(narrow.assignments, wide.assignments);
   const expanded = placeCards([400, 100, 120, 80], narrow.assignments, 2);
   assert.deepEqual(expanded.assignments.slice(0, 3), wide.assignments);
   assert.equal(expanded.assignments[3], 1);
-  const removed = [...expanded.assignments]; removed.splice(1, 1);
+  const removed = [...expanded.assignments];
+  removed.splice(1, 1);
   assert.deepEqual(placeCards([400, 120, 80], removed, 2).assignments, removed);
 });

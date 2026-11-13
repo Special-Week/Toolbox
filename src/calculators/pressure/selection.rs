@@ -217,7 +217,7 @@ impl ToolboxApp {
                     ("综合判断", if s.meets { "符合" } else { "不符合" }.into()),
                 ]);
             }
-            // Store catalogue ranges in MPa and convert into the selected unit.
+            // 目录量程以 MPa 保存，再转换为所选单位。
             let series = if transmitter {
                 0
             } else {

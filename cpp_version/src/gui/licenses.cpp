@@ -58,7 +58,7 @@ INT_PTR CALLBACK licenseProcedure(HWND dialog, UINT message, WPARAM w, LPARAM l)
     }
     return FALSE;
 }
-} // namespace
+} // 命名空间
 
 void showLicenses(HWND owner, float dpi) {
     auto instance = GetModuleHandleW(nullptr);
@@ -95,4 +95,4 @@ void showLicenses(HWND owner, float dpi) {
     }
     require(result != -1, "无法打开许可证窗口");
 }
-} // namespace toolbox
+} // 命名空间 toolbox

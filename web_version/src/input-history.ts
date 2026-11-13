@@ -3,9 +3,13 @@ import type { State, Tool } from "./types";
 
 export const INPUT_STORAGE_KEY = "toolbox-web:v1";
 
-export function rememberedInputs(tools: Tool[], input: unknown): Record<string, State> {
+export function rememberedInputs(
+  tools: Tool[],
+  input: unknown,
+): Record<string, State> {
   const result: Record<string, State> = {};
-  if (!input || typeof input !== "object" || Array.isArray(input)) return result;
+  if (!input || typeof input !== "object" || Array.isArray(input))
+    return result;
   for (const tool of tools) {
     if (!tool.rememberInputs) continue;
     const value = (input as Record<string, unknown>)[tool.id];

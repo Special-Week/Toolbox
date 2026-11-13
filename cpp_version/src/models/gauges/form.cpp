@@ -200,7 +200,7 @@ class Form {
         return smooth(read("diameter"), mode, letter, std::stoi(grade.substr(2)));
     }
 };
-} // namespace
+} // 命名空间
 PageData page(Type type, State state, const std::string &changed) {
     Form form(std::move(state));
     try {
@@ -210,4 +210,4 @@ PageData page(Type type, State state, const std::string &changed) {
     }
     return std::move(form.data);
 }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

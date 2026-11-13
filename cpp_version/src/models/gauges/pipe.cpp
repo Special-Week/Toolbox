@@ -29,7 +29,7 @@ Table properties(const std::string &title, const Data &row, std::initializer_lis
     }
     return table;
 }
-} // namespace
+} // 命名空间
 Report pipe(bool npt, const std::string &code) {
     // 交互入口仅传标准代号，避免把不同管螺纹类型的同名规格混在一起。
     if (npt) {
@@ -113,4 +113,4 @@ Report pipe(bool npt, const std::string &code) {
     out.checked();
     return out;
 }
-} // namespace toolbox::gauges
+} // 命名空间 toolbox::gauges

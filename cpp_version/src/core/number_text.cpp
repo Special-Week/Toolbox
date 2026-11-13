@@ -114,4 +114,4 @@ std::wstring formatUnit(double value) {
     }
     return wide(displayDecimal(value, 7, false));
 }
-} // namespace toolbox
+} // 命名空间 toolbox

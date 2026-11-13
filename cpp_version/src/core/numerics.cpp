@@ -1,3 +1,4 @@
+// 公共数值校验、文本编码和线性方程求解，供各计算模型复用。
 #define NOMINMAX
 #include "toolbox/core.hpp"
 #include <windows.h>
@@ -193,18 +194,14 @@ double rangeCoefficient(std::size_t n) {
     require(n >= 2 && n <= 9, "极差法支持 2～9 次测量");
     return c[n - 2];
 }
-std::wstring TemperatureUnit::symbol() const {
-    return index == 1 ? L"K" : index == 2 ? L"°F" : L"°C";
-}
+std::wstring TemperatureUnit::symbol() const { return index == 1 ? L"K" : index == 2 ? L"°F" : L"°C"; }
 double TemperatureUnit::celsius(double t) const {
     return index == 1 ? t - 273.15 : index == 2 ? (t - 32) / 1.8 : t;
 }
 double TemperatureUnit::display(double t) const {
     return index == 1 ? t + 273.15 : index == 2 ? t * 1.8 + 32 : t;
 }
-double TemperatureUnit::span() const {
-    return index == 2 ? 1.8 : 1.0;
-}
+double TemperatureUnit::span() const { return index == 2 ? 1.8 : 1.0; }
 double convert(Dimension dimension, double value, std::size_t from, std::size_t to) {
     const auto &list = units(dimension);
     require(from < list.size() && to < list.size(), "单位不存在");
@@ -223,4 +220,4 @@ double convert(Dimension dimension, double value, std::size_t from, std::size_t 
     require(temperature || value == 0 || result != 0, "单位换算结果过小，超出双精度可表示范围");
     return result;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

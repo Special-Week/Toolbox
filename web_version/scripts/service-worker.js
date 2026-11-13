@@ -61,7 +61,10 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       caches
         .open(CACHE)
-        .then(async (cache) => (await cache.match(INDEX, { ignoreVary: true })) || fetch(request)),
+        .then(
+          async (cache) =>
+            (await cache.match(INDEX, { ignoreVary: true })) || fetch(request),
+        ),
     );
     return;
   }
@@ -77,7 +80,9 @@ self.addEventListener("fetch", (event) => {
       for (const name of (await caches.keys()).filter((name) =>
         name.startsWith(PREFIX),
       )) {
-        const previous = await (await caches.open(name)).match(request, { ignoreVary: true });
+        const previous = await (
+          await caches.open(name)
+        ).match(request, { ignoreVary: true });
         if (previous) return previous;
       }
       return fetch(request);

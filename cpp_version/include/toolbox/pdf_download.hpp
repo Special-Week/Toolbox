@@ -1,3 +1,4 @@
+// 规范目录、PDF 下载与校验接口；保存时使用原子替换保护已有文件。
 #pragma once
 
 #include <exception>
@@ -22,14 +23,14 @@ struct Download {
 struct Standard {
     std::wstring code, name, category, status, published, effective, url, searchCode, searchName;
 };
-const std::vector<Standard>& standard_catalog();
-std::vector<const Standard*> search_standards(const std::wstring& query);
+const std::vector<Standard> &standard_catalog();
+std::vector<const Standard *> search_standards(const std::wstring &query);
 
-std::wstring standard_number(const std::wstring& url);
-std::wstring standard_name(const std::string& html);
-std::wstring default_filename(const std::wstring& code, const std::wstring& name);
-size_t validate_pdf(const std::vector<unsigned char>& data);
-Download download_pdf(const std::wstring& url);
-void save_atomic(const std::wstring& path, const std::vector<unsigned char>& data);
+std::wstring standard_number(const std::wstring &url);
+std::wstring standard_name(const std::string &html);
+std::wstring default_filename(const std::wstring &code, const std::wstring &name);
+size_t validate_pdf(const std::vector<unsigned char> &data);
+Download download_pdf(const std::wstring &url);
+void save_atomic(const std::wstring &path, const std::vector<unsigned char> &data);
 
-} // namespace toolbox::pdf
+} // 命名空间 toolbox::pdf

@@ -17,9 +17,7 @@
 
 namespace toolbox {
 // 测量和绘制必须共用行距，窗口缩放后段落高度才不会偏移或截断。
-constexpr float paragraphLineSpacing(float size) {
-    return size * 1.65f;
-}
+constexpr float paragraphLineSpacing(float size) { return size * 1.65f; }
 struct Rect {
     float x = 0, y = 0, w = 0, h = 0;
     bool contains(float px, float py) const;
@@ -31,9 +29,8 @@ struct Color {
 };
 inline const Color Ink{35 / 255.f, 48 / 255.f, 67 / 255.f}, Muted{111 / 255.f, 126 / 255.f, 146 / 255.f},
     Blue{39 / 255.f, 105 / 255.f, 220 / 255.f}, Soft{234 / 255.f, 242 / 255.f, 1},
-    TableStripe{225 / 255.f, 235 / 255.f, 250 / 255.f},
-    Background{246 / 255.f, 248 / 255.f, 251 / 255.f}, White{1, 1, 1}, Border{.84f, .88f, .94f},
-    Green{.114f, .545f, .38f}, Red{.72f, .28f, .27f};
+    TableStripe{225 / 255.f, 235 / 255.f, 250 / 255.f}, Background{246 / 255.f, 248 / 255.f, 251 / 255.f},
+    White{1, 1, 1}, Border{.84f, .88f, .94f}, Green{.114f, .545f, .38f}, Red{.72f, .28f, .27f};
 struct Draw {
     int kind = 0;
     Rect rect, clip;
@@ -221,9 +218,7 @@ class App {
     float textWidth(const std::wstring &text, float size = 12) const;
     void exportCsv(const std::wstring &defaultName, const std::string &header, std::size_t count,
                    std::function<std::string(std::size_t)> row);
-    HWND handle() const {
-        return window_;
-    }
+    HWND handle() const { return window_; }
 };
 void renderPage(Page &page);
 void renderSensors(Page &page);
@@ -236,4 +231,4 @@ void renderCurveFit(Page &page);
 void renderGauges(Page &page);
 void clearGaugeCache(const std::string &id);
 void showLicenses(HWND owner, float dpi);
-} // namespace toolbox
+} // 命名空间 toolbox

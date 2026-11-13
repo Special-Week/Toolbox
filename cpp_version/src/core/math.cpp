@@ -165,10 +165,6 @@ Axis::Axis(const std::wstring &name, double low, double high, int intervals, boo
         caption += L" (×10^" + std::to_wstring(exponent) + L")";
     }
 }
-double Axis::fraction(double value) const {
-    return tickFraction((value - origin) / factor);
-}
-double Axis::tickFraction(double value) const {
-    return (value - minimum) / (maximum - minimum);
-}
-} // namespace toolbox
+double Axis::fraction(double value) const { return tickFraction((value - origin) / factor); }
+double Axis::tickFraction(double value) const { return (value - minimum) / (maximum - minimum); }
+} // 命名空间 toolbox

@@ -148,4 +148,4 @@ void App::homepage() {
     }
     contentHeight_ = y + float((index + cols - 1) / cols) * 176 + scroll - top + 24;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

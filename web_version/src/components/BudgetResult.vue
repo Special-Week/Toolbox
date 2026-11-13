@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 递归展示不确定度分量及其合成结果。
 import { display } from "../format";
 export interface Detail {
   name: string;

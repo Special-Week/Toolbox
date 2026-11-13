@@ -34,7 +34,8 @@ static LRESULT CALLBACK comboProcedure(HWND window, UINT msg, WPARAM w, LPARAM l
         GetClientRect(window, &rect);
         SetWindowPos(face, nullptr, 0, 0, rect.right, rect.bottom, SWP_NOZORDER | SWP_NOACTIVATE);
         SendMessageW(face, WM_SETFONT, SendMessageW(window, WM_GETFONT, 0, 0), FALSE);
-        SendMessageW(face, CB_SETITEMHEIGHT, WPARAM(-1), SendMessageW(window, CB_GETITEMHEIGHT, WPARAM(-1), 0));
+        SendMessageW(face, CB_SETITEMHEIGHT, WPARAM(-1),
+                     SendMessageW(window, CB_GETITEMHEIGHT, WPARAM(-1), 0));
         EnableWindow(face, IsWindowEnabled(window));
         const int selection = int(SendMessageW(window, CB_GETCURSEL, 0, 0));
         const int length = selection < 0 ? CB_ERR : int(SendMessageW(window, CB_GETLBTEXTLEN, selection, 0));
@@ -53,10 +54,14 @@ static LRESULT CALLBACK comboProcedure(HWND window, UINT msg, WPARAM w, LPARAM l
             RECT label = info.rcItem;
             label.left += 3;
             const int previousMode = SetBkMode(dc, TRANSPARENT);
-            const COLORREF previousColor = SetTextColor(dc, GetSysColor(IsWindowEnabled(window) ? COLOR_WINDOWTEXT : COLOR_GRAYTEXT));
-            HGDIOBJ previousFont = SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
-            DrawTextW(dc, text.c_str(), -1, &label, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-            if (previousFont) SelectObject(dc, previousFont);
+            const COLORREF previousColor =
+                SetTextColor(dc, GetSysColor(IsWindowEnabled(window) ? COLOR_WINDOWTEXT : COLOR_GRAYTEXT));
+            HGDIOBJ previousFont =
+                SelectObject(dc, reinterpret_cast<HFONT>(SendMessageW(window, WM_GETFONT, 0, 0)));
+            DrawTextW(dc, text.c_str(), -1, &label,
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+            if (previousFont)
+                SelectObject(dc, previousFont);
             SetTextColor(dc, previousColor);
             SetBkMode(dc, previousMode);
             if (GetFocus() == window && !(SendMessageW(window, WM_QUERYUISTATE, 0, 0) & UISF_HIDEFOCUS))
@@ -67,12 +72,13 @@ static LRESULT CALLBACK comboProcedure(HWND window, UINT msg, WPARAM w, LPARAM l
     }
     if (msg == WM_NCDESTROY) {
         RemoveWindowSubclass(window, comboProcedure, 1);
-        if (face && IsWindow(face)) DestroyWindow(face);
+        if (face && IsWindow(face))
+            DestroyWindow(face);
     }
     const LRESULT result = DefSubclassProc(window, msg, w, l);
-    if (face && (msg == WM_SETFOCUS || msg == WM_KILLFOCUS || msg == WM_ENABLE ||
-                 msg == WM_LBUTTONDOWN || msg == WM_LBUTTONUP || msg == CB_SETCURSEL ||
-                 msg == WM_THEMECHANGED || msg == WM_SYSCOLORCHANGE)) {
+    if (face &&
+        (msg == WM_SETFOCUS || msg == WM_KILLFOCUS || msg == WM_ENABLE || msg == WM_LBUTTONDOWN ||
+         msg == WM_LBUTTONUP || msg == CB_SETCURSEL || msg == WM_THEMECHANGED || msg == WM_SYSCOLORCHANGE)) {
         InvalidateRect(window, nullptr, FALSE);
     }
     return result;
@@ -121,7 +127,8 @@ void App::refresh() {
     }
 }
 void App::open(int index) {
-    if (index >= 0 && index != selected && tools().at(std::size_t(index)).kind != Kind::PdfDownload && !remembersInputs(tools().at(std::size_t(index)))) {
+    if (index >= 0 && index != selected && tools().at(std::size_t(index)).kind != Kind::PdfDownload &&
+        !remembersInputs(tools().at(std::size_t(index)))) {
         clearToolInputs(tools().at(std::size_t(index)));
     }
     selected = index;
@@ -131,22 +138,30 @@ void App::open(int index) {
 void App::clearToolInputs(const Tool &tool) {
     const auto prefix = tool.id + ".";
     for (auto it = state.values.begin(); it != state.values.end();)
-        if (it->first.compare(0, prefix.size(), prefix) == 0) it = state.values.erase(it);
-        else ++it;
+        if (it->first.compare(0, prefix.size(), prefix) == 0)
+            it = state.values.erase(it);
+        else
+            ++it;
     for (auto it = state.choices.begin(); it != state.choices.end();)
-        if (it->first.compare(0, prefix.size(), prefix) == 0) it = state.choices.erase(it);
-        else ++it;
+        if (it->first.compare(0, prefix.size(), prefix) == 0)
+            it = state.choices.erase(it);
+        else
+            ++it;
     for (auto it = openDetails.begin(); it != openDetails.end();)
-        if (it->compare(0, prefix.size(), prefix) == 0) it = openDetails.erase(it);
-        else ++it;
+        if (it->compare(0, prefix.size(), prefix) == 0)
+            it = openDetails.erase(it);
+        else
+            ++it;
     clearGaugeCache(tool.id);
     SetFocus(window_);
 }
 void App::restoreExample() {
-    if (selected < 0 || exportJob.active) return;
+    if (selected < 0 || exportJob.active)
+        return;
     const auto &tool = tools().at(std::size_t(selected));
     if (tool.kind == Kind::PdfDownload) {
-        if (pdfJob->active) return;
+        if (pdfJob->active)
+            return;
         std::lock_guard<std::mutex> lock(pdfJob->mutex);
         pdfJob->result.reset();
         pdfJob->error.clear();
@@ -154,7 +169,8 @@ void App::restoreExample() {
         pdfSavePending = false;
     }
     clearToolInputs(tool);
-    if (tool.kind == Kind::Uncertainty) uncertaintyColumns = {};
+    if (tool.kind == Kind::Uncertainty)
+        uncertaintyColumns = {};
     calibrationSelection.erase(tool.id);
     inputHistory_.observe(tool, state);
     inputHistory_.flush(true);
@@ -300,7 +316,8 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         refresh();
         return 0;
     case WM_MOUSEWHEEL: {
-        if (pdfModal != PdfModal::None) return 0;
+        if (pdfModal != PdfModal::None)
+            return 0;
         POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
         ScreenToClient(window_, &p);
         float side = width >= 880 ? (collapsed ? 92.f : 245.f) : 0;
@@ -333,51 +350,64 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
     }
     case WM_DRAWITEM: {
         auto item = reinterpret_cast<DRAWITEMSTRUCT *>(l);
-        if (item->CtlType != ODT_COMBOBOX) break;
+        if (item->CtlType != ODT_COMBOBOX)
+            break;
         const auto key = nativeKeys_.find(item->hwndItem);
-        if (key == nativeKeys_.end() ||
-            (key->second != "gauge_unified.gauge.size.suggestion" &&
-             key->second != "gauge_unified.gauge.tpi.suggestion")) break;
+        if (key == nativeKeys_.end() || (key->second != "gauge_unified.gauge.size.suggestion" &&
+                                         key->second != "gauge_unified.gauge.tpi.suggestion"))
+            break;
         const auto native = native_.find(key->second);
-        if (native == native_.end()) break;
+        if (native == native_.end())
+            break;
         const bool selected = (item->itemState & ODS_SELECTED) != 0;
         const bool closed = (item->itemState & ODS_COMBOBOXEDIT) != 0;
         FillRect(item->hDC, &item->rcItem,
-                 GetSysColorBrush(selected ? COLOR_HIGHLIGHT : closed ? COLOR_BTNFACE : COLOR_WINDOW));
+                 GetSysColorBrush(selected ? COLOR_HIGHLIGHT
+                                  : closed ? COLOR_BTNFACE
+                                           : COLOR_WINDOW));
         const int previousMode = SetBkMode(item->hDC, TRANSPARENT);
-        const COLORREF previousColor = SetTextColor(item->hDC, GetSysColor((item->itemState & ODS_DISABLED) ? COLOR_GRAYTEXT :
-                                                                           selected ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT));
-        HGDIOBJ previous = SelectObject(item->hDC, font_ ? font_ : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
+        const COLORREF previousColor =
+            SetTextColor(item->hDC, GetSysColor((item->itemState & ODS_DISABLED) ? COLOR_GRAYTEXT
+                                                : selected                       ? COLOR_HIGHLIGHTTEXT
+                                                                                 : COLOR_WINDOWTEXT));
+        HGDIOBJ previous = SelectObject(
+            item->hDC, font_ ? font_ : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
         if (item->itemID < native->second.options.size() && item->itemID < native->second.optionRows.size()) {
             const auto &text = native->second.options[item->itemID];
             const auto &columns = native->second.optionRows[item->itemID];
             RECT rect = item->rcItem;
             rect.left += int(std::ceil(6 * dpi_ / 96));
             if (closed || columns[1].empty()) {
-                DrawTextW(item->hDC, text.c_str(), -1, &rect, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
+                DrawTextW(item->hDC, text.c_str(), -1, &rect,
+                          DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
             } else {
                 const int gap = int(std::ceil(16 * dpi_ / 96));
                 for (std::size_t i = 0; i < columns.size(); ++i) {
                     RECT cell = rect;
-                    if (i < 2) cell.right = std::min(cell.right, cell.left + native->second.optionColumns[i]);
+                    if (i < 2)
+                        cell.right = std::min(cell.right, cell.left + native->second.optionColumns[i]);
                     DrawTextW(item->hDC, columns[i].c_str(), -1, &cell,
                               DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX | DT_END_ELLIPSIS);
-                    if (i < 2) rect.left += native->second.optionColumns[i] + gap;
+                    if (i < 2)
+                        rect.left += native->second.optionColumns[i] + gap;
                 }
             }
         }
         SelectObject(item->hDC, previous);
         SetBkMode(item->hDC, previousMode);
         SetTextColor(item->hDC, previousColor);
-        if (item->itemState & ODS_FOCUS) DrawFocusRect(item->hDC, &item->rcItem);
+        if (item->itemState & ODS_FOCUS)
+            DrawFocusRect(item->hDC, &item->rcItem);
         return TRUE;
     }
     case WM_LBUTTONDOWN: {
         const float px = GET_X_LPARAM(l) * 96.f / dpi_, py = GET_Y_LPARAM(l) * 96.f / dpi_;
         for (auto it = scene.controls.rbegin(); it != scene.controls.rend(); ++it) {
-            if (!it->options.empty() || !it->rect.contains(px, py) || !it->clip.contains(px, py)) continue;
+            if (!it->options.empty() || !it->rect.contains(px, py) || !it->clip.contains(px, py))
+                continue;
             auto native = native_.find(it->key);
-            if (native == native_.end() || !IsWindowVisible(native->second.window)) continue;
+            if (native == native_.end() || !IsWindowVisible(native->second.window))
+                continue;
             HWND edit = native->second.window;
             POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
             MapWindowPoints(window_, edit, &point, 1);
@@ -449,7 +479,8 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
                     if (notification == CBN_SELCHANGE || (suggestion && notification == CBN_SELENDOK)) {
                         // 浏览展开列表时不触发整页重算，确认选择或收起状态下用键盘选择仍立即生效。
                         if (suggestion && notification == CBN_SELCHANGE &&
-                            SendMessageW(child, CB_GETDROPPEDSTATE, 0, 0)) return 0;
+                            SendMessageW(child, CB_GETDROPPEDSTATE, 0, 0))
+                            return 0;
                         const int selection = int(SendMessageW(child, CB_GETCURSEL, 0, 0));
                         if (it->second == "__calibration.selection") {
                             selectCalibration(selection);
@@ -474,11 +505,19 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
     }
     case WM_KEYDOWN:
         if (pdfModal != PdfModal::None) {
-            if (w == VK_ESCAPE) { pdfModal = PdfModal::None; refresh(); }
-            else if (w == VK_TAB) { pdfDialogFocus = 1 - pdfDialogFocus; refresh(); }
-            else if (w == VK_RETURN || w == VK_SPACE) {
-                if (pdfModal == PdfModal::Warning && pdfDialogFocus == 0) startPdfDownload();
-                else { pdfModal = PdfModal::None; refresh(); }
+            if (w == VK_ESCAPE) {
+                pdfModal = PdfModal::None;
+                refresh();
+            } else if (w == VK_TAB) {
+                pdfDialogFocus = 1 - pdfDialogFocus;
+                refresh();
+            } else if (w == VK_RETURN || w == VK_SPACE) {
+                if (pdfModal == PdfModal::Warning && pdfDialogFocus == 0)
+                    startPdfDownload();
+                else {
+                    pdfModal = PdfModal::None;
+                    refresh();
+                }
             }
             return 0;
         }
@@ -491,11 +530,13 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         }
         return 0;
     case WM_QUERYENDSESSION:
-        if (selected >= 0) inputHistory_.observe(tools().at(std::size_t(selected)), state);
+        if (selected >= 0)
+            inputHistory_.observe(tools().at(std::size_t(selected)), state);
         inputHistory_.flush(true);
         return TRUE;
     case WM_CLOSE:
-        if (selected >= 0) inputHistory_.observe(tools().at(std::size_t(selected)), state);
+        if (selected >= 0)
+            inputHistory_.observe(tools().at(std::size_t(selected)), state);
         inputHistory_.flush(true);
         exportJob.cancel = true;
         DestroyWindow(window_);
@@ -517,7 +558,8 @@ void App::synchronizeControls(bool scrolling) {
     if (HDC dc = GetDC(window_)) {
         HGDIOBJ previousFont = SelectObject(dc, font_);
         TEXTMETRICW metrics{};
-        if (GetTextMetricsW(dc, &metrics)) editHeight = metrics.tmHeight + int(std::ceil(2 * dpi_ / 96));
+        if (GetTextMetricsW(dc, &metrics))
+            editHeight = metrics.tmHeight + int(std::ceil(2 * dpi_ / 96));
         SelectObject(dc, previousFont);
         ReleaseDC(window_, dc);
     }
@@ -551,16 +593,17 @@ void App::synchronizeControls(bool scrolling) {
                                        0, 0, 0, 0, window_, nullptr, GetModuleHandleW(nullptr), nullptr);
             require(n.window != nullptr, "无法创建输入控件");
             nativeKeys_[n.window] = c.key;
-            HWND face = ownerDraw ? CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL,
-                                                     0, 0, 0, 0, window_, nullptr, GetModuleHandleW(nullptr), nullptr)
-                                  : nullptr;
-            SetWindowSubclass(n.window, combo ? comboProcedure : editProcedure, 1, reinterpret_cast<DWORD_PTR>(face));
+            HWND face =
+                ownerDraw ? CreateWindowExW(0, L"COMBOBOX", L"", WS_CHILD | CBS_DROPDOWNLIST | WS_VSCROLL, 0,
+                                            0, 0, 0, window_, nullptr, GetModuleHandleW(nullptr), nullptr)
+                          : nullptr;
+            SetWindowSubclass(n.window, combo ? comboProcedure : editProcedure, 1,
+                              reinterpret_cast<DWORD_PTR>(face));
         }
         n.seen = true;
         const bool changed = combo && (created || n.options != c.options);
-        if (ownerDraw && !changed && n.layoutValid && n.optionDpi == dpi_ &&
-            sameRect(n.layoutRect, c.rect) && sameRect(n.layoutClip, c.clip) &&
-            SendMessageW(n.window, CB_GETDROPPEDSTATE, 0, 0)) {
+        if (ownerDraw && !changed && n.layoutValid && n.optionDpi == dpi_ && sameRect(n.layoutRect, c.rect) &&
+            sameRect(n.layoutClip, c.clip) && SendMessageW(n.window, CB_GETDROPPEDSTATE, 0, 0)) {
             continue;
         }
         SendMessageW(n.window, WM_SETFONT, reinterpret_cast<WPARAM>(font_), TRUE);
@@ -570,7 +613,8 @@ void App::synchronizeControls(bool scrolling) {
                 n.optionRows.clear();
                 if (ownerDraw) {
                     n.optionRows.reserve(n.options.size());
-                    for (const auto &option : n.options) n.optionRows.push_back(specColumns(option));
+                    for (const auto &option : n.options)
+                        n.optionRows.push_back(specColumns(option));
                 }
                 SendMessageW(n.window, CB_RESETCONTENT, 0, 0);
                 for (auto &o : c.options) {
@@ -594,7 +638,8 @@ void App::synchronizeControls(bool scrolling) {
                         if (alignedSpecs) {
                             const auto &columns = n.optionRows[index];
                             for (std::size_t i = 0; i < columns.size(); ++i) {
-                                if (GetTextExtentPoint32W(dc, columns[i].c_str(), int(columns[i].size()), &extent))
+                                if (GetTextExtentPoint32W(dc, columns[i].c_str(), int(columns[i].size()),
+                                                          &extent))
                                     n.optionColumns[i] = std::max(n.optionColumns[i], int(extent.cx));
                             }
                         }
@@ -609,14 +654,16 @@ void App::synchronizeControls(bool scrolling) {
                         if (alignedSpecs) {
                             const auto &columns = n.optionRows[index];
                             for (std::size_t i = 0; i < columns.size(); ++i)
-                                n.optionColumns[i] = std::max(n.optionColumns[i],
-                                    int(std::ceil(textWidth(columns[i], 14) * dpi_ / 96)));
+                                n.optionColumns[i] =
+                                    std::max(n.optionColumns[i],
+                                             int(std::ceil(textWidth(columns[i], 14) * dpi_ / 96)));
                         }
                     }
                 }
                 if (alignedSpecs)
-                    n.optionTextWidth = std::max(n.optionTextWidth, n.optionColumns[0] + n.optionColumns[1] +
-                        n.optionColumns[2] + int(std::ceil(32 * dpi_ / 96)));
+                    n.optionTextWidth =
+                        std::max(n.optionTextWidth, n.optionColumns[0] + n.optionColumns[1] +
+                                                        n.optionColumns[2] + int(std::ceil(32 * dpi_ / 96)));
                 n.optionDpi = dpi_;
             }
             const float comboScale = dpi_ / 96;
@@ -640,7 +687,8 @@ void App::synchronizeControls(bool scrolling) {
                 SetWindowPos(face, nullptr, 0, 0, int(c.rect.w * comboScale), int(380 * comboScale),
                              SWP_NOZORDER | SWP_NOACTIVATE);
                 const LRESULT height = SendMessageW(face, CB_GETITEMHEIGHT, WPARAM(-1), 0);
-                if (height != CB_ERR) selectionHeight = height;
+                if (height != CB_ERR)
+                    selectionHeight = height;
             }
             SendMessageW(n.window, CB_SETITEMHEIGHT, WPARAM(-1), selectionHeight);
         } else if (GetFocus() != n.window) {
@@ -703,12 +751,12 @@ void App::rebuild(bool scrolling) {
     } else {
         const auto &tool = tools().at(std::size_t(selected));
         float x = left + 24,
-              w = std::min(width - left - 48, tool.group == Group::Gauges ||
-                                                      tool.kind == Kind::BSplineInterpolation ||
-                                                      tool.kind == Kind::CalibrationCurveFit
-                                                      || tool.kind == Kind::PdfDownload || tool.kind == Kind::Uncertainty
-                                                  ? 960.f
-                                                  : 820.f),
+              w = std::min(width - left - 48,
+                           tool.group == Group::Gauges || tool.kind == Kind::BSplineInterpolation ||
+                                   tool.kind == Kind::CalibrationCurveFit || tool.kind == Kind::PdfDownload ||
+                                   tool.kind == Kind::Uncertainty
+                               ? 960.f
+                               : 820.f),
               y = top + 10 - scroll;
         scene.button({x, y, 86, 28}, L"← 工具箱", [this] { open(-1); });
         scene.text({x + 96, y, w - 96, 28}, L"/ " + groupName(tool.group) + L" / " + tool.name, 12, Muted);
@@ -720,15 +768,20 @@ void App::rebuild(bool scrolling) {
         float offset = tool.icon.empty() ? 0 : 60;
         const float actionWidth = 104, actionGap = 16;
         const bool actionBelow = textWidth(tool.name, 26) + offset + actionWidth + actionGap > w;
-        const float textSpace = w - offset - (!exportJob.active && !actionBelow ? actionWidth + actionGap : 0);
+        const float textSpace =
+            w - offset - (!exportJob.active && !actionBelow ? actionWidth + actionGap : 0);
         scene.text({x + offset, y, textSpace, 32}, tool.name, 26, Ink, true);
         scene.text({x + offset, y + 34, textSpace, 44}, tool.description, 12, Muted);
         if (!exportJob.active && !actionBelow) {
-            scene.button({x + w - actionWidth, y + 3, actionWidth, 40}, tool.kind == Kind::PdfDownload ? L"清空" : L"恢复示例", [this] { restoreExample(); });
+            scene.button({x + w - actionWidth, y + 3, actionWidth, 40},
+                         tool.kind == Kind::PdfDownload ? L"清空" : L"恢复示例",
+                         [this] { restoreExample(); });
         }
         y += 86;
         if (!exportJob.active && actionBelow) {
-            scene.button({x + w - actionWidth, y, actionWidth, 40}, tool.kind == Kind::PdfDownload ? L"清空" : L"恢复示例", [this] { restoreExample(); });
+            scene.button({x + w - actionWidth, y, actionWidth, 40},
+                         tool.kind == Kind::PdfDownload ? L"清空" : L"恢复示例",
+                         [this] { restoreExample(); });
             y += 52;
         }
         Page page(*this, scene, tool, x, y, w);
@@ -835,4 +888,4 @@ void App::paint() {
     }
     EndPaint(window_, &ps);
 }
-} // namespace toolbox
+} // 命名空间 toolbox

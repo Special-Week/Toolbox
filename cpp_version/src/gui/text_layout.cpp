@@ -13,8 +13,8 @@ float App::textWidth(const std::wstring &text, float size) const {
                                                     size, L"zh-cn", &format);
     if (SUCCEEDED(status)) {
         format->SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP);
-        status = textFactory_->CreateTextLayout(text.c_str(), UINT32(text.size()), format,
-                                                100000.f, 100000.f, &layout);
+        status = textFactory_->CreateTextLayout(text.c_str(), UINT32(text.size()), format, 100000.f, 100000.f,
+                                                &layout);
     }
     DWRITE_TEXT_METRICS metrics{};
     if (SUCCEEDED(status)) {
@@ -54,4 +54,4 @@ float App::paragraphHeight(const std::wstring &text, float availableWidth, float
     require(SUCCEEDED(status), "无法计算说明文字的排版高度");
     return std::ceil(std::max(paragraphLineSpacing(size), metrics.height)) + 2;
 }
-} // namespace toolbox
+} // 命名空间 toolbox

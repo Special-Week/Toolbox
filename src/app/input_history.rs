@@ -1,5 +1,5 @@
 //! 本地输入续接：按工具隔离，停顿后原子写入，正常退出时补存最后一次编辑。
-use crate::catalog::{ToolDef, TOOLS};
+use crate::catalog::{TOOLS, ToolDef};
 use serde_json::json;
 use std::collections::HashMap;
 use std::io::{self, Read, Write};
@@ -293,9 +293,11 @@ mod tests {
             if name == "固定点证书" {
                 click(&mut app, &ctx, id, "保存");
                 let empty = frame(&mut app, &ctx, id, [1220.0, 2000.0], vec![]);
-                assert!(text_shapes(&empty)
-                    .iter()
-                    .any(|(text, _)| text == "请输入档案名称"));
+                assert!(
+                    text_shapes(&empty)
+                        .iter()
+                        .any(|(text, _)| text == "请输入档案名称")
+                );
                 assert!(!dir.path().join("calibrations-v1.json").exists());
             }
             if name != "S型证书" {
@@ -387,17 +389,21 @@ mod tests {
                 );
                 click(&mut reopened, &ctx, id, "保存");
                 let invalid = frame(&mut reopened, &ctx, id, [1220.0, 2000.0], vec![]);
-                assert!(text_shapes(&invalid)
-                    .iter()
-                    .any(|(text, _)| text.contains("请先完整填写并检查证书参数")));
+                assert!(
+                    text_shapes(&invalid)
+                        .iter()
+                        .any(|(text, _)| text.contains("请先完整填写并检查证书参数"))
+                );
                 assert_eq!(std::fs::read(&path).unwrap(), before_invalid);
                 click(&mut reopened, &ctx, id, "取消");
                 assert_eq!(reopened.value(tool, coefficient, ""), "-");
                 reopened.set_value(tool, coefficient, "3.5".into());
                 let edited = frame(&mut reopened, &ctx, id, [1220.0, 2000.0], vec![]);
-                assert!(text_shapes(&edited)
-                    .iter()
-                    .any(|(text, _)| text == "已修改"));
+                assert!(
+                    text_shapes(&edited)
+                        .iter()
+                        .any(|(text, _)| text == "已修改")
+                );
                 let before_overwrite = std::fs::read(&path).unwrap();
                 click(&mut reopened, &ctx, id, "保存当前…");
                 click(&mut reopened, &ctx, id, "例如：仪器编号或证书日期");
@@ -410,12 +416,16 @@ mod tests {
                 );
                 click(&mut reopened, &ctx, id, "保存");
                 let overwrite = frame(&mut reopened, &ctx, id, [1220.0, 2000.0], vec![]);
-                assert!(text_shapes(&overwrite)
-                    .iter()
-                    .any(|(text, _)| text == "覆盖系数档案"));
-                assert!(text_shapes(&overwrite)
-                    .iter()
-                    .any(|(text, _)| text.contains("已存在")));
+                assert!(
+                    text_shapes(&overwrite)
+                        .iter()
+                        .any(|(text, _)| text == "覆盖系数档案")
+                );
+                assert!(
+                    text_shapes(&overwrite)
+                        .iter()
+                        .any(|(text, _)| text.contains("已存在"))
+                );
                 assert_eq!(std::fs::read(&path).unwrap(), before_overwrite);
                 click(&mut reopened, &ctx, id, "取消");
                 assert_eq!(std::fs::read(&path).unwrap(), before_overwrite);
@@ -427,15 +437,21 @@ mod tests {
                 reopened.set_value(tool, coefficient, "3.6".into());
                 click(&mut reopened, &ctx, id, "更新选中…");
                 let updating = frame(&mut reopened, &ctx, id, [1220.0, 2000.0], vec![]);
-                assert!(text_shapes(&updating)
-                    .iter()
-                    .any(|(text, _)| text == "更新系数档案"));
-                assert!(text_shapes(&updating)
-                    .iter()
-                    .any(|(text, _)| text.contains("确定用当前证书参数更新档案")));
-                assert!(!text_shapes(&updating)
-                    .iter()
-                    .any(|(text, _)| text.contains("已存在")));
+                assert!(
+                    text_shapes(&updating)
+                        .iter()
+                        .any(|(text, _)| text == "更新系数档案")
+                );
+                assert!(
+                    text_shapes(&updating)
+                        .iter()
+                        .any(|(text, _)| text.contains("确定用当前证书参数更新档案"))
+                );
+                assert!(
+                    !text_shapes(&updating)
+                        .iter()
+                        .any(|(text, _)| text.contains("已存在"))
+                );
                 click(&mut reopened, &ctx, id, "确认更新");
                 let data: serde_json::Value =
                     serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
@@ -655,16 +671,20 @@ mod tests {
                 })
             };
             let default = shapes(&mut app);
-            assert!(default
-                .iter()
-                .any(|(text, _)| text.contains("留空默认 1 次")));
+            assert!(
+                default
+                    .iter()
+                    .any(|(text, _)| text.contains("留空默认 1 次"))
+            );
             assert!(result_value(&default, "1"));
             set(&mut app, field, "4");
             assert!(result_value(&shapes(&mut app), "0.5"));
             set(&mut app, field, "0");
-            assert!(shapes(&mut app)
-                .iter()
-                .any(|(text, _)| text.contains("取测量次数 n 须为正整数")));
+            assert!(
+                shapes(&mut app)
+                    .iter()
+                    .any(|(text, _)| text.contains("取测量次数 n 须为正整数"))
+            );
         }
     }
 
@@ -715,9 +735,11 @@ mod tests {
                 })
             };
             let default = shapes(&mut app);
-            assert!(default
-                .iter()
-                .any(|(text, _)| text.contains("留空保留原始计算精度")));
+            assert!(
+                default
+                    .iter()
+                    .any(|(text, _)| text.contains("留空保留原始计算精度"))
+            );
             assert!(result_value(&default, "2.49"));
             if !quick {
                 assert_eq!(app.value(tool, "budget.rounding_v2", ""), "1");
@@ -727,9 +749,11 @@ mod tests {
             set(&mut app, &format!("{prefix}.rounding"), "0");
             assert!(result_value(&shapes(&mut app), "2.48"));
             set(&mut app, &format!("{prefix}.digits"), "18");
-            assert!(shapes(&mut app)
-                .iter()
-                .any(|(text, _)| text.contains("有效数字须为 1～17")));
+            assert!(
+                shapes(&mut app)
+                    .iter()
+                    .any(|(text, _)| text.contains("有效数字须为 1～17"))
+            );
         }
     }
 
@@ -855,9 +879,11 @@ mod tests {
         let cards: Vec<_> = (1..=3)
             .map(|i| card_rect(&narrow, &format!("分量 {i}")))
             .collect();
-        assert!(cards
-            .iter()
-            .all(|rect| (rect.left() - cards[0].left()).abs() < 1.0));
+        assert!(
+            cards
+                .iter()
+                .all(|rect| (rect.left() - cards[0].left()).abs() < 1.0)
+        );
         assert!(cards[1].top() >= cards[0].bottom() && cards[2].top() >= cards[1].bottom());
         let wide_again = draw(&mut app, 1220.0);
         assert!((card_rect(&wide_again, "分量 3").left() - first.left()).abs() < 1.0);
@@ -965,12 +991,16 @@ mod tests {
             .iter()
             .map(|name| card_rect(&narrow, name))
             .collect();
-        assert!(cards
-            .iter()
-            .all(|r| (r.left() - cards[0].left()).abs() < 1.0));
-        assert!(cards
-            .windows(2)
-            .all(|pair| pair[1].top() >= pair[0].bottom()));
+        assert!(
+            cards
+                .iter()
+                .all(|r| (r.left() - cards[0].left()).abs() < 1.0)
+        );
+        assert!(
+            cards
+                .windows(2)
+                .all(|pair| pair[1].top() >= pair[0].bottom())
+        );
         let wide_again = draw(&mut app, 1220.0);
         assert!((card_rect(&wide_again, "B 类分量 3").left() - b3.left()).abs() < 1.0);
         assert_eq!(app.value(tool, "b_widths.value.0", ""), "1.245");
@@ -1328,11 +1358,12 @@ mod tests {
         );
         let output = frame(&mut app, &ctx, unit.id, [620.0, 820.0], vec![]);
         assert_eq!(app.value(unit, "value", ""), "1");
-        assert!(!app
-            .history
-            .values
-            .keys()
-            .any(|key| key.starts_with(unit.id)));
+        assert!(
+            !app.history
+                .values
+                .keys()
+                .any(|key| key.starts_with(unit.id))
+        );
         let texts = text_shapes(&output);
         let button = texts.iter().find(|(text, _)| text == "恢复示例").unwrap().1;
         assert!(button.right() <= 596.0 && button.left() > 450.0);

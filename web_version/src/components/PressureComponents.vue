@@ -1,4 +1,5 @@
 <script setup lang="ts">
+// 编辑压力合成误差的各个分量及单位。
 import NumericInput from "./NumericInput.vue";
 import { computed } from "vue";
 import type { Catalog } from "../types";

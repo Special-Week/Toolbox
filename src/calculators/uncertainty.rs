@@ -123,7 +123,7 @@ impl ToolboxApp {
                         .show(ui, |ui| {
                             value = Some(self.uncertainty_component(ui, tool, &k, depth + 1));
                         });
-                    // Calculate collapsed nodes without drawing their controls.
+                    // 折叠节点仍参与计算，但不绘制其控件。
                     if let Some(value) = value {
                         children.push(value?);
                     } else {

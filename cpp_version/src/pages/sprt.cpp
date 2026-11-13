@@ -136,4 +136,4 @@ void sprtPage(Page &p) {
                             {L"电阻比变化率 dW/dt", format(slope / m.rtp / unit.span())}});
     p.division(k, {lo, hi}, unit, L"Ω", curve);
 }
-} // namespace toolbox
+} // 命名空间 toolbox

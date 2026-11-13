@@ -83,4 +83,4 @@ void standardCouplePage(Page &p) {
                             {L"参考端电势", format(ce) + L" mV"}});
     p.division(k, {lo, hi}, unit, L"mV", [model, ce](double t) { return model.emf(t) - ce; });
 }
-} // namespace toolbox
+} // 命名空间 toolbox

@@ -2,11 +2,13 @@
 
 **Toolbox** 的 Windows 桌面版，使用 C++17、Win32、Direct2D 和 DirectWrite，提供 **7 个分类、50 个工具**。支持窗口缩放和分类折叠，采用系统字体与 DPI 适配。
 
+当前版本：**v2026.11.15**。
+
 完整功能清单和通用计算约定见 [主项目 README](../README.md#功能分类)。本目录可独立构建。
 
 ## 构建与运行
 
-预先将完整的 **mingw64 / mingw32** 工具链加入 PATH，确保 `gcc`、C++ 编译组件、`ar` 和 `windres` 来自同一套工具链。以下命令在 `cpp_version` 目录执行。构建脚本会通过 PowerShell 编译随源码提供的 PDFio、zlib 依赖。
+预先将完整的 **mingw64 / mingw32** 工具链加入 PATH，确保 `gcc`、`g++`、`windres` 和 `mingw32-make` 来自同一套工具链。以下命令在 `cpp_version` 目录执行。构建会编译随源码提供的 PDFio、zlib 和数学排版依赖。
 
 ### 64 位（默认）
 
@@ -16,7 +18,7 @@
 .\build.cmd
 ```
 
-生成 `dist/x64/Toolbox.exe`。
+生成 `dist/x64/Toolbox_cpp_x64_v2026.11.15.exe`。
 
 ### 32 位
 
@@ -26,35 +28,42 @@
 .\build.cmd x86
 ```
 
-生成 `dist/x86/Toolbox.exe`。
+生成 `dist/x86/Toolbox_cpp_x86_v2026.11.15.exe`。
 
 Windows 7 SP1 32 位构建方案使用 **GCC 8.1.0、POSIX/DWARF/MSVCRT** 工具链，处理器须支持 SSE2；尚未完成 Win7 真机验证。任意新版 mingw32 不保证 Win7 兼容。
 
-### 直接使用 GCC
+### 直接使用 mingw32-make
 
 以 64 位为例：
 
 ```powershell
-New-Item -ItemType Directory -Force build, dist/x64 | Out-Null
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-pdf.ps1
-windres -c 65001 -O coff resources/Toolbox.rc -o build/Toolbox.res.o
-gcc "@build.rsp" -O2 -s -o dist/x64/Toolbox.exe
+mingw32-make -j4 ARCH=x64
 ```
 
-32 位改用 mingw32，将输出目录改为 `dist/x86`，并在 GCC 命令中加入 `-msse2 -mfpmath=sse -pthread`。
+32 位切换至 mingw32 工具链，并将参数改为 `ARCH=x86`。脚本默认使用 4 个并行任务，可在运行 `build.cmd` 前设置 `TOOLBOX_BUILD_JOBS` 调整。
 
-`build.rsp` 保存源码清单与编译、链接参数；`gcc` 按源文件扩展名编译 C++，并显式链接 C++ 标准库。
+Makefile 分架构保存对象文件和头文件依赖，后续构建只重编已变化的文件；`build.rsp` 和 `microtex.rsp` 提供源码清单，实际编译和链接参数由 Makefile 管理。文件名中的版本号取自 `resources/Toolbox.rc` 的 `FILEVERSION`；更新版本时应同时更新该文件中的版本字符串、数字版本、程序清单和窗口标题。普通构建使用已生成的 C++ 公式目录，不需要 Node.js。
+
+修改仓库根目录 `assets/math/` 下的共享公式目录或匹配规则后，需在 `cpp_version` 目录使用 Node.js 同步并检查生成文件，再构建：
+
+```powershell
+node scripts/sync-math-catalog.mjs
+node scripts/sync-math-catalog.mjs --check
+```
+
+`include/toolbox/generated_formula_catalog.inc` 和 `generated_formula_patterns.inc` 是构建所需源码，应与共享公式数据保持同步。
 
 ## 发布
 
-发布对应架构的 **Toolbox.exe** 即可。运行库、数据、图标和许可声明已静态链接或内嵌；Windows 系统 DLL 由操作系统提供。`build/` 仅存放编译中间文件。
+发布对应架构的 **Toolbox_cpp_x86_v版本号.exe** 或 **Toolbox_cpp_x64_v版本号.exe** 即可。运行库、数据、图标和许可声明已静态链接或内嵌；Windows 系统 DLL 由操作系统提供。`build/` 仅存放编译中间文件。
 
 ## 项目结构
 
 ```text
 cpp_version/
 ├── build.cmd                 # 构建入口，默认 x64，可选 x86
-├── build.rsp                 # 源码清单、C++17 编译参数与静态链接库
+├── Makefile                  # mingw32-make 构建规则和架构隔离
+├── build.rsp / microtex.rsp  # 应用与 MicroTeX 源码清单
 ├── .gitignore                # 构建产物和本地缓存的忽略规则
 ├── THIRD-PARTY-NOTICES.md     # 第三方组件与授权说明
 ├── include/toolbox/
@@ -64,6 +73,9 @@ cpp_version/
 │   ├── gauges.hpp            # 量规输入、查表和结果报告接口
 │   ├── gui.hpp               # 窗口、控件、页面和绘图接口
 │   ├── pdf_download.hpp      # 规范 PDF 获取、校验与保存接口
+│   ├── formula_layout.hpp    # 公式识别及共享公式目录
+│   ├── generated_formula_*.inc # 由共享公式数据生成的 C++ 条目
+│   ├── math_engine.hpp       # MicroTeX 数学排版接口
 │   └── resource_ids.h        # 代码与资源文件共用的资源编号
 ├── src/
 │   ├── main.cpp              # Windows 程序入口与 COM 初始化
@@ -113,6 +125,7 @@ cpp_version/
 │       ├── window.cpp        # 窗口消息、输入控件、焦点与滚动处理
 │       ├── scene.cpp         # 界面布局及 Direct2D 绘制
 │       ├── text_layout.cpp   # DirectWrite 文字测量、换行与排版
+│       ├── details.cpp / math_engine.cpp # 计算过程、说明与公式绘制
 │       ├── navigation.cpp    # 首页与分类导航
 │       ├── icon.cpp          # 图标资源加载
 │       ├── export.cpp        # CSV 导出与后台任务
@@ -128,10 +141,11 @@ cpp_version/
 │       ├── tables.json       # 量规尺寸、公差、偏差和长度表
 │       └── unified.json      # UN 系列及中径制造公差 U
 ├── licenses/                 # 第三方许可原文及内嵌许可汇总
-├── scripts/build-pdf.ps1     # 按当前 MinGW 架构编译 PDF 依赖
+├── scripts/                  # PDF 依赖辅助脚本和共享公式目录同步脚本
 └── third_party/
     ├── README.md             # 第三方源码说明
     ├── double-conversion/    # 十进制解析与格式化组件
+    ├── microtex/ / tinyxml2/ # 数学排版、字体及 XML 解析组件
     ├── pdfio/                # PDF 文件解析及页数检查
     └── zlib/                 # PDF 流解压依赖
 ```
@@ -143,6 +157,7 @@ cpp_version/
 ## 使用说明
 
 - 计算使用 `double`，适用温区、单位、允差和模型条件见各页“计算说明”。量规模型与数据边界见 [量规数据说明](../data/gauges/README.md)。
+- 可展开“计算过程”查看本次公式和数值代入；较复杂且已接入的公式通过 MicroTeX 绘制，显示修约不改变计算精度。
 - 部分需要反复录入的工具自动保存最近输入，默认使用 `%LOCALAPPDATA%\Toolbox\cpp\inputs-v1.json`，可用“恢复示例”重置。单位换算等快捷工具和 PDF 下载链接不保存。
 - 标准热电偶和标准铂电阻的证书参数可保存为命名档案，默认存放在 `%LOCALAPPDATA%\Toolbox\cpp\calibrations-v1.json`。
 - “其他工具 → 计量规范 PDF 下载”支持按规范名称或编号搜索内置的 2,882 条规范，分页展示类型、状态及日期，选择条目后由本机下载 PDF、检查实际页数并选择位置保存。下载前显示提示，保存成功后显示确认；单文件上限 100 MB，请按网站的电子文本使用说明使用文件。

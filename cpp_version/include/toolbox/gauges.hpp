@@ -50,6 +50,7 @@ struct Report {
     std::vector<std::pair<std::string, Cell>> metrics;
     std::vector<Table> tables;
     std::vector<std::string> notes;
+    std::vector<std::wstring> process;
     explicit Report(std::string name) : title(std::move(name)) {}
     void metric(const std::string &name, Cell value);
     void parameter(const std::string &name, double value);
@@ -58,6 +59,7 @@ struct Report {
     void showInches();
     std::string text(Type type) const;
 };
+inline std::wstring traceNumber(double value) { return std::isfinite(value) ? L"\u2063" + inputNumber(value) + L"\u2063" : L"—"; }
 void geometry(Report &out, double d, double p, double d2, double d1, double angle, int lines);
 void positiveGeometry(double d, double p, double d2, double d1);
 double pitch(const Data &row);

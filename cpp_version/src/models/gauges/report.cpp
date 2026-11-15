@@ -145,6 +145,12 @@ void geometry(Report &out, double d, double p, double d2, double d1, double angl
     const double pi = std::acos(-1.);
     out.metric("螺旋升角 ψ (°)", std::atan(lines * p / (pi * d2)) * 180 / pi);
     out.metric("最佳三针直径 d₀ (mm)", p / (2 * std::cos(angle / 2 * pi / 180)));
+    auto c = traceNumber;
+    out.process.push_back(L"基本几何：大径 D = " + c(d) + L" mm，螺距 P = " + c(p) + L" mm，中径 D₂ = " + c(d2) + L" mm，小径 D₁ = " + c(d1) + L" mm，牙型角 α = " + c(angle) + L"°，线数 = " + std::to_wstring(lines) + L"。");
+    out.process.push_back(L"导程 L = 线数 × P = " + c(lines * p) + L" mm；螺旋升角 ψ = atan[L/(πD₂)] × 180/π = " + c(std::atan(lines * p / (pi * d2)) * 180 / pi) + L"°。");
+    out.process.push_back(L"最佳三针直径 d₀ = P/[2cos(α/2)]。");
+    out.process.push_back(L"数值代入：" + c(p) + L" / [2cos(" + c(angle) + L"°/2)] = " +
+                          c(p / (2 * std::cos(angle / 2 * pi / 180))) + L" mm。");
 }
 void positiveGeometry(double d, double p, double d2, double d1) {
     require(std::isfinite(d) && std::isfinite(p) && std::isfinite(d2) && std::isfinite(d1) && d > 0 &&

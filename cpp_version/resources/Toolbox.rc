@@ -2,6 +2,8 @@
 #pragma code_page(65001)
 #include <windows.h>
 #include "../include/toolbox/resource_ids.h"
+#include "microtex-fonts.rcinc"
+#define TOOLBOX_VERSION_STRING "2026.11.15"
 // 资源文件路径相对于 cpp_version；许可文本随源码保存，无需构建时生成。
 TOOLBOX_ICON ICON "resources/toolbox.ico"
 TOOLBOX_LICENSE_TEXT RCDATA "licenses/third-party-licenses.txt"
@@ -20,8 +22,8 @@ BEGIN
 END
 1 RT_MANIFEST "resources/Toolbox.manifest"
 1 VERSIONINFO
- FILEVERSION 0,1,0,0
- PRODUCTVERSION 0,1,0,0
+ FILEVERSION 2026,11,15,0
+ PRODUCTVERSION 2026,11,15,0
  FILEFLAGSMASK 0x3fL
  FILEFLAGS 0
  FILEOS VOS_NT_WINDOWS32
@@ -33,9 +35,13 @@ BEGIN
   BEGIN
    VALUE "FileDescription", "工具箱\0"
    VALUE "ProductName", "Toolbox\0"
-   VALUE "FileVersion", "0.1.0\0"
-   VALUE "ProductVersion", "0.1.0\0"
-   VALUE "OriginalFilename", "Toolbox.exe\0"
+   VALUE "FileVersion", "v" TOOLBOX_VERSION_STRING "\0"
+   VALUE "ProductVersion", "v" TOOLBOX_VERSION_STRING "\0"
+#ifdef _WIN64
+   VALUE "OriginalFilename", "Toolbox_cpp_x64_v" TOOLBOX_VERSION_STRING ".exe\0"
+#else
+   VALUE "OriginalFilename", "Toolbox_cpp_x86_v" TOOLBOX_VERSION_STRING ".exe\0"
+#endif
   END
  END
  BLOCK "VarFileInfo"

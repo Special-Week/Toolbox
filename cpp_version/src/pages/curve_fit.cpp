@@ -266,5 +266,6 @@ void renderCurveFit(Page &p) {
         drawCurveFitChart(p, fit, points, xLabel, L"残差（与响应量同单位）", true);
     }
     resultRows(p, fit, points);
+    p.processSteps = fit.process(points, false);
 }
 } // 命名空间 toolbox

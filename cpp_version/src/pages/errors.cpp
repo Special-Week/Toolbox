@@ -5,6 +5,54 @@ namespace toolbox {
 static const Values sampleDefaults{10.02, 10.01, 10.03, 10.02, 10.01};
 static const std::vector<std::wstring> distributions{L"均匀分布", L"三角分布", L"正态 k=2",
                                                      L"正态 k=3", L"两点分布", L"反正弦分布"};
+static std::wstring roundedProcess(Page &p, double value, std::optional<int> digits) {
+    return digits && *digits > 13 ? inputNumber(value) : p.processValue(value);
+}
+static std::wstring roundingDescription(const UncertaintyRounding &r) {
+    return r.digits ? L"保留 " + std::to_wstring(*r.digits) + L" 位有效数字，" + (r.carry ? L"进位" : L"四舍六入、五成双") : L"未设置有效数字，保留原始精度";
+}
+static void sampleProcess(Page &p, const Values &values, const Statistics &s, bool separate) {
+    p.processSteps.push_back(L"测量值 n = " + std::to_wstring(values.size()) + L"；平均值 x̄ = " + p.processValue(s.mean) + L"。");
+    if (s.centered)
+        p.processSteps.push_back(L"以首个测量值 x₀ = " + inputNumber(s.origin) + L" 为基准；中心化均值 d̄ = Σ(xᵢ − x₀)/n = " + p.processValue(s.deltaMean) + L"。");
+    else
+        p.processSteps.push_back(L"中心化差值溢出，使用缩放均值；残差按 xᵢ − x̄ 计算。");
+    for (std::size_t i = 0; i < values.size(); ++i) {
+        if (separate)
+            p.processSteps.push_back(L"");
+        if (s.centered) {
+            double difference = values[i] - s.origin;
+            p.processSteps.push_back(L"测量点 " + std::to_wstring(i + 1) + L"：dᵢ = xᵢ − x₀ = " + inputNumber(values[i]) + L" − " + inputNumber(s.origin) + L" = " + p.processValue(difference) + L"；残差 vᵢ = dᵢ − d̄ = " + p.processValue(difference) + L" − " + p.processValue(s.deltaMean) + L" = " + p.processValue(s.residuals[i]) + L"。");
+        } else {
+            p.processSteps.push_back(L"测量点 " + std::to_wstring(i + 1) + L"：残差 vᵢ = xᵢ − x̄ = " + inputNumber(values[i]) + L" − " + inputNumber(s.mean) + L" = " + p.processValue(s.residuals[i]) + L"。");
+        }
+    }
+    p.processSteps.push_back(L"样本标准差 s = √[Σvᵢ²/(n − 1)] = " + p.processValue(s.sd) + L"；程序使用补偿求和和 hypot 累积。");
+}
+static void uncertaintyComponentProcess(Page &p, const Component &component, const UncertaintyDetail &detail, const std::wstring &parent) {
+    const auto path = parent.empty() ? component.name : parent + L" / " + component.name;
+    p.processSteps.push_back(L"");
+    p.processSteps.push_back(L"分量：" + path + L"。");
+    if (component.kind == 0) {
+        auto stats = statistics(component.values);
+        sampleProcess(p, component.values, stats, false);
+        if (component.useRange) {
+            double range = stats.maximum - stats.minimum, coefficient = rangeCoefficient(component.values.size());
+            p.processSteps.push_back(L"极差法：R = " + inputNumber(stats.maximum) + L" − " + inputNumber(stats.minimum) + L" = " + p.processValue(range) + L"；u = R/(d₂√m) = " + p.processValue(range) + L" / (" + inputNumber(coefficient) + L" × √" + std::to_wstring(component.values.size()) + L") = " + p.processValue(detail.rawStandard) + L"。");
+        } else {
+            auto count = component.averageCount.value_or(1);
+            p.processSteps.push_back(L"贝塞尔法：取测量次数 n = " + std::to_wstring(count) + (component.averageCount ? L"" : L"（留空默认 1 次）") + L"（此 n 可不同于上方估计 s 的测量值个数）；u = s/√n = " + p.processValue(stats.sd) + L" / √" + std::to_wstring(count) + L" = " + p.processValue(detail.rawStandard) + L"。");
+        }
+    } else if (component.kind == 1) {
+        p.processSteps.push_back(L"B 类" + distributions[std::size_t(component.distribution)] + L"：" + (component.distribution == 2 || component.distribution == 3 ? L"证书扩展不确定度" : L"区间半宽") + L" = " + inputNumber(component.halfWidth) + L"，除数 d = " + inputNumber(distributionDivisor(component.distribution)) + L"；u = 输入/d = " + inputNumber(component.halfWidth) + L" / " + inputNumber(distributionDivisor(component.distribution)) + L" = " + p.processValue(detail.rawStandard) + L"。");
+    } else {
+        p.processSteps.push_back(component.maximum ? L"子分量合成方法：最大绝对贡献。" : L"子分量合成方法：贡献平方和根。");
+        for (std::size_t i = 0; i < component.children.size(); ++i)
+            uncertaintyComponentProcess(p, component.children[i], detail.children[i], path);
+        p.processSteps.push_back(L"子分量合成后的标准不确定度 = " + p.processValue(detail.rawStandard) + L"。");
+    }
+    p.processSteps.push_back(roundingDescription(component.rounding) + L"；修约前 u = " + p.processValue(detail.rawStandard) + L"；修约后 u = " + roundedProcess(p, detail.standard, component.rounding.digits) + L"；贡献 q = 灵敏系数 × 修约后 u = " + inputNumber(detail.sensitivity) + L" × " + roundedProcess(p, detail.standard, component.rounding.digits) + L" = " + p.processValue(detail.contribution) + L"。");
+}
 static std::optional<std::size_t> averageCountInput(Page &p, const std::string &key) {
     const auto text = p.textInput(key, L"取测量次数 n", L"");
     p.note(L"留空默认 1 次。");
@@ -151,6 +199,7 @@ static void uncertainty(Page &p) {
         double rawUa = ua;
         ua = roundSignificant(ua, aRounding);
         Values bRaw;
+        Values bInputs = bv;
         for (std::size_t i = 0; i < bv.size(); ++i) {
             auto &b = bv[i];
             require(b >= 0, "B 类半宽不能为负");
@@ -175,6 +224,19 @@ static void uncertainty(Page &p) {
                    {L"修约后标准不确定度", format(rounded)},
                    {L"修约后扩展不确定度", format(roundedExpanded)},
                    {L"包含因子 k", format(k)}});
+        if (!av.empty()) {
+            p.processSteps.push_back(L"A 类分量：");
+            auto stats = statistics(av);
+            sampleProcess(p, av, stats, false);
+            p.processSteps.push_back(L"取测量次数 n = " + std::to_wstring(averageCount.value_or(1)) + (averageCount ? L"" : L"（留空默认 1 次）") + L"（此 n 可不同于上方估计 s 的测量值个数）；uA = s/√n = " + p.processValue(stats.sd) + L" / √" + std::to_wstring(averageCount.value_or(1)) + L" = " + p.processValue(rawUa) + L"；" + roundingDescription(aRounding) + L"；修约后 uA = " + roundedProcess(p, ua, aRounding.digits) + L"。");
+        }
+        for (std::size_t i = 0; i < bv.size(); ++i) {
+            p.processSteps.push_back(L"");
+            p.processSteps.push_back(L"B 类分量 " + std::to_wstring(i + 1) + L"：" + distributions[std::size_t(distribution)] + L"；" + (distribution == 2 || distribution == 3 ? L"证书扩展不确定度" : L"区间半宽") + L" = " + inputNumber(bInputs[i]) + L"；u = 输入 / 除数 = " + inputNumber(bInputs[i]) + L" / " + inputNumber(distributionDivisor(distribution)) + L" = " + p.processValue(bRaw[i]) + L"；" + roundingDescription(bRounding[i]) + L"，修约后 = " + roundedProcess(p, bv[i], bRounding[i].digits) + L"。");
+        }
+        p.processSteps.push_back(L"");
+        p.processSteps.push_back(L"B 类合成 uB = √Σuᵢ² = " + p.processValue(ub) + L"；u_c = √[(cA·uA)² + (cB·uB)²] = √[(" + inputNumber(ac) + L" × " + p.processValue(ua) + L")² + (" + inputNumber(bc) + L" × " + p.processValue(ub) + L")²] = " + p.processValue(uc) + L"。");
+        p.processSteps.push_back(L"扩展不确定度 U = k × u_c = " + inputNumber(k) + L" × " + p.processValue(uc) + L" = " + p.processValue(k * uc) + L"；按 u_c 和 U 的较大值确定修约位数，保留 " + std::to_wstring(digits) + L" 位有效数字，" + (carry ? L"进位" : L"四舍六入、五成双") + L"；修约后 u_c = " + p.processValue(rounded) + L"，修约后 U = k × 修约后 u_c = " + p.processValue(roundedExpanded) + L"。");
         return;
     }
     int n = p.count("budget.count", L"不确定度分量", 2, 1, 20);
@@ -206,6 +268,11 @@ static void uncertainty(Page &p) {
                                 {L"修约后标准不确定度", format(rounded)},
                                 {L"修约后扩展不确定度", format(roundedExpanded)},
                                 {L"包含因子 k", format(k)}});
+    for (std::size_t i = 0; i < data.size(); ++i)
+        uncertaintyComponentProcess(p, data[i], details[i], L"");
+    p.processSteps.push_back(L"");
+    p.processSteps.push_back((maximum ? L"总合成方法：取各分量绝对贡献的最大值；u_c = " : L"总合成方法：各分量贡献平方和根；u_c = ") + p.processValue(uc) + L"。");
+    p.processSteps.push_back(L"扩展不确定度 U = k × u_c = " + inputNumber(k) + L" × " + p.processValue(uc) + L" = " + p.processValue(expanded) + L"；按 u_c 和 U 的较大值确定修约位数，保留 " + std::to_wstring(digits) + L" 位有效数字，" + (carry ? L"进位" : L"四舍六入、五成双") + L"；修约后 u_c = " + p.processValue(rounded) + L"，修约后 U = k × 修约后 u_c = " + p.processValue(roundedExpanded) + L"。");
 }
 void renderErrors(Page &p) {
     if (p.tool.kind == Kind::Uncertainty) {
@@ -220,7 +287,7 @@ void renderErrors(Page &p) {
         finite({s.maximum - s.minimum});
         if (p.collapse("residual", L"各项残差")) {
             for (int i = 0; i < n; ++i) {
-                p.note(L"测量 " + std::to_wstring(i + 1) + L"：" + format(v[i] - s.mean));
+                p.note(L"测量 " + std::to_wstring(i + 1) + L"：" + format(s.residuals[i]));
             }
         }
         double rsd = s.mean == 0 ? 0 : s.sd / std::abs(s.mean) * 100;
@@ -231,6 +298,10 @@ void renderErrors(Page &p) {
                                 {L"极差", format(s.maximum - s.minimum)},
                                 {L"平均值标准差 s/√n", format(s.standardError)},
                                 {L"相对标准偏差", s.mean == 0 ? L"平均值为 0" : format(rsd) + L" %"}});
+        sampleProcess(p, v, s, true);
+        p.processSteps.push_back(L"");
+        p.processSteps.push_back(L"极差 R = 最大值 − 最小值 = " + inputNumber(s.maximum) + L" − " + inputNumber(s.minimum) + L" = " + p.processValue(s.maximum - s.minimum) + L"；平均值标准差 = s/√n = " + p.processValue(s.sd) + L" / √" + std::to_wstring(n) + L" = " + p.processValue(s.standardError) + L"。");
+        p.processSteps.push_back(s.mean == 0 ? L"平均值为 0，相对标准偏差无定义。" : L"相对标准偏差 = s/|x̄| × 100 = " + p.processValue(s.sd) + L" / |" + p.processValue(s.mean) + L"| × 100 = " + p.processValue(rsd) + L"%。");
         return;
     }
     if (p.tool.kind == Kind::RangeMethod) {
@@ -256,6 +327,9 @@ void renderErrors(Page &p) {
                                   {L"极差系数 d₂", format(coefficient)},
                                   {L"重复性标准差 s ≈ R/d₂", format(sd)},
                                   {L"平均值标准差 s/√n", format(sd / std::sqrt(double(n)))}});
+        p.processSteps.push_back(L"极差 R = 最大值 − 最小值 = " + inputNumber(hi) + L" − " + inputNumber(lo) + L" = " + p.processValue(range) + L"。");
+        p.processSteps.push_back(L"测量次数 n = " + std::to_wstring(n) + L"，查极差系数 d₂ = " + inputNumber(coefficient) + L"；s = R/d₂ = " + p.processValue(range) + L" / " + inputNumber(coefficient) + L" = " + p.processValue(sd) + L"。");
+        p.processSteps.push_back(L"平均值标准差 = s/√n = " + p.processValue(sd) + L" / √" + std::to_wstring(n) + L" = " + p.processValue(sd / std::sqrt(double(n))) + L"。");
         return;
     }
     if (p.tool.kind == Kind::ErrorAnalysis) {
@@ -277,6 +351,11 @@ void renderErrors(Page &p) {
                                 {L"相对误差 δ", percent(truth)},
                                 {L"引用误差 γ", percent(ref)},
                                 {L"绝对值", format(std::abs(delta))}});
+        p.processSteps.push_back(L"绝对误差 Δ = 测量值 − 真值 = " + inputNumber(measured) + L" − " + inputNumber(truth) + L" = " + p.processValue(delta) + L"；误差绝对值 |Δ| = " + p.processValue(std::abs(delta)) + L"。");
+        p.processSteps.push_back(L"");
+        p.processSteps.push_back(truth == 0 ? L"真值为 0，相对误差无定义。" : L"相对误差 = Δ/真值 × 100 = " + p.processValue(delta) + L" / " + inputNumber(truth) + L" × 100 = " + p.processValue(delta / truth * 100) + L"%。");
+        const std::wstring baseDescription = reference.empty() ? L"引用值留空，使用真值；" : L"";
+        p.processSteps.push_back(baseDescription + (ref == 0 ? L"引用值为 0，引用误差无定义。" : std::wstring(L"引用误差 = Δ/引用值 × 100 = ") + p.processValue(delta) + L" / " + inputNumber(ref) + L" × 100 = " + p.processValue(delta / ref * 100) + L"%。"));
         return;
     }
     int mode = p.select("mode", L"分量输入", {L"同单位误差分量", L"压力分量（相对 / 绝对误差）"});
@@ -307,6 +386,8 @@ void renderErrors(Page &p) {
         p.check();
         for (int i = 0; i < n; ++i) {
             contributions.push_back(errors[i] * sensitivity[i]);
+            if (i) p.processSteps.push_back(L"");
+            p.processSteps.push_back(L"分量 " + std::to_wstring(i + 1) + L"：贡献 = 误差 × 灵敏系数 = " + inputNumber(errors[i]) + L" × " + inputNumber(sensitivity[i]) + L" = " + p.processValue(contributions.back()) + L"。");
         }
     } else {
         auto list = units(Dimension::Pressure);
@@ -333,6 +414,12 @@ void renderErrors(Page &p) {
             p.check();
             contributions.push_back(
                 convert(Dimension::Pressure, error * (relative ? span / 100 : 1), source, target));
+            if (i) p.processSteps.push_back(L"");
+            if (relative)
+                p.processSteps.push_back(L"分量 " + std::to_wstring(i + 1) + L"：量程跨度 = " + p.processValue(span) + L" " + names[source] + L"；绝对误差 = 相对误差 × 跨度 / 100 = " + inputNumber(error) + L" × " + p.processValue(span) + L" / 100 = " + p.processValue(error * span / 100) + L" " + names[source] + L"。");
+            else
+                p.processSteps.push_back(L"分量 " + std::to_wstring(i + 1) + L"：输入绝对误差 = " + inputNumber(error) + L" " + names[source] + L"。");
+            p.processSteps.push_back(L"统一单位：" + p.processValue(error * (relative ? span / 100 : 1)) + L" " + names[source] + L" × (" + inputNumber(list[source].factor) + L" / " + inputNumber(list[target].factor) + L") = " + p.processValue(contributions.back()) + L" " + names[target] + L"。");
         }
     }
     double combined = rss(contributions), linear = 0, largest = 0;
@@ -348,5 +435,9 @@ void renderErrors(Page &p) {
                        {{L"最坏情况界限（绝对值求和）", format(linear)}, {L"最大单项贡献", format(largest)}});
     }
     p.metrics(L"合成结果", metrics);
+    p.processSteps.push_back(L"");
+    p.processSteps.push_back(L"合成误差 = √Σqᵢ² = " + p.processValue(combined) + symbol + L"；程序使用 hypot 累加。");
+    if (mode == 0)
+        p.processSteps.push_back(L"最坏情况界限 = Σ|qᵢ| = " + p.processValue(linear) + L"；最大单项贡献 = " + p.processValue(largest) + L"。");
 }
 } // 命名空间 toolbox

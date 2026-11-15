@@ -40,6 +40,7 @@ Report pipe(bool npt, const std::string &code) {
         }
         Report out("NPT " + code);
         geometry(out, n(pg, "d"), n(pg, "P"), n(pg, "d2"), n(pg, "d1"), 60, 1);
+        out.process.push_back(L"NPT " + wide(code) + L" 的基面尺寸、长度与量规尺寸直接从内置规格表逐项查取；螺距和中径保留表中修约值，不用 TPI 重新推算。锥度 1:16。" + (code == "6" ? std::wstring(L"环规中径原表值存疑，故不输出。") : L""));
         out.parameter("TPI (牙/inch)", n(pg, "tpi"));
         out.metric("锥度", "1:16");
         out.tables.push_back(properties("NPT 工作塞规 · 基面尺寸", pg,
@@ -72,6 +73,7 @@ Report pipe(bool npt, const std::string &code) {
                &wear = find(db["wear"], "尺寸代号", code);
     Report out("R " + code);
     geometry(out, n(dim, "D"), n(dim, "P"), n(dim, "D2"), n(dim, "D1"), 55, 1);
+    out.process.push_back(L"R " + wide(code) + L" 的几何尺寸、结构尺寸、制造公差及磨损偏差分别按规格从内置表查取，保留原表单位与符号；锥度为 1:16。锥螺纹基面与台阶判定按相应标准执行。");
     out.parameter("TPI (牙/inch)", n(dim, "n"));
     out.metric("锥度", "1:16");
     out.tables.push_back(properties("螺纹量规结构尺寸", dim,

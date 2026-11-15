@@ -163,16 +163,16 @@ Statistics statistics(const Values &values) {
         differences.push_back(v - values[0]);
         valid = valid && std::isfinite(differences.back());
     }
-    double mean;
+    double mean, delta = 0;
     if (valid) {
         Values divided;
         for (double d : differences) {
             divided.push_back(d / count);
         }
-        double delta = compensated(divided);
+        delta = compensated(divided);
         mean = values[0] + delta;
         for (double d : differences) {
-            residuals.push_back((d - delta) / std::sqrt(count - 1));
+            residuals.push_back(d - delta);
         }
     } else {
         double scale = std::max(std::abs(minimum), std::abs(maximum));
@@ -182,12 +182,15 @@ Statistics statistics(const Values &values) {
         }
         mean = compensated(normalized) * scale;
         for (double v : values) {
-            residuals.push_back((v - mean) / std::sqrt(count - 1));
+            residuals.push_back(v - mean);
         }
     }
-    double sd = rss(residuals);
+    Values scaled;
+    for (double residual : residuals)
+        scaled.push_back(residual / std::sqrt(count - 1));
+    double sd = rss(scaled);
     finite({mean, sd, minimum, maximum});
-    return {mean, sd, minimum, maximum, sd / std::sqrt(count)};
+    return {mean, sd, minimum, maximum, sd / std::sqrt(count), valid, values[0], delta, residuals};
 }
 double rangeCoefficient(std::size_t n) {
     static const double c[] = {1.13, 1.69, 2.06, 2.33, 2.53, 2.70, 2.85, 2.97};

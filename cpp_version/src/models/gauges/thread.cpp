@@ -101,6 +101,8 @@ void referenceTable(Report &out, const std::string &name, double base, double lo
                 {}};
     table.rows.push_back({base, tol ? low : missing, tol ? high : missing, tol.value_or(missing)});
     out.tables.push_back(table);
+    out.process.push_back(L"");
+    out.process.push_back(wide(name) + L"参考界限（非独立制造公差）：基本尺寸 = " + traceNumber(base) + L" mm。" + (tol ? L" 查表采用公差 = " + traceNumber(*tol) + L" μm，换算为 mm 后得参考下界 " + traceNumber(low) + L"、上界 " + traceNumber(high) + L" mm。" : L"未收录该组合的公差，不计算界限。"));
     if (!tol) {
         out.note("该组合的" + name + "公差未收录，只列基本尺寸，不据此判定" + name + "合格。");
     }
@@ -156,6 +158,11 @@ Report thread(bool trap, double d, double p, const std::string &grade, int lines
         ring ? deviation(db["ei"], used, trap ? "es(" + letter + ")" : "外螺纹" + letter + "-es")
              : (letter == "H" ? 0 : deviation(db["ei"], used, "内螺纹G-EI"));
     const auto f = factors(trap, td, offset < 0);
+    auto c = traceNumber;
+    out.process.push_back(L"");
+    out.process.push_back(std::wstring(trap ? L"基本中径 D₂ = D − P/2；基本小径 D₁ = D − P。" : L"基本中径 D₂ = D − 3√3P/8；基本小径 D₁ = D − 5√3P/8。"));
+    out.process.push_back(L"工件中径公差按尺寸、公差等级及取值螺距 " + c(used) + L" mm 查表；多线系数 = " + c(kv) + L"，公差 = " + c(td) + L" μm，基本偏差 = " + c(offset) + L" μm。代入尺寸公式时除以 1000。");
+    out.process.push_back(L"量规要素按工件公差和偏差符号查表并换算为 mm：TPL = " + c(f.tpl) + L"，ZPL = " + c(f.zpl) + L"，TR = " + c(f.tr) + L"，ZR = " + c(f.zr) + L"，TCP = " + c(f.tcp) + L"，m = " + c(f.m) + L"；塞规通/止磨损储备 = " + c(f.sgo) + L" / " + c(f.sng) + L"，环规通/止磨损储备 = " + c(f.rgo) + L" / " + c(f.rng) + L" mm。");
     out.metric("工件中径公差 (μm)", td);
     out.metric(ring ? "基本偏差 es (μm)" : "基本偏差 EI (μm)", offset);
     out.parameter("公差取值螺距 (mm)", used);
@@ -177,6 +184,22 @@ Report thread(bool trap, double d, double p, const std::string &grade, int lines
         auto len = lengths(trap, true, d, p, out.notes);
         sets.first[0].length = len.first;
         sets.first[1].length = len.second;
+        const auto &go = sets.first[0], &ng = sets.first[1];
+        out.process.push_back(L"");
+        out.process.push_back(L"通端工作环规：中径名义 = D₂ + es − ZR = " + c(d2) + L" + " + c(offset/1000) + L" − " + c(f.zr) + L" = " + c(go.center) + L"；中径界限 = 名义 ± TR/2 = " + c(go.pd[0]) + L"～" + c(go.pd[1]) + L" mm；磨损极限 = 名义 + 通端磨损储备 = " + c(go.wear) + L" mm。");
+        out.process.push_back(L"大径下限 = D + es + TPL = " + c(go.majorMin) + L" mm；小径界限 = D₁ + es ± TR/2 = " + c(go.minor[0]) + L"～" + c(go.minor[1]) + L" mm。");
+        out.process.push_back(L"");
+        out.process.push_back(L"止端工作环规：中径名义 = D₂ + es − Td − TR/2 = " + c(ng.center) + L" mm；中径界限 = 名义 ± TR/2 = " + c(ng.pd[0]) + L"～" + c(ng.pd[1]) + L" mm；磨损极限 = 名义 + 止端磨损储备 = " + c(ng.wear) + L" mm。");
+        out.process.push_back(L"大径下限 = D + es + TPL = " + c(ng.majorMin) + L" mm；小径界限 = 止端中径名义 − 截短量 ± TR = " + c(ng.minor[0]) + L"～" + c(ng.minor[1]) + L" mm；截短量 = " + c(truncation) + L" mm。");
+        const wchar_t *centers[] = {L"通端中径名义 − m",L"通端中径上限",L"通端磨损极限",L"止端中径名义 − m",L"D₂ + es − Td",L"止端磨损极限"};
+        const wchar_t *majors[] = {L"D + es",L"通端中径上限 + 截短量",L"通端磨损极限 + 截短量",L"D + es",L"D + es − Td",L"D + es − Td − TR/2 + 止端磨损储备"};
+        const wchar_t *minors[] = {L"D₁ + es − ZR − m",L"D₁ + es − TR/2",L"D₁ + es − TR/2",L"D₁ + es − Td − TR/2 − m",L"D₁ + es − Td",L"D₁ + es − Td"};
+        for (std::size_t i = 0; i < sets.second.size(); ++i) {
+            const auto &g = sets.second[i];
+            out.process.push_back(L"");
+            out.process.push_back(wide(g.code + " " + g.name) + L"：中径名义 = " + centers[i] + L" = " + c(g.center) + L" mm；中径界限 = 名义 ± TCP/2 = " + c(g.pd[0]) + L"～" + c(g.pd[1]) + L" mm。");
+            out.process.push_back(L"大径基准 = " + std::wstring(majors[i]) + L"，大径界限 = 基准 ± " + c((i == 1 || i == 2) ? f.tpl/2 : f.tpl) + L" = " + c(g.major[0]) + L"～" + c(g.major[1]) + L" mm；小径上限 = " + minors[i] + L" = " + c(g.minorMax) + L" mm。");
+        }
         out.tables.push_back(gaugeTable("工作环规 · 检外螺纹", sets.first));
         out.tables.push_back(gaugeTable("校对塞规 · 检工作环规", sets.second));
         if (trap) {
@@ -209,6 +232,15 @@ Report thread(bool trap, double d, double p, const std::string &grade, int lines
         }
         work[0].length = len.first;
         work[1].length = len.second;
+        const auto &go = work[0], &ng = work[1];
+        double major = trap ? d + 2 * ac : d + offset / 1000, low = d2 + offset / 1000, high = low + td / 1000;
+        out.process.push_back(L"");
+        out.process.push_back(L"通端工作塞规：中径名义 = 工件中径下限 + ZPL = " + c(low) + L" + " + c(f.zpl) + L" = " + c(go.center) + L" mm；中径界限 = 名义 ± TPL/2 = " + c(go.pd[0]) + L"～" + c(go.pd[1]) + L" mm。");
+        out.process.push_back(L"大径界限 = 大径基准 + ZPL ± TPL = " + c(major) + L" + " + c(f.zpl) + L" ± " + c(f.tpl) + L" = " + c(go.major[0]) + L"～" + c(go.major[1]) + L" mm；小径上限 = " + c(minor) + L" mm；磨损极限 = 通端中径下限 − 通端磨损储备 = " + c(go.wear) + L" mm。");
+        out.process.push_back(L"");
+        out.process.push_back(L"止端工作塞规：中径下限 = 工件中径上限 = " + c(high) + L" mm；中径上限 = 工件中径上限 + TPL = " + c(ng.pd[1]) + L" mm；中径名义 = " + c(ng.center) + L" mm。" + (trap ? L"名义值按上限 + TPL/2 计算。" : L"本模型名义值按工件上限 + TPL 计算，并非界限中点。"));
+        out.process.push_back(std::wstring(trap ? L"大径基准 = 中径名义 + 截短量；大径界限 = 基准 ± TPL。" : L"大径上限 = 工件上限 + TPL + 截短量 + TPL/2；大径下限 = 大径上限 − TPL。") + L"截短量 = " + c(truncation) + L" mm；大径界限 = " + c(ng.major[0]) + L"～" + c(ng.major[1]) + L" mm；小径上限 = " + c(ng.minorMax) + L" mm；磨损极限 = 止端中径下限 − 止端磨损储备 = " + c(ng.wear) + L" mm。");
+        if (valid(len.first) && valid(len.second)) out.process.push_back(L"螺纹长度按规格查表：通端 = " + c(len.first) + L" mm，止端 = " + c(len.second) + L" mm。");
         out.tables.push_back(gaugeTable("工作塞规 · 检内螺纹", work));
         auto td1 = minorTolerance(db["td1"], used, trap ? "4" : num);
         double base = trap ? d1 : d1 + offset / 1000;
@@ -248,6 +280,24 @@ Report rebar(int angle, std::size_t index, int lines) {
     double zzMajor = d2 + es - te.first / 1000, zsMajor = zzMajor - fe.tr / 2 + fe.rng;
     sets.second[4].major = {zzMajor - fe.tpl, zzMajor + fe.tpl};
     sets.second[5].major = {zsMajor - fe.tpl, zsMajor + fe.tpl};
+    auto c = traceNumber;
+    out.process.push_back(L"钢筋规格的大径、中径、小径和螺距直接查表；套筒 6H 与丝头 6f 中径公差分别查表 = " + c(ti.first) + L" / " + c(te.first) + L" μm，丝头 es = " + c(es) + L" mm。多头不额外增加公差系数。");
+    out.process.push_back(L"套筒量规 TPL = " + c(fi.tpl) + L"，ZPL = " + c(fi.zpl) + L" mm；丝头量规 TPL = " + c(fe.tpl) + L"，TR = " + c(fe.tr) + L"，ZR = " + c(fe.zr) + L"，TCP = " + c(fe.tcp) + L"，m = " + c(fe.m) + L" mm。磨损储备均按公差档查表。");
+    out.process.push_back(L"");
+    out.process.push_back(L"套筒通端塞规：中径名义 = D₂ + ZPL = " + c(plugs[0].center) + L" mm，中径界限 = 名义 ± TPL/2 = " + c(plugs[0].pd[0]) + L"～" + c(plugs[0].pd[1]) + L" mm；大径界限 = D + ZPL ± TPL = " + c(plugs[0].major[0]) + L"～" + c(plugs[0].major[1]) + L" mm，小径上限 = D₁，磨损极限 = 中径下限 − 通端磨损储备 = " + c(plugs[0].wear) + L" mm。");
+    out.process.push_back(L"");
+    out.process.push_back(L"套筒止端塞规：中径下限 = D₂ + 工件公差，止端上限 = 下限 + TPL = " + c(plugs[1].pd[0]) + L"～" + c(plugs[1].pd[1]) + L" mm；大径上限 = 工件中径上限 + TPL + 0.2P + TPL/2，下限 = 上限 − TPL = " + c(plugs[1].major[0]) + L"～" + c(plugs[1].major[1]) + L" mm；磨损极限 = 中径下限 − 止端磨损储备 = " + c(plugs[1].wear) + L" mm。");
+    out.process.push_back(L"");
+    out.process.push_back(L"丝头通端环规：中径名义 = D₂ + es − ZR = " + c(sets.first[0].center) + L" mm，中径界限 = 名义 ± TR/2 = " + c(sets.first[0].pd[0]) + L"～" + c(sets.first[0].pd[1]) + L" mm；磨损极限 = 名义 + 通端磨损储备 = " + c(sets.first[0].wear) + L" mm；小径界限 = D₁ + es ± TR/2 = " + c(sets.first[0].minor[0]) + L"～" + c(sets.first[0].minor[1]) + L" mm。");
+    out.process.push_back(L"丝头止端环规：中径名义 = D₂ + es − Td − TR/2 = " + c(sets.first[1].center) + L" mm，中径界限 = 名义 ± TR/2 = " + c(sets.first[1].pd[0]) + L"～" + c(sets.first[1].pd[1]) + L" mm；磨损极限 = 名义 + 止端磨损储备 = " + c(sets.first[1].wear) + L" mm；小径界限 = 名义 − 0.2P ± TR = " + c(sets.first[1].minor[0]) + L"～" + c(sets.first[1].minor[1]) + L" mm。两种环规大径下限均为 D + es + TPL = " + c(sets.first[0].majorMin) + L" mm。");
+    const wchar_t *rebarCenters[] = {L"通端中径名义 − m",L"通端中径上限",L"通端磨损极限",L"止端中径名义 − m",L"D₂ + es − Td",L"止端磨损极限"};
+    const wchar_t *rebarMajors[] = {L"D + es",L"通端中径上限 + 0.2P",L"通端磨损极限 + 0.2P",L"D + es",L"D₂ + es − Td",L"D₂ + es − Td − TR/2 + 止端磨损储备"};
+    const wchar_t *rebarMinors[] = {L"D₁ + es − ZR − m",L"D₁ + es − TR/2",L"D₁ + es − TR/2",L"D₁ + es − Td − TR/2 − m",L"D₁ + es − Td",L"D₁ + es − Td"};
+    for (std::size_t i=0; i<sets.second.size(); ++i) {
+        const auto &g = sets.second[i];
+        out.process.push_back(L"");
+        out.process.push_back(wide(g.code + " " + g.name) + L"：中径名义 = " + rebarCenters[i] + L" = " + c(g.center) + L" mm；界限 = 名义 ± TCP/2 = " + c(g.pd[0]) + L"～" + c(g.pd[1]) + L" mm。大径基准 = " + rebarMajors[i] + L"，界限为基准 ± " + c(i == 1 || i == 2 ? fe.tpl/2 : fe.tpl) + L" = " + c(g.major[0]) + L"～" + c(g.major[1]) + L" mm；小径上限 = " + rebarMinors[i] + L" = " + c(g.minorMax) + L" mm。");
+    }
     out.tables.push_back(gaugeTable("套筒内螺纹 6H · 工作塞规", plugs));
     out.tables.push_back(gaugeTable("丝头外螺纹 6f · 工作环规", sets.first));
     out.tables.push_back(gaugeTable("校对塞规", sets.second));

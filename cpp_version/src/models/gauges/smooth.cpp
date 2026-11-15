@@ -74,6 +74,12 @@ Report smooth(double d, int mode, const std::string &letter, int grade) {
             "该尺寸与公差组合产生非正量规尺寸，请核对参数");
     std::string label = hole ? "孔用塞规" : mode == 2 ? "轴用卡规" : "轴用环规";
     Report out("光滑量规 · " + label + " · " + rawNumber(d) + " " + letter + std::to_string(grade));
+    auto c = traceNumber;
+    out.process = {L"基本尺寸 D = " + c(d) + L" mm；公差带 " + wide(letter) + std::to_wstring(grade) + L"。按尺寸档和等级查表：IT = " + c(itu) + L" μm，T1 = " + c(t1u) + L" μm，Z1 = " + c(z1u) + L" μm；代入尺寸时除以 1000。",
+        symmetric ? L"对称公差带：下偏差 = −IT/2，上偏差 = IT/2。" : L"按孔或轴的基本偏差表取值，再由上偏差 − 下偏差 = IT 求另一偏差。",
+        L"下偏差 = " + c(ei) + L" mm，上偏差 = " + c(es) + L" mm；工件下限 = D + 下偏差 = " + c(d+ei) + L" mm，上限 = D + 上偏差 = " + c(d+es) + L" mm。", L"",
+        (hole ? L"孔用通端名义 = D + EI + Z1；通端界限 = 名义 ± T1/2；止端界限 = D + ES − T1 ～ D + ES。" : L"轴用通端名义 = D + es − Z1；通端界限 = 名义 ± T1/2；止端界限 = D + ei ～ D + ei + T1。"),
+        L"通端界限 = " + c(go[0]) + L"～" + c(go[1]) + L" mm，止端界限 = " + c(ng[0]) + L"～" + c(ng[1]) + L" mm；磨损极限 = " + c(wear) + L" mm。"};
     out.parameter("基本尺寸 D (mm)", d);
     out.metric("工件公差带", letter + std::to_string(grade));
     out.metric("工件公差 IT (μm)", itu);

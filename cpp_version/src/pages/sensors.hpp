@@ -6,4 +6,5 @@ void standardCouplePage(Page &page);
 void sprtPage(Page &page);
 void thermistorPage(Page &page);
 void cvdPage(Page &page);
+void thermoReferenceProcess(Page &page, const std::string &kind, double temperature, const std::wstring &label);
 } // 命名空间 toolbox

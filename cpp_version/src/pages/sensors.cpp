@@ -1,6 +1,25 @@
 // 工业传感器页面，允差温区独立于分度曲线温区，不用边界温度替代超范围输入。
 #include "sensors.hpp"
 namespace toolbox {
+void thermoReferenceProcess(Page &p, const std::string &kind, double t, const std::wstring &label) {
+    const auto &segments = thermoSegments(kind);
+    auto selected = std::find_if(segments.begin(), segments.end(), [t](const ThermoSegment &part) {
+        return t >= part.minimum && t <= part.maximum;
+    });
+    require(selected != segments.end(), "温度超出所选分度号范围");
+    const auto &segment = *selected;
+    p.processSteps.push_back(label + L"：t = " + inputNumber(t) + L" °C，参考函数温区 " + inputNumber(segment.minimum) + L"～" + inputNumber(segment.maximum) + L" °C；E多项式(t) = Σcᵢtⁱ，系数按升幂：");
+    for (std::size_t i = 0; i < segment.coefficients.size(); ++i)
+        p.processSteps.push_back(L"c[" + std::to_wstring(i) + L"] = " + inputNumber(segment.coefficients[i]) + L"。");
+    double poly = polynomial(segment.coefficients, t);
+    p.processSteps.push_back(L"代入 t = " + inputNumber(t) + L" °C，多项式电势 = " + p.processValue(poly) + L" mV。");
+    if (segment.gaussian) {
+        auto g = *segment.gaussian;
+        double term = g[0] * std::exp(g[1] * (t - g[2]) * (t - g[2]));
+        p.processSteps.push_back(L"高斯修正 = a₀exp[a₁(t−a₂)²] = " + inputNumber(g[0]) + L" × exp[" + inputNumber(g[1]) + L" × (" + inputNumber(t) + L" − " + inputNumber(g[2]) + L")²] = " + p.processValue(term) + L" mV。");
+    }
+    p.processSteps.push_back(L"参考电势 E(" + inputNumber(t) + L") = " + p.processValue(segment.evaluate(t).first) + L" mV。");
+}
 static void toleranceCards(Page &p, const std::vector<Tolerance> &list, double t, TemperatureUnit unit,
                            const Curve &curve, const std::wstring &signal) {
     if (list.empty()) {
@@ -71,6 +90,15 @@ void renderSensors(Page &p) {
                                 {L"参考端电势", format(ce) + L" mV"},
                                 {L"微分热电势 dE/dt",
                                  format(thermoSlope(kind, t) / unit.span()) + L" mV/" + unit.symbol()}});
+        p.processSteps.push_back(wide(kind) + L" 型参考函数；热端温度 " + p.processValue(t) + L" °C，参考端温度 " + p.processValue(cold) + L" °C。");
+        thermoReferenceProcess(p, kind, t, L"热端");
+        p.processSteps.push_back(L"");
+        thermoReferenceProcess(p, kind, cold, L"参考端");
+        p.processSteps.push_back(L"");
+        double reconstructed = thermoEmf(kind, t) - ce;
+        p.processSteps.push_back(std::wstring(mode == 0 ? L"测得热电势" : L"反算温度代回得到的热电势") + L" = E(热端) − E(参考端) = " + p.processValue(thermoEmf(kind, t)) + L" − " + p.processValue(ce) + L" = " + p.processValue(reconstructed) + L" mV。" );
+        if (mode != 0)
+            p.processSteps.push_back(L"反算时输入电势 = " + inputNumber(input) + L" mV，先加回参考端电势，在参考函数有效单调区间内二分求热端温度；正算残差 = 代回电势 − 输入电势 = " + p.processValue(reconstructed - input) + L" mV。");
         p.heading(L"等级允差 · IEC 60584-1");
         toleranceCards(
             p, thermoTolerances(kind, t), t, unit, [kind](double t) { return thermoEmf(kind, t); },
@@ -120,6 +148,19 @@ void renderSensors(Page &p) {
                {L"电阻", format(resistance) + L" Ω"},
                {L"电阻比 R / R₀", format(resistance / r0)},
                {L"电阻变化率 dR/dt", format(model.slope(t) / unit.span()) + L" Ω/" + unit.symbol()}});
+    const auto ref = model.reference(t);
+    const double variable = t + ref.shift;
+    p.processSteps.push_back(L"分度号 " + d.name + L"；R₀ = " + inputNumber(r0) + L" Ω；当前温度 t = " + p.processValue(t) + L" °C，电阻 R = " + p.processValue(resistance) + L" Ω。");
+    if (d.curve == RtdCurve::Cvd) {
+        p.processSteps.push_back(L"CVD 系数 A = " + inputNumber(model.coefficients[0]) + L"，B = " + inputNumber(model.coefficients[1]) + L"，C = " + inputNumber(model.coefficients[2]) + L"；" + (t < 0 ? std::wstring(L"t < 0：R/R₀ = 1 + At + Bt² + C(t−100)t³。") : std::wstring(L"t ≥ 0：R/R₀ = 1 + At + Bt²。")));
+    }
+    p.processSteps.push_back(L"本段参考函数 R/R₀ = 倍率 × Σcᵢzⁱ；z = t + 偏移 = " + p.processValue(t) + L" + " + inputNumber(ref.shift) + L" = " + p.processValue(variable) + L"；倍率 = " + inputNumber(ref.scale) + L"，系数按升幂为：");
+    for (std::size_t i = 0; i < ref.coefficients.size(); ++i)
+        p.processSteps.push_back(L"c[" + std::to_wstring(i) + L"] = " + inputNumber(ref.coefficients[i]) + L"。");
+    p.processSteps.push_back(L"电阻比 = " + p.processValue(model.ratio(t).first) + L"；曲线正算电阻 = R₀ × 电阻比 = " + inputNumber(r0) + L" × " + p.processValue(model.ratio(t).first) + L" = " + p.processValue(model.resistance(t)) + L" Ω。");
+    if (mode != 0)
+        p.processSteps.push_back(L"电阻反算时在所选分度范围内二分，并核对曲线残差。");
+    p.processSteps.push_back(L"曲线解析变化率 dR/dt = " + p.processValue(model.slope(t) / unit.span()) + L" Ω/" + unit.symbol() + L"。");
     p.heading(L"等级允差");
     bool film = false;
     if (d.tolerance == RtdTolerance::Platinum || d.tolerance == RtdTolerance::PlatinumReference) {
@@ -149,5 +190,12 @@ void cvdPage(Page &p) {
                             {L"系数 B", format(c[1])},
                             {L"系数 C", format(c[2])},
                             {L"最大残差", format(residual) + L" Ω"}});
+    p.processSteps.push_back(L"按 R/R₀ − 1 = At + Bt² + C(t−100)t³ 建立三元方程；t ≥ 0 时 C 项为零。采用列缩放和选主元消元求解。");
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        auto point = points[i];
+        p.processSteps.push_back(L"");
+        p.processSteps.push_back(L"校准点 " + std::to_wstring(i + 1) + L"：t = " + inputNumber(point.first) + L" °C，R = " + inputNumber(point.second) + L" Ω；R/R₀ − 1 = " + inputNumber(point.second) + L" / " + inputNumber(r0) + L" − 1 = " + p.processValue(point.second / r0 - 1) + L"；拟合电阻 = " + p.processValue(cvd(point.first, r0, c[0], c[1], c[2])) + L" Ω。");
+    }
+    p.processSteps.push_back(L"解得 A = " + p.processValue(c[0]) + L"，B = " + p.processValue(c[1]) + L"，C = " + p.processValue(c[2]) + L"；最大绝对残差 = " + p.processValue(residual) + L" Ω。");
 }
 } // 命名空间 toolbox

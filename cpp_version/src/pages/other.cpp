@@ -70,6 +70,15 @@ void renderOther(Page &p) {
                   {{L"被测量值", format(direction == 0 ? input : result.first) + L" " + symbol},
                    {L"输出信号", format(direction == 0 ? result.first : input) + L" " + signals[signal]},
                    {L"量程比例", format(result.second * 100) + L" %"}});
+        p.processSteps.push_back(L"过程量范围 = " + inputNumber(a) + L"～" + inputNumber(b) + L" " + symbol + L"，跨度 = " + p.processValue(process.span) + L"；输出范围 = " + inputNumber(sl) + L"～" + inputNumber(sh) + L" " + signals[signal] + L"，跨度 = " + p.processValue(output.span) + L"。");
+        if (direction == 0) {
+            p.processSteps.push_back(L"过程量比例 f = (输入 − 下限)/跨度 = (" + inputNumber(input) + L" − " + inputNumber(a) + L") / " + p.processValue(process.span) + L" = " + p.processValue(result.second) + L"。");
+            p.processSteps.push_back(std::wstring(function ? L"开方特性 s = √f = " : L"线性特性 s = f = ") + p.processValue(function ? std::sqrt(result.second) : result.second) + L"；输出 = 输出下限 + s × 输出跨度 = " + inputNumber(sl) + L" + " + p.processValue(function ? std::sqrt(result.second) : result.second) + L" × " + p.processValue(output.span) + L" = " + p.processValue(result.first) + L" " + signals[signal] + L"。");
+        } else {
+            double fraction = (input - sl) / output.span;
+            p.processSteps.push_back(L"信号比例 s = (输入 − 输出下限)/输出跨度 = (" + inputNumber(input) + L" − " + inputNumber(sl) + L") / " + p.processValue(output.span) + L" = " + p.processValue(fraction) + L"。");
+            p.processSteps.push_back(std::wstring(function ? L"开方反算 f = s² = " : L"线性反算 f = s = ") + p.processValue(result.second) + L"；过程量 = 下限 + f × 跨度 = " + inputNumber(a) + L" + " + p.processValue(result.second) + L" × " + p.processValue(process.span) + L" = " + p.processValue(result.first) + L" " + symbol + L"。");
+        }
         return;
     }
     p.heading(L"插值参数");
@@ -124,5 +133,25 @@ void renderOther(Page &p) {
     }
     p.table({L"x", L"y"}, rows);
     p.chart(curve, points, [spline](double x) { return spline->y(x); });
+    bool full = false;
+    p.processSteps.push_back(L"输入 " + std::to_wstring(points.size()) + L" 个 Q 型值点，x 严格递增；自然端点二阶导数为零。");
+    auto normalized = spline->normalizationProcess(full);
+    p.processSteps.insert(p.processSteps.end(), normalized.begin(), normalized.end());
+    p.processSteps.push_back(L"");
+    p.processSteps.push_back(L"内部控制点满足 Pᵢ₋₁ + 4Pᵢ + Pᵢ₊₁ = 6Qᵢ；采用三对角消元。每段 x(u)、y(u) 均为三次多项式。");
+    p.processSteps.push_back(L"采样范围 " + inputNumber(minimum) + L"～" + inputNumber(maximum) + L"，步进 " + inputNumber(step) + L"；采样点数 = " + std::to_wstring(samples) + L"，最后一点固定为最大值。");
+    std::size_t chosen = 0;
+    auto isKnot = [&](double x) { return std::any_of(points.begin(), points.end(), [x](Point point) { return point.x == x; }); };
+    auto previewCount = std::min<std::size_t>(100, samples);
+    for (std::size_t i = 0; i < previewCount; ++i) {
+        double x = sampleX(minimum, maximum, step, samples, i);
+        if (x > points.front().x && x < points.back().x && !isKnot(x)) { chosen = i; break; }
+        if (i == 0 || (isKnot(sampleX(minimum, maximum, step, samples, chosen)) && !isKnot(x))) chosen = i;
+    }
+    double example = sampleX(minimum, maximum, step, samples, chosen);
+    p.processSteps.push_back(L"");
+    p.processSteps.push_back(L"示例：预览采样点 " + std::to_wstring(chosen + 1) + L"，x = " + p.processValue(example) + L"，y = " + p.processValue(spline->y(example)) + L"；其余采样点采用相同方法。");
+    auto steps = spline->processAt(example, full);
+    p.processSteps.insert(p.processSteps.end(), steps.begin(), steps.end());
 }
 } // 命名空间 toolbox

@@ -225,6 +225,7 @@ void renderGauges(Page &p) {
         p.note(wide(data.error), Red);
     } else if (data.report) {
         const auto &report = *data.report;
+        p.processSteps = report.process;
         p.heading(wide(report.title));
         auto text = wide(report.text(type));
         p.button(L"复制完整结果", [owner = p.app.handle(), text] {

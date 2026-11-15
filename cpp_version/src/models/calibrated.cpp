@@ -98,35 +98,12 @@ double StandardCouple::temperature(double e) const {
 }
 double sprtReference(double t) {
     require(std::isfinite(t) && t >= -259.3467 && t <= 961.78, "温度超出参考电阻比范围");
-    return t >= 0 ? polynomial(sprtC(), (t - 481) / 481)
+    return t >= 0.01 ? polynomial(sprtC(), (t - 481) / 481)
                   : std::exp(polynomial(sprtA(), (std::log((t + 273.15) / 273.16) + 1.5) / 1.5));
 }
-static double referenceTemperature(double wr) {
-    // 逆参考多项式只是初值；用正参考函数校正，消除银点附近约 0.1 mK 的近似残差。
-    bool high = wr >= sprtReference(0);
-    double t = high ? polynomial(sprtD(), (wr - 2.64) / 1.64)
-                    : 273.16 * polynomial(sprtB(), (std::pow(wr, 1. / 6) - .65) / .35) - 273.15;
-    for (int i = 0; i < 6; ++i) {
-        double value, slope;
-        if (high) {
-            auto p = polynomialSlope(sprtC(), (t - 481) / 481);
-            value = p.first;
-            slope = p.second / 481;
-        } else {
-            require(t > -273.15, "参考电阻比超出低温参考函数的有效范围");
-            auto p = polynomialSlope(sprtA(), (std::log((t + 273.15) / 273.16) + 1.5) / 1.5);
-            value = std::exp(p.first);
-            slope = value * p.second / (1.5 * (t + 273.15));
-        }
-        require(std::isfinite(slope) && slope > 0, "参考电阻比无法可靠反算温度");
-        double next = t - (value - wr) / slope;
-        finite({next});
-        if (next == t) {
-            break;
-        }
-        t = next;
-    }
-    return t;
+static double referenceTemperature(double wr, bool high) {
+    return high ? polynomial(sprtD(), (wr - 2.64) / 1.64)
+                : 273.16 * polynomial(sprtB(), (std::pow(wr, 1. / 6) - .65) / .35) - 273.15;
 }
 void Sprt::validate() const {
     finite({rtp, a, b, c, a4, b4, d, w660});
@@ -142,7 +119,7 @@ double Sprt::temperatureBranch(double r, bool high) const {
     double wr = high ? w - a * x - b * x * x - c * x * x * x - d * z * z
                      : w - a4 * x - b4 * (lowQuadratic ? x * x : x * std::log(w));
     require(wr > 0, "偏差系数使参考电阻比非正");
-    double t = referenceTemperature(wr);
+    double t = referenceTemperature(wr, high || (lowQuadratic && w >= 1));
     finite({t});
     return t;
 }
@@ -151,9 +128,9 @@ double Sprt::resistanceBranch(double t, bool high) const {
     validate();
     require(std::isfinite(t) && t >= -200 && t <= 961.78, "SPRT 换算范围为 −200～961.78 °C");
     return rtp * inverse([&](double w) { return temperatureBranch(w * rtp, high); }, t, high ? .99 : .01,
-                         (high || (lowQuadratic && t >= 0)) ? 4.5 : 1.01);
+                         (high || (lowQuadratic && t >= 0.01)) ? 4.5 : 1.01);
 }
-double Sprt::resistance(double t) const { return resistanceBranch(t, t >= 0); }
+double Sprt::resistance(double t) const { return resistanceBranch(t, t >= 0.01); }
 void Sprt::fit(const std::vector<std::pair<double, double>> &high,
                const std::vector<std::pair<double, double>> &low, int terms) {
     validate();

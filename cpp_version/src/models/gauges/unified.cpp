@@ -177,6 +177,12 @@ Report unified(const std::string &size, double tpi, const std::string &grade) {
     out.metric("工件容隙 (mm)", allowance * inch);
     out.metric("旋合长度 Le (mm)", le * inch);
     geometry(out, d, p, d2, d1, 60, 1);
+    auto c = traceNumber;
+    out.process.push_back(L"");
+    out.process.push_back(L"公称直径 = " + c(dIn) + L" inch，TPI = " + c(tpi) + L"；P = 1/TPI = " + c(pIn) + L" inch = " + c(p) + L" mm，1 inch = 25.4 mm。");
+    out.process.push_back(L"基本中径 d₂ = d − 3√3P/8 = " + c(d2In) + L" inch；基本小径 D₁ = D − 5√3P/8 = " + c(d1) + L" mm。");
+    out.process.push_back(L"旋合长度 Le 根据系列及等级取公称直径或 9P = " + c(le) + L" inch；2A 基础公差 T₂A = 0.0015∛d + 0.0015√Le + 0.015P^(2/3) = " + c(base) + L" inch。");
+    out.process.push_back(L"按等级的公差系数 = " + c(factor) + L"，工件中径公差 = T₂A × 系数 = " + c(tol) + L" inch；容隙 = " + c(allowance) + L" inch。工件中径上下限 = " + c(loIn) + L"～" + c(hiIn) + L" inch，即 " + c(lo) + L"～" + c(hi) + L" mm。");
     if (external) {
         out.metric("基本外螺纹小径 (mm)", root);
     }
@@ -193,6 +199,7 @@ Report unified(const std::string &size, double tpi, const std::string &grade) {
            tw = optionalMm(band(db["w"], dIn, tpi), "中径公差");
     out.metric("中径制造公差 U (mm)", u);
     out.metric("顶径公差 Ta · 参考 (mm)", ta);
+    out.process.push_back(L"制造公差 U 按直径档和牙数查表 = " + c(u) + L" mm；顶径公差 Ta " + (valid(ta) ? L"= " + c(ta) + L" mm。" : std::wstring(L"未收录，相应下限不计算。")));
     out.note("工作量规中径按 U 计算；大径、小径及校对尺寸供参考。");
     // 无独立磨损数据：不显示空磨损列，也不生成 TS/ZS 校损规。
     if (!external) {
@@ -203,6 +210,12 @@ Report unified(const std::string &size, double tpi, const std::string &grade) {
         double ngMajor = ng.pd[1] + .2 * p + u / 2;
         ng.major = {ngMajor - ta, ngMajor};
         ng.minorMax = d1;
+        out.process.push_back(L"");
+        out.process.push_back(L"通端工作塞规：中径名义 = 工件中径下限 + U/2 = " + c(lo) + L" + " + c(u) + L"/2 = " + c(go.center) + L" mm；中径界限 = 名义 ± U/2 = " + c(go.pd[0]) + L"～" + c(go.pd[1]) + L" mm。");
+        if (valid(ta)) out.process.push_back(L"通端大径界限 = D − Ta ～ D = " + c(go.major[0]) + L"～" + c(go.major[1]) + L" mm；小径上限 = D₁ = " + c(d1) + L" mm。");
+        out.process.push_back(L"");
+        out.process.push_back(L"止端工作塞规：中径名义 = 工件中径上限 − U/2 = " + c(ng.center) + L" mm；中径界限 = 名义 ± U/2 = " + c(ng.pd[0]) + L"～" + c(ng.pd[1]) + L" mm。");
+        out.process.push_back(L"止端大径上限 = 止端中径上限 + 0.2P + U/2 = " + c(ngMajor) + L" mm；" + (valid(ta) ? L"大径下限 = 大径上限 − Ta = " + c(ng.major[0]) + L" mm。" : std::wstring(L"Ta 未收录，大径下限不计算。")) + L"小径上限 = D₁ = " + c(d1) + L" mm。");
         out.tables.push_back(gaugeTable("工作塞规 · 检内螺纹", {go, ng}, false));
         out.showInches();
         out.checked();
@@ -215,6 +228,10 @@ Report unified(const std::string &size, double tpi, const std::string &grade) {
     Gauge rn("NO GO", "止端工作环规", lo + u / 2, u);
     rn.majorMin = major;
     rn.minor = {rn.center - .2 * p, rn.center - .2 * p};
+    out.process.push_back(L"");
+    out.process.push_back(L"通端工作环规：中径名义 = 工件上限 − U/2 = " + c(rg.center) + L" mm；中径界限 = 名义 ± U/2 = " + c(rg.pd[0]) + L"～" + c(rg.pd[1]) + L" mm；大径下限 = 工件大径上限 = " + c(major) + L" mm，小径下限 = 外螺纹基本小径 = " + c(root) + L" mm。");
+    out.process.push_back(L"");
+    out.process.push_back(L"止端工作环规：中径名义 = 工件下限 + U/2 = " + c(rn.center) + L" mm；中径界限 = 名义 ± U/2 = " + c(rn.pd[0]) + L"～" + c(rn.pd[1]) + L" mm；大径下限 = " + c(major) + L" mm，小径下限 = 名义 − 0.2P = " + c(rn.minor[0]) + L" mm。");
     out.tables.push_back(gaugeTable("工作环规 · 检外螺纹", {rg, rn}, false));
     struct Spec {
         const char *code, *name;
@@ -230,6 +247,9 @@ Report unified(const std::string &size, double tpi, const std::string &grade) {
         g.major = {s.major - s.half, s.major + s.half};
         g.minorMax = root;
         cal.push_back(g);
+        out.process.push_back(L"");
+        out.process.push_back(wide(g.code + " " + g.name) + (valid(tw) ? L"：中径名义 = 对应环规中径界限 − 校对公差/2 = " + c(s.upper) + L" − " + c(tw) + L"/2 = " + c(g.center) + L" mm；中径界限 = 名义 ± 校对公差/2 = " + c(g.pd[0]) + L"～" + c(g.pd[1]) + L" mm。" : std::wstring(L"：未收录校对中径公差，不计算中径界限。")));
+        out.process.push_back(L"大径基准 = " + c(s.major) + L" mm；大径界限 = 基准 ± " + c(s.half) + L" = " + c(g.major[0]) + L"～" + c(g.major[1]) + L" mm；小径上限 = 外螺纹基本小径 = " + c(root) + L" mm。");
     }
     if (!valid(tw)) {
         out.note("该规格未收录校对中径公差，相应界限不计算。");

@@ -174,4 +174,26 @@ double CurveFit::predict(double input) const {
     finite({value});
     return value;
 }
+std::vector<std::wstring> CurveFit::process(const std::vector<std::pair<double, double>> &points, bool full) const {
+    auto c = [full](double v) { return processNumber(v, full); };
+    std::vector<std::wstring> lines{
+        L"输入与响应分别归一化：X = (x − x₀)/sₓ，Y = (y − y₀)/sᵧ。",
+        L"x₀ = " + inputNumber(x_.origin) + L"，sₓ = " + c(x_.scale) + L"；y₀ = " + inputNumber(y_.origin) + L"，sᵧ = " + c(y_.scale) + L"。",
+        L"程序使用缩放 QR 最小二乘求归一化多项式 Ŷ = ΣaⱼXʲ，再换算为原单位系数；预测采用归一化多项式和融合乘加。"};
+    std::wstring coefficients = L"归一化系数（升幂）：";
+    for (std::size_t i = 0; i < normalizedCoefficients_.size(); ++i)
+        coefficients += (i ? L"，" : L"") + std::wstring(L"a") + std::to_wstring(i) + L" = " + c(normalizedCoefficients_[i]);
+    lines.push_back(coefficients + L"。");
+    for (std::size_t i = 0; i < points.size(); ++i) {
+        double x = x_.normalize(points[i].first), y = y_.normalize(points[i].second);
+        double fittedY = evaluate(normalizedCoefficients_, x);
+        lines.push_back(L"");
+        lines.push_back(L"第 " + std::to_wstring(i + 1) + L" 点：x = " + inputNumber(points[i].first) + L"，y = " + inputNumber(points[i].second) + L"；X = " + c(x) + L"，Y = " + c(y) + L"，Ŷ = " + c(fittedY) + L"。");
+        lines.push_back(L"拟合值 = y₀ + sᵧŶ = " + c(fitted[i]) + L"；残差 = sᵧ(Y − Ŷ) = " + c(residuals[i]) + L"。程序在归一化坐标中求差。");
+    }
+    lines.push_back(L"");
+    lines.push_back(L"RMSE = √[Σ残差²/n] = " + c(rmse) + L"；残差标准差 = √[Σ残差²/(n−p)] = " + (residualSd ? c(*residualSd) : L"无剩余自由度，未定义") + L"。");
+    lines.push_back(L"相关系数 r 由原始 x、y 的中心化数据计算；决定系数 R² = 1 − Σ残差²/Σ(y−ȳ)²。响应无变化时两者未定义。");
+    return lines;
+}
 } // 命名空间 toolbox

@@ -5,6 +5,9 @@
 -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601 -DWINVER=0x0601
 -Iinclude -Ithird_party
 -Ithird_party/pdfio -Ithird_party/pdfio/ttf -Ithird_party/zlib
+-Ithird_party/microtex/src -Ithird_party/tinyxml2
+-DBUILD_WIN32 -DNDEBUG
+@microtex.rsp
 
 src/main.cpp
 src/core/catalog_data.cpp
@@ -37,7 +40,9 @@ src/gui/window.cpp
 src/gui/input_history.cpp
 src/gui/calibration_archive.cpp
 src/gui/icon.cpp
+src/gui/math_engine.cpp
 src/gui/scene.cpp
+src/gui/details.cpp
 src/gui/text_layout.cpp
 src/gui/navigation.cpp
 src/gui/export.cpp
@@ -69,5 +74,5 @@ build/pdf-deps.a
 
 -municode -mwindows -static -static-libgcc
 -lstdc++ -ld2d1 -ldwrite -lwindowscodecs -lcomctl32 -lcomdlg32 -lole32 -lgdi32 -luuid
--lwinhttp -lbcrypt -ladvapi32 -lwinpthread -lshell32
+-lwinhttp -lbcrypt -ladvapi32 -lwinpthread -lshell32 -lgdiplus
 -Wl,--major-subsystem-version,6,--minor-subsystem-version,1

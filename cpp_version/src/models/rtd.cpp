@@ -31,38 +31,30 @@ RtdModel::RtdModel(std::size_t index, double zero, const Values &custom)
     resistance(definition.minimum);
     resistance(definition.maximum);
 }
-std::pair<double, double> RtdModel::ratio(double t) const {
-    auto p = [&](Values c) { return polynomialSlope(c, t); };
+RtdReference RtdModel::reference(double t) const {
     switch (definition.curve) {
     case RtdCurve::Cvd: {
         double a = coefficients[0], b = coefficients[1], c = coefficients[2];
-        return t < 0 ? p({1, a, b, -100 * c, c}) : p({1, a, b});
+        return {t < 0 ? Values{1, a, b, -100 * c, c} : Values{1, a, b}, 0, 1};
     }
     case RtdCurve::Pt3916:
-        return t < 0 ? p({1, 3.971686e-3, -1.157433e-6, -2.051844e-8, -3.629438e-10, -3.157615e-12,
-                          -1.369914e-14, -2.303654e-17})
-                     : p({1, 3.974973e-3, -5.8973e-7});
+        return {t < 0 ? Values{1, 3.971686e-3, -1.157433e-6, -2.051844e-8, -3.629438e-10, -3.157615e-12, -1.369914e-14, -2.303654e-17} : Values{1, 3.974973e-3, -5.8973e-7}, 0, 1};
     case RtdCurve::Cu428:
-        return p({1, .00428 + 100 * 9.31e-8, -9.31e-8 - 100 * 1.23e-9, 1.23e-9});
+        return {{1, .00428 + 100 * 9.31e-8, -9.31e-8 - 100 * 1.23e-9, 1.23e-9}, 0, 1};
     case RtdCurve::Cu427:
         if (t < -50) {
-            auto v = polynomialSlope({1, .0392313, -7.45044e-6}, t + 200);
-            return {.117058 * v.first, .117058 * v.second};
+            return {{1, .0392313, -7.45044e-6}, 200, .117058};
         }
         if (t <= 150) {
-            return p({1, .0042743});
+            return {{1, .0042743}, 0, 1};
         }
-        {
-            auto v = polynomialSlope({1, .00262628, 2.43732e-8}, t - 150);
-            return {1.641145 * v.first, 1.641145 * v.second};
-        }
+        return {{1, .00262628, 2.43732e-8}, -150, 1.641145};
     case RtdCurve::Ni617:
-        return t < 100 ? p({1, .0054963, 6.7556e-6})
-                       : p({1, .0054963, 6.7556e-6 - 100 * 9.2004e-9, 9.2004e-9});
+        return {t < 100 ? Values{1, .0054963, 6.7556e-6} : Values{1, .0054963, 6.7556e-6 - 100 * 9.2004e-9, 9.2004e-9}, 0, 1};
     case RtdCurve::Ni618:
-        return p({1, .005485, 6.65e-6, 0, 2.805e-11, 0, -2e-17});
+        return {{1, .005485, 6.65e-6, 0, 2.805e-11, 0, -2e-17}, 0, 1};
     case RtdCurve::Ni1000:
-        return p({1, .004427, 5.172e-6, 5.585e-9});
+        return {{1, .004427, 5.172e-6, 5.585e-9}, 0, 1};
     case RtdCurve::Ni672: {
         static const double upper[] = {-60, -30, 0, 30, 60, 90, 120, 150, 180, 210, 240, 260};
         static const Values c[] = {{.9980384367, .005779005438, 4.519218356e-6, 1.883007648e-8},
@@ -79,12 +71,17 @@ std::pair<double, double> RtdModel::ratio(double t) const {
                                    {1.437355995, .0008017164189, 2.59170561e-5, -1.300325764e-8}};
         for (int i = 0; i < 12; ++i) {
             if (t <= upper[i] || i == 11) {
-                return p(c[i]);
+                return {c[i], 0, 1};
             }
         }
     }
     }
     throw std::runtime_error("未知电阻曲线");
+}
+std::pair<double, double> RtdModel::ratio(double t) const {
+    auto ref = reference(t);
+    auto value = polynomialSlope(ref.coefficients, t + ref.shift);
+    return {ref.scale * value.first, ref.scale * value.second};
 }
 double RtdModel::resistance(double t) const {
     require(std::isfinite(t) && t >= definition.minimum && t <= definition.maximum, "温度超出分度范围");

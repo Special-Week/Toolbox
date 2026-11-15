@@ -1,6 +1,72 @@
 // 标准热电偶固定点实测电势和温区系数两套入口，统一使用同一模型作正反算。
 #include "sensors.hpp"
 namespace toolbox {
+static void standardReferenceProcess(Page &p, const StandardCouple &model, double t, const std::wstring &label) {
+    if (model.zone) {
+        if (t == 0) {
+            p.processSteps.push_back(label + L"：0 °C 参考电势按模型固定为 0 mV。");
+            return;
+        }
+        p.processSteps.push_back(label + L"：t = " + inputNumber(t) + L" °C，证书温区 " + inputNumber(model.zone->minimum) + L"～" + inputNumber(model.zone->maximum) + L" °C；E(t) = Σcᵢtⁱ，系数按升幂：");
+        for (std::size_t i = 0; i < model.zone->coefficients.size(); ++i)
+            p.processSteps.push_back(L"c[" + std::to_wstring(i) + L"] = " + inputNumber(model.zone->coefficients[i]) + L"。");
+        p.processSteps.push_back(L"代入 t = " + inputNumber(t) + L" °C，E(t) = " + p.processValue(model.emf(t)) + L" mV。");
+        return;
+    }
+    thermoReferenceProcess(p, model.kind, t, label + L"参考曲线");
+    Values offsets;
+    for (std::size_t i = 0; i < model.points.size(); ++i) {
+        double point = model.points[i].first, measured = model.points[i].second, ref = thermoEmf(model.kind, point);
+        offsets.push_back(measured - ref);
+        p.processSteps.push_back(L"固定点 " + std::to_wstring(i + 1) + L"：偏差 δ = 实测 − 参考 = " + inputNumber(measured) + L" − " + p.processValue(ref) + L" = " + p.processValue(offsets.back()) + L" mV。");
+    }
+    double correction = 0;
+    if (model.kind == "S") {
+        if (t < 400) {
+            correction = offsets[0] * t / model.points[0].first;
+            p.processSteps.push_back(L"S 型 t < 400 °C：偏差线性延伸 δ(t) = δ₀ × t/t₀ = " + p.processValue(offsets[0]) + L" × " + inputNumber(t) + L" / " + inputNumber(model.points[0].first) + L" = " + p.processValue(correction) + L" mV。");
+        } else {
+            p.processSteps.push_back(L"S 型 t ≥ 400 °C：固定点偏差按拉格朗日二次插值，δ(t) = Σδᵢ ∏(t−tⱼ)/(tᵢ−tⱼ)。");
+            for (int i = 0; i < 3; ++i) {
+                double term = offsets[i];
+                std::wstring substitution = p.processValue(offsets[i]);
+                for (int j = 0; j < 3; ++j)
+                    if (i != j) {
+                        term *= (t - model.points[j].first) / (model.points[i].first - model.points[j].first);
+                        substitution += L" × (" + inputNumber(t) + L" − " + inputNumber(model.points[j].first) + L") / (" + inputNumber(model.points[i].first) + L" − " + inputNumber(model.points[j].first) + L")";
+                    }
+                correction += term;
+                p.processSteps.push_back(L"第 " + std::to_wstring(i + 1) + L" 项 = " + substitution + L" = " + p.processValue(term) + L" mV。");
+            }
+        }
+    } else {
+        correction = offsets.back();
+        bool branchReported = false;
+        for (std::size_t i = 0; i < model.points.size(); ++i) {
+            double point = model.points[i].first;
+            if (t <= point + 30) {
+                if (i == 0 && t < point - 300) {
+                    correction = t >= 23 ? offsets[0] * (t - 23) / (point - 23) : 0;
+                    p.processSteps.push_back(t >= 23 ? L"B 型低温线性段：δ(t) = δ₀(t−23)/(t₀−23) = " + p.processValue(offsets[0]) + L" × (" + inputNumber(t) + L" − 23)/(" + inputNumber(point) + L" − 23) = " + p.processValue(correction) + L" mV。" : L"B 型 t < 23 °C：偏差为零。");
+                } else {
+                    correction = offsets[i];
+                    p.processSteps.push_back(L"B 型固定点邻域：采用第 " + std::to_wstring(i + 1) + L" 点偏差。");
+                }
+                branchReported = true;
+                break;
+            }
+            if (t < point + 70) {
+                correction = i == 4 ? offsets[i] : offsets[i] + (offsets[i + 1] - offsets[i]) * (t - point - 30) / 40;
+                p.processSteps.push_back(i == 4 ? L"B 型末点邻域：采用末点偏差。" : L"B 型固定点 " + std::to_wstring(i + 1) + L" 与 " + std::to_wstring(i + 2) + L" 之间的过渡段：δ(t) = δᵢ + (δᵢ₊₁−δᵢ)(t−tᵢ−30)/40 = " + p.processValue(offsets[i]) + L" + (" + p.processValue(offsets[i + 1]) + L" − " + p.processValue(offsets[i]) + L") × (" + inputNumber(t) + L" − " + inputNumber(point) + L" − 30)/40 = " + p.processValue(correction) + L" mV。");
+                branchReported = true;
+                break;
+            }
+        }
+        if (!branchReported)
+            p.processSteps.push_back(L"B 型高于末点邻域：采用末点偏差 " + p.processValue(correction) + L" mV。");
+    }
+    p.processSteps.push_back(L"校准偏差 δ(t) = " + p.processValue(correction) + L" mV；校准电势 = 参考电势 + 偏差 = " + p.processValue(thermoEmf(model.kind, t)) + L" + " + p.processValue(correction) + L" = " + p.processValue(model.emf(t)) + L" mV。");
+}
 void standardCouplePage(Page &p) {
     const auto calibrationStart = p.ui.controls.size();
     int type = p.select("type", L"分度号", {L"S 型", L"B 型"}),
@@ -81,6 +147,14 @@ void standardCouplePage(Page &p) {
                             {L"测得热电势", format(e) + L" mV"},
                             {L"微分热电势 dE/dt", format(slope / unit.span()) + L" mV/" + unit.symbol()},
                             {L"参考端电势", format(ce) + L" mV"}});
+    standardReferenceProcess(p, model, t, L"热端");
+    p.processSteps.push_back(L"");
+    standardReferenceProcess(p, model, cold, L"参考端");
+    p.processSteps.push_back(L"");
+    double reconstructed = model.emf(t) - ce;
+    p.processSteps.push_back(std::wstring(direction == 0 ? L"测得热电势" : L"反算温度代回得到的热电势") + L" = E(热端) − E(参考端) = " + p.processValue(model.emf(t)) + L" − " + p.processValue(ce) + L" = " + p.processValue(reconstructed) + L" mV。" );
+    if (direction != 0)
+        p.processSteps.push_back(L"反算时输入电势 = " + inputNumber(input) + L" mV，先加回参考端电势，再在所选有效温区内二分；正算残差 = 代回电势 − 输入电势 = " + p.processValue(reconstructed - input) + L" mV。");
     p.division(k, {lo, hi}, unit, L"mV", [model, ce](double t) { return model.emf(t) - ce; });
 }
 } // 命名空间 toolbox

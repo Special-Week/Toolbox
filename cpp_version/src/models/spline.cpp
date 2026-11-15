@@ -113,17 +113,23 @@ double Spline::invert(Cubic p, double target, double lo, double hi) {
     if (!std::isfinite(u) || u <= lo || u >= hi) {
         u = lo + (hi - lo) / 2;
     }
-    for (int i = 0; i < 80; ++i) {
+    // 横坐标误差小不代表参数收敛；水平切线附近继续缩小参数括区间。
+    for (int i = 0; i < 1200; ++i) {
         double error = p.value(u) - target;
         if (!std::isfinite(error)) {
             break;
         }
-        if (std::abs(error) <= 8 * eps * std::max(std::abs(target), 1.)) {
+        if (error == 0) {
             return u;
         }
         (error < 0 ? lo : hi) = u;
         double candidate = u - error / p.derivative(u);
-        u = std::isfinite(candidate) && candidate > lo && candidate < hi ? candidate : lo + (hi - lo) / 2;
+        if (candidate == u)
+            return u;
+        double midpoint = lo + (hi - lo) / 2;
+        if (midpoint == lo || midpoint == hi)
+            return std::abs(p.value(lo) - target) <= std::abs(p.value(hi) - target) ? lo : hi;
+        u = std::isfinite(candidate) && candidate > lo && candidate < hi ? candidate : midpoint;
     }
     throw std::runtime_error("反求样条参数未收敛，请检查 x 间距或外推范围");
 }
@@ -150,6 +156,56 @@ double Spline::y(double x) const {
     double result = std::fma(s.y.value(invert(s.x, target, lo, hi)), scale_.y, origin_.y);
     finite({result});
     return result;
+}
+std::vector<std::wstring> Spline::normalizationProcess(bool full) const {
+    auto c = [full](double value) { return processNumber(value, full); };
+    std::size_t farthest = 0;
+    double difference = 0;
+    for (std::size_t i = 0; i < points_.size(); ++i) {
+        double current = std::abs(points_[i].y - origin_.y);
+        if (current > difference) {
+            difference = current;
+            farthest = i;
+        }
+    }
+    std::vector<std::wstring> lines{
+        L"归一化基准为首个型值点 Q₀：x₀ = " + inputNumber(origin_.x) + L"，y₀ = " + inputNumber(origin_.y) + L"。",
+        L"横坐标缩放因子 sₓ = x末 − x₀ = " + inputNumber(points_.back().x) + L" − " + inputNumber(origin_.x) + L" = " + c(scale_.x) + L"。"};
+    lines.push_back(difference == 0
+        ? L"所有纵坐标都等于 y₀，maxᵢ|yᵢ − y₀| = 0；程序将 sᵧ 设为 1，避免除以零。"
+        : L"纵坐标缩放因子 sᵧ = maxᵢ|yᵢ − y₀|；最大差值来自 Q" + std::to_wstring(farthest) + L"：|" + inputNumber(points_[farthest].y) + L" − " + inputNumber(origin_.y) + L"| = " + c(difference) + L"，所以 sᵧ = " + c(scale_.y) + L"。");
+    lines.push_back(L"各型值点归一化：Xᵢ = (xᵢ − x₀)/sₓ，Yᵢ = (yᵢ − y₀)/sᵧ；计算后按 y = y₀ + sᵧY 恢复纵坐标。");
+    return lines;
+}
+std::vector<std::wstring> Spline::processAt(double x, bool full) const {
+    auto c = [full](double value) { return processNumber(value, full); };
+    auto found = std::lower_bound(points_.begin(), points_.end(), x,
+                                  [](Point p, double value) { return p.x < value; });
+    if (found != points_.end() && found->x == x)
+        return {L"x = " + inputNumber(x) + L" 恰为 Q" + std::to_wstring(found - points_.begin()) + L" 的横坐标，直接返回原始 y = " + inputNumber(found->y) + L"。"};
+    double target = (x - origin_.x) / scale_.x;
+    Segment segment;
+    double lo = 0, hi = 1;
+    std::wstring branch;
+    if (found == points_.begin() || found == points_.end()) {
+        bool right = found == points_.end();
+        segment = endpoint(right);
+        auto bracket = externalBracket(segment.x, target, right);
+        lo = bracket.first;
+        hi = bracket.second;
+        branch = right ? L"右端外推" : L"左端外推";
+    } else {
+        auto index = std::size_t(found - points_.begin() - 1);
+        segment = segments_[index];
+        branch = L"Q" + std::to_wstring(index) + L"～Q" + std::to_wstring(index + 1) + L" 插值";
+    }
+    double u = invert(segment.x, target, lo, hi), normalized = segment.y.value(u);
+    double result = std::fma(normalized, scale_.y, origin_.y);
+    return {
+        L"x = " + inputNumber(x) + L"；" + branch + L"；目标归一化横坐标 X = (x − x₀)/sₓ = (" + inputNumber(x) + L" − " + inputNumber(origin_.x) + L")/" + c(scale_.x) + L" = " + c(target) + L"。",
+        L"X(u) = a + bu + cu² + du³；本段系数 a、b、c、d = " + inputNumber(segment.x.a) + L"、" + inputNumber(segment.x.b) + L"、" + inputNumber(segment.x.c) + L"、" + inputNumber(segment.x.d) + L"；在 [" + inputNumber(lo) + L"，" + inputNumber(hi) + L"] 内用带括区间的 Newton 法反求，必要时二分，得到 u = " + c(u) + L"。",
+        L"Y(u) = a + bu + cu² + du³；本段系数 a、b、c、d = " + inputNumber(segment.y.a) + L"、" + inputNumber(segment.y.b) + L"、" + inputNumber(segment.y.c) + L"、" + inputNumber(segment.y.d) + L"。",
+        L"恢复坐标 y = y₀ + sᵧY(u) = " + inputNumber(origin_.y) + L" + " + c(scale_.y) + L" × " + c(normalized) + L" = " + c(result) + L"；多项式及恢复坐标使用融合乘加。"};
 }
 std::size_t sampleCount(double lo, double hi, double step) {
     finite({lo, hi, step});

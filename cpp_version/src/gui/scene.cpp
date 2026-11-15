@@ -1,5 +1,7 @@
 // 声明式界面场景。控件键值稳定，计算结果刷新不会重建正在输入的编辑框。
 #include "toolbox/gui.hpp"
+#include "toolbox/formula_layout.hpp"
+#include "toolbox/resource_ids.h"
 namespace toolbox {
 bool Rect::contains(float px, float py) const { return px >= x && py >= y && px < x + w && py < y + h; }
 std::wstring &State::value(const std::string &key, const std::wstring &initial) {
@@ -60,6 +62,15 @@ void Scene::icon(Rect r) {
     d.clip = clip;
     draws.push_back(d);
 }
+void Scene::math(Rect r, const std::wstring &fallback, const std::wstring &formula) {
+    Draw d;
+    d.kind = 5;
+    d.rect = r;
+    d.clip = clip;
+    d.text = fallback;
+    d.formula = formula;
+    draws.push_back(std::move(d));
+}
 void Scene::input(const std::string &key, Rect r, const std::wstring &value) {
     fill(r, Color(250 / 255.f, 252 / 255.f, 1), 6);
     border(r, Color(150 / 255.f, 168 / 255.f, 192 / 255.f), 6);
@@ -89,32 +100,16 @@ void Page::error(const std::wstring &t) {
     ui.text({x + 12, y + 12, w - 24, h}, message, 13, Red, false, false, true);
     y += h + 36;
 }
-void Page::details(const std::string &field, const std::wstring &title,
-                   const std::vector<std::wstring> &lines) {
-    const auto k = key(field);
-    const bool open = app.openDetails.count(k) != 0;
-    const float padding = 18, inner = std::max(1.f, w - 2 * padding);
-    float height = 60;
-    if (open)
-        for (const auto &line : lines)
-            height += app.paragraphHeight(line, inner, 13) + 8;
-    ui.fill({x, y, w, height}, Soft, 8);
-    ui.text({x + padding, y + 12, inner, 36}, (open ? L"▾  " : L"▸  ") + title, 14, Blue, true);
-    ui.hits.push_back({{x, y, w, 60}, ui.clip, [owner = &app, k] {
-                           if (owner->openDetails.count(k))
-                               owner->openDetails.erase(k);
-                           else
-                               owner->openDetails.insert(k);
-                           owner->refresh();
-                       }});
-    float lineY = y + 52;
-    if (open)
-        for (const auto &line : lines) {
-            const float lineHeight = app.paragraphHeight(line, inner, 13);
-            ui.text({x + padding, lineY, inner, lineHeight}, line, 13, Ink, false, false, true);
-            lineY += lineHeight + 8;
-        }
-    y += height + 12;
+std::wstring Page::processValue(double value) {
+    if (!std::isfinite(value)) return L"—";
+    return L"\u2063" + inputNumber(value) + L"\u2063";
+}
+void Page::showProcess() {
+    if (!processSteps.empty()) {
+        for (auto &line : processSteps) line = processDisplayLine(line, false);
+        processSteps.push_back(L"部分计算值按 13 位有效数字显示，实际计算精度不变。");
+        details("calculation.process", L"计算过程", processSteps);
+    }
 }
 void Page::explain() {
     // 说明只读取当前选择，不改变计算参数。
@@ -145,10 +140,20 @@ void Page::explain() {
     if (sections.empty()) {
         return;
     }
-    std::vector<std::wstring> lines{sections.front().second};
+    std::vector<std::wstring> lines;
+    auto appendLines = [&](const std::wstring &text) {
+        std::size_t start = 0;
+        while (true) {
+            const auto end = text.find(L'\n', start);
+            lines.push_back(text.substr(start, end == std::wstring::npos ? end : end - start));
+            if (end == std::wstring::npos) break;
+            start = end + 1;
+        }
+    };
+    appendLines(sections.front().second);
     for (std::size_t i = 1; i < sections.size(); ++i) {
         lines.push_back(sections[i].first);
-        lines.push_back(sections[i].second);
+        appendLines(sections[i].second);
     }
     details("calculation.details", L"计算说明", lines);
 }

@@ -2,6 +2,8 @@
 
 本程序使用 Windows 系统提供的 Direct2D、DirectWrite、Win32 和通用控件，不随包复制 Windows 系统 DLL。
 
+运行时数学排版使用 MicroTeX（MIT）、tinyxml2 9.0.0（zlib 许可）及 MicroTeX 自带数学字体；源码和字体许可分别保存在 `third_party/microtex` 与 `third_party/tinyxml2`，许可原文随程序内许可汇总发布。
+
 计量规范 PDF 下载使用系统 WinHTTP、BCrypt，以及静态编译的 PDFio 1.7.0（提交 `3444a8a6f99028e2f9853a857936c144d7b6d955`）、其 TTF 源码（提交 `671390aef1f9e81723da164ea4a4a72037abfd52`，均为 Apache-2.0）和 zlib 1.3.1。源码及许可证保存在 `third_party/pdfio`、`third_party/zlib`；许可全文与 PDFio NOTICE 亦已嵌入 EXE。MinGW 的 `ssize_t` 兼容性调整沿用原下载工具。
 
 十进制文本解析和格式化使用 Google/V8 的 [double-conversion v3.3.1](https://github.com/google/double-conversion/tree/v3.3.1)，源码保存在 `third_party/double-conversion` 并直接编译进程序，不增加额外 DLL。原作者的 BSD 三条款许可证保留在源码目录 `licenses/double-conversion-LICENSE.txt`，并完整嵌入发布 EXE。

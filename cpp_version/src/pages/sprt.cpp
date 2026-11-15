@@ -120,20 +120,37 @@ void sprtPage(Page &p) {
                             direction == 0 ? L"温度 (" + unit.symbol() + L")" : L"电阻 (Ω)",
                             direction == 0 ? unit.display(dt) : m.resistance(dt));
     p.check();
+    auto highForTemperature = [hr, lr](double temperature) { return hr != 6 && (lr == 2 || temperature >= .01); };
     double t = direction == 0 ? unit.celsius(input)
-                              : (hr == 6 ? m.temperatureBranch(input, false) : m.temperature(input)),
-           r = direction == 0 ? m.resistanceBranch(t, hr != 6 && t >= 0) : input;
+                              : m.temperatureBranch(input, hr != 6 && (lr == 2 || input >= m.rtp)),
+           r = direction == 0 ? m.resistanceBranch(t, highForTemperature(t)) : input;
     const double lows[] = {-189.344, -38.834, 0},
                  highs[] = {961.78, 660.323, 419.527, 231.928, 156.599, 29.765, 0};
     double lo = lows[lr], hi = highs[hr];
     require(t >= lo - 1e-8 && t <= hi + 1e-8, "温度超出所选高低温分区");
-    auto curve = [m, hr](double t) { return m.resistanceBranch(t, hr != 6 && t >= 0); };
+    auto curve = [m, highForTemperature](double t) { return m.resistanceBranch(t, highForTemperature(t)); };
     double a = std::max(t - 1, lo), b = std::min(t + 1, hi), slope = (curve(b) - curve(a)) / (b - a);
     p.metrics(L"换算结果", {{L"温度", format(unit.display(t)) + L" " + unit.symbol()},
                             {L"电阻", format(r) + L" Ω"},
                             {L"电阻比 W = R / Rtp", format(r / m.rtp)},
                             {L"电阻变化率 dR/dt", format(slope / unit.span()) + L" Ω/" + unit.symbol()},
                             {L"电阻比变化率 dW/dt", format(slope / m.rtp / unit.span())}});
+    bool high = direction == 0 ? highForTemperature(t) : (hr != 6 && (lr == 2 || input >= m.rtp));
+    double w = r / m.rtp, x = w - 1, z = std::max(w - m.w660, 0.0);
+    double wr = high ? w - m.a * x - m.b * x * x - m.c * x * x * x - m.d * z * z
+                     : w - m.a4 * x - m.b4 * (m.lowQuadratic ? x * x : x * std::log(w));
+    bool highReference = high || (m.lowQuadratic && w >= 1);
+    double variable = highReference ? (wr - 2.64) / 1.64 : (std::pow(wr, 1.0 / 6) - .65) / .35;
+    const auto &coefficients = highReference ? sprtD() : sprtB();
+    p.processSteps.push_back(L"实际电阻比 W = R/Rtp = " + p.processValue(r) + L" / " + inputNumber(m.rtp) + L" = " + p.processValue(w) + L"；选择" + (high ? std::wstring(L"高温") : std::wstring(L"低温")) + L"偏差分支。");
+    if (high)
+        p.processSteps.push_back(L"Wr = W − a(W−1) − b(W−1)² − c(W−1)³ − d·max(W−W660,0)²；a、b、c、d、W660 = " + inputNumber(m.a) + L"、" + inputNumber(m.b) + L"、" + inputNumber(m.c) + L"、" + inputNumber(m.d) + L"、" + inputNumber(m.w660) + L"；Wr = " + p.processValue(wr) + L"。");
+    else
+        p.processSteps.push_back(std::wstring(m.lowQuadratic ? L"Wr = W − a₅(W−1) − b₅(W−1)²；" : L"Wr = W − a₄(W−1) − b₄(W−1)ln(W)；") + L"a、b = " + inputNumber(m.a4) + L"、" + inputNumber(m.b4) + L"；Wr = " + p.processValue(wr) + L"。");
+    p.processSteps.push_back(std::wstring(highReference ? L"高温逆参考函数：z = (Wr − 2.64)/1.64 = " : L"低温逆参考函数：z = (Wr^(1/6) − 0.65)/0.35 = ") + p.processValue(variable) + L"，多项式系数按升幂：");
+    for (std::size_t i = 0; i < coefficients.size(); ++i)
+        p.processSteps.push_back(L"c[" + std::to_wstring(i) + L"] = " + inputNumber(coefficients[i]) + L"。");
+    p.processSteps.push_back(std::wstring(highReference ? L"t = Σcᵢzⁱ = " : L"t = 273.16 × Σcᵢzⁱ − 273.15 = ") + p.processValue(m.temperatureBranch(r, high)) + L" °C。电阻正算采用同一温度分支二分求解。");
     p.division(k, {lo, hi}, unit, L"Ω", curve);
 }
 } // 命名空间 toolbox

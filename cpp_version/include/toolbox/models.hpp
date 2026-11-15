@@ -40,12 +40,17 @@ struct RtdDefinition {
     Values coefficients;
     RtdTolerance tolerance;
 };
+struct RtdReference {
+    Values coefficients;
+    double shift = 0, scale = 1;
+};
 const std::vector<RtdDefinition> &rtdDefinitions();
 struct RtdModel {
     RtdDefinition definition;
     double r0;
     Values coefficients;
     RtdModel(std::size_t index, double zero, const Values &custom = {});
+    RtdReference reference(double temperature) const;
     std::pair<double, double> ratio(double temperature) const;
     double resistance(double temperature) const;
     double temperature(double resistance) const;
@@ -126,8 +131,8 @@ std::pair<double, double> transmitterForward(Range process, Range output, bool r
 std::pair<double, double> transmitterInverse(Range process, Range output, bool root, double value);
 
 struct Humidity {
-    double rh, saturated, vapor, volumeFraction, ppm, absolute, mass, specific, mixing, normal;
-    // 湿球可能低于饱和压模型下限；单项无解不应抹去其余有效参数。
+    double rh, saturated, vapor, rawVapor, volumeFraction, ppm, absolute, mass, specific, mixing, normal;
+    // 湿球反算受 −100～环境温度区间约束，成功结果包含湿球温度。
     std::optional<double> dew, frost, wet;
 };
 double saturation(double t);
@@ -139,12 +144,12 @@ double earBlackbody(double t, double emissivity, double probe, double probeEmiss
                     bool singleReflection = false);
 class Spectrum {
     std::vector<std::pair<double, double>> nodes_;
-    double logRadiance(double kelvin) const;
     double invert(double logarithm) const;
     double transform(double t, double background, double weight) const;
 
   public:
     Spectrum(double wavelength, double upper = 0);
+    double logRadiance(double kelvin) const;
     double apparent(double t, double background, double emissivity) const;
     double corrected(double indicated, double background, double instrument, double source) const;
 };
@@ -205,6 +210,8 @@ class Spline {
   public:
     explicit Spline(const std::vector<Point> &points);
     double y(double x) const;
+    std::vector<std::wstring> normalizationProcess(bool fullPrecision) const;
+    std::vector<std::wstring> processAt(double x, bool fullPrecision) const;
 };
 std::size_t sampleCount(double minimum, double maximum, double step);
 double sampleX(double minimum, double maximum, double step, std::size_t count, std::size_t index);

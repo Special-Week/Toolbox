@@ -36,6 +36,7 @@ struct Draw {
     Rect rect, clip;
     Color color = Ink;
     std::wstring text;
+    std::wstring formula;
     float size = 13, radius = 0, stroke = 1;
     bool bold = false, center = false, paragraph = false;
 };
@@ -89,6 +90,7 @@ struct Scene {
               bool center = false, bool paragraph = false);
     void line(float x1, float y1, float x2, float y2, Color color, float thickness = 1);
     void icon(Rect r);
+    void math(Rect r, const std::wstring &fallback, const std::wstring &formula);
     void button(Rect r, const std::wstring &text, std::function<void()> action, bool selected = false);
     void input(const std::string &key, Rect r, const std::wstring &value);
     void combo(const std::string &key, Rect r, const std::vector<std::wstring> &options, int selection);
@@ -102,6 +104,7 @@ class Page {
     const Tool &tool;
     float x, y, w;
     std::wstring inputError;
+    std::vector<std::wstring> processSteps;
     Page(App &app, Scene &ui, const Tool &tool, float x, float y, float width);
     std::string key(const std::string &field) const;
     void heading(const std::wstring &title);
@@ -109,6 +112,8 @@ class Page {
     void error(const std::wstring &text);
     void details(const std::string &field, const std::wstring &title, const std::vector<std::wstring> &lines);
     void explain();
+    std::wstring processValue(double value);
+    void showProcess();
     double number(const std::string &field, const std::wstring &label, double initial);
     std::wstring textInput(const std::string &field, const std::wstring &label, const std::wstring &initial);
     int select(const std::string &field, const std::wstring &label, const std::vector<std::wstring> &options,
@@ -165,6 +170,7 @@ class App {
     IDWriteFactory *textFactory_ = nullptr;
     ID2D1HwndRenderTarget *target_ = nullptr;
     ID2D1Bitmap *iconBitmap_ = nullptr;
+    std::map<std::wstring, ID2D1Bitmap *> dynamicMathBitmaps_;
     std::map<std::string, Native> native_;
     std::map<HWND, std::string> nativeKeys_;
     bool synchronizing_ = false;
@@ -176,6 +182,7 @@ class App {
     void paint();
     void releaseTarget();
     void loadIconBitmap();
+    ID2D1Bitmap *loadDynamicMathBitmap(const std::wstring &formula);
     void rebuild(bool scrolling = false);
     LRESULT message(UINT message, WPARAM w, LPARAM l);
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);

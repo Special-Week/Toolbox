@@ -119,6 +119,8 @@ App::~App() {
 }
 void App::releaseTarget() {
     release(iconBitmap_);
+    for (auto &entry : dynamicMathBitmaps_) release(entry.second);
+    dynamicMathBitmaps_.clear();
     release(target_);
 }
 void App::refresh() {
@@ -214,7 +216,7 @@ int App::run(HINSTANCE instance, int show) {
     dpi_ = float(GetDeviceCaps(dc, LOGPIXELSX));
     ReleaseDC(nullptr, dc);
     editBrush_ = CreateSolidBrush(RGB(250, 252, 255));
-    window_ = CreateWindowExW(0, wc.lpszClassName, L"工具箱 · 桌面版", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+    window_ = CreateWindowExW(0, wc.lpszClassName, L"工具箱 · 桌面版 v2026.11.15", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                               CW_USEDEFAULT, CW_USEDEFAULT, int(1220 * dpi_ / 96), int(820 * dpi_ / 96),
                               nullptr, nullptr, instance, this);
     if (!window_) {
@@ -789,9 +791,11 @@ void App::rebuild(bool scrolling) {
             renderPage(page);
             page.check();
         } catch (const std::exception &e) {
+            page.processSteps.clear();
             page.error(page.inputError.empty() ? wide(e.what()) : page.inputError);
         }
         page.y += 14;
+        page.showProcess();
         page.explain();
         contentHeight_ = page.y + scroll - top + 52;
         inputHistory_.observe(tool, state);
@@ -857,6 +861,29 @@ void App::paint() {
                 } else if (d.kind == 4) {
                     if (iconBitmap_) {
                         target_->DrawBitmap(iconBitmap_, r, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                    }
+                } else if (d.kind == 5) {
+                    const float deviceScale = dpi_ / 96.f;
+                    const UINT pixelWidth = std::max(1u, UINT(std::lround(d.rect.w * deviceScale)));
+                    const UINT pixelHeight = std::max(1u, UINT(std::lround(d.rect.h * deviceScale)));
+                    auto bitmap = loadDynamicMathBitmap(d.formula);
+                    if (bitmap) {
+                        r.left = std::round(d.rect.x * deviceScale) / deviceScale;
+                        r.top = std::round(d.rect.y * deviceScale) / deviceScale;
+                        r.right = r.left + pixelWidth / deviceScale;
+                        r.bottom = r.top + pixelHeight / deviceScale;
+                        target_->DrawBitmap(bitmap, r, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
+                    } else {
+                        IDWriteTextFormat *format = nullptr;
+                        const float fallbackSize = std::min(13.f, 13.f * d.rect.w / std::max(1.f, textWidth(d.text, 13)));
+                        if (SUCCEEDED(textFactory_->CreateTextFormat(L"Microsoft YaHei", nullptr,
+                                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                                DWRITE_FONT_STRETCH_NORMAL, fallbackSize, L"zh-cn", &format))) {
+                            format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+                            target_->DrawTextW(d.text.c_str(), UINT32(d.text.size()), format, r, brush,
+                                               D2D1_DRAW_TEXT_OPTIONS_CLIP);
+                            format->Release();
+                        }
                     }
                 } else {
                     IDWriteTextFormat *format = nullptr;

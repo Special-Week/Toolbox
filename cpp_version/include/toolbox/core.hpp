@@ -25,6 +25,9 @@ std::wstring formatUnit(double value);
 // 输入和导出保留原数值的最短普通十进制，不暴露二进制展开产生的无意义尾数。
 std::string rawNumber(double value);
 std::wstring inputNumber(double value);
+std::wstring processNumber(double value, bool fullPrecision);
+std::wstring processDisplayLine(const std::wstring &line, bool fullPrecision);
+std::wstring parenthesizeNegativeSubtrahends(const std::wstring &line);
 std::wstring wide(const std::string &text);
 std::string utf8(const std::wstring &text);
 double polynomial(const Values &coefficients, double x);
@@ -34,6 +37,9 @@ Values leastSquares(const std::vector<Values> &rows, const Values &target);
 double rss(const Values &values);
 struct Statistics {
     double mean, sd, minimum, maximum, standardError;
+    bool centered;
+    double origin, deltaMean;
+    Values residuals;
 };
 Statistics statistics(const Values &values);
 double rangeCoefficient(std::size_t count);

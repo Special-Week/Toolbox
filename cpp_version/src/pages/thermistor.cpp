@@ -15,6 +15,17 @@ void thermistorPage(Page &p) {
         double t = mode == 0 ? model.temperature(input) : input,
                r = mode == 0 ? input : model.resistance(input);
         p.metrics(L"计算结果", {{L"温度", format(t) + L" °C"}, {L"电阻", format(r) + L" Ω"}});
+        double t0k = t0 + 273.15;
+        if (mode == 0) {
+            double inverse = 1 / t0k + (std::log(r) - std::log(r0)) / beta;
+            p.processSteps.push_back(L"β 模型：T₀ = t₀ + 273.15 = " + inputNumber(t0) + L" + 273.15 = " + p.processValue(t0k) + L" K；R₀ = " + inputNumber(r0) + L" Ω，β = " + inputNumber(beta) + L" K。");
+            p.processSteps.push_back(L"1/T = 1/T₀ + [ln(R) − ln(R₀)]/β = 1/" + p.processValue(t0k) + L" + [ln(" + inputNumber(r) + L") − ln(" + inputNumber(r0) + L")]/" + inputNumber(beta) + L" = " + p.processValue(inverse) + L" K⁻¹。");
+            p.processSteps.push_back(L"温度 t = 1/(1/T) − 273.15 = 1/" + p.processValue(inverse) + L" − 273.15 = " + p.processValue(t) + L" °C。");
+        } else {
+            double logR = std::log(r0) + beta * (1 / (t + 273.15) - 1 / t0k);
+            p.processSteps.push_back(L"β 模型：T = t + 273.15 = " + inputNumber(t) + L" + 273.15 = " + p.processValue(t + 273.15) + L" K；T₀ = " + p.processValue(t0k) + L" K。");
+            p.processSteps.push_back(L"ln(R) = ln(R₀) + β(1/T − 1/T₀) = ln(" + inputNumber(r0) + L") + " + inputNumber(beta) + L" × (1/" + p.processValue(t + 273.15) + L" − 1/" + p.processValue(t0k) + L") = " + p.processValue(logR) + L"；R = exp(ln R) = " + p.processValue(r) + L" Ω。");
+        }
         return;
     }
     bool sh =
@@ -92,6 +103,29 @@ void thermistorPage(Page &p) {
     p.metrics(L"换算结果", {{L"温度", format(unit.display(t)) + L" " + unit.symbol()},
                             {L"电阻", format(r) + L" Ω"},
                             {L"电阻变化率", format(slope / unit.span()) + L" Ω/" + unit.symbol()}});
+    p.processSteps.push_back(L"热敏电阻 " + std::to_wstring(order) + L" 阶" + (sh ? L" Steinhart–Hart（二次项固定为零）" : L"完整多项式") + L"；温度使用 K、电阻使用 Ω。");
+    if (source == 1)
+        p.processSteps.push_back(L"校准点分别拟合 A：x=ln(R)、y=1/T 和 B：x=1/T、y=ln(R)；分别用列缩放 QR 求最小二乘解。");
+    const auto &used = direction == 0 ? model.a : model.b;
+    double variable = direction == 0 ? std::log(r) : 1 / (t + 273.15);
+    p.processSteps.push_back(std::wstring(direction == 0 ? L"电阻 → 温度：1/T = ΣAᵢ[ln(R)]ⁱ；ln(R) = " : L"温度 → 电阻：ln(R) = ΣBᵢ(1/T)ⁱ；1/T = ") + p.processValue(variable) + L"；系数按升幂为：");
+    for (std::size_t i = 0; i < used.size(); ++i)
+        p.processSteps.push_back(std::wstring(direction == 0 ? L"A[" : L"B[") + std::to_wstring(i) + L"] = " + inputNumber(used[i]) + L"。");
+    double evaluated = polynomial(used, variable);
+    if (direction == 0)
+        p.processSteps.push_back(L"多项式结果 1/T = " + p.processValue(evaluated) + L" K⁻¹；温度 = 1/(1/T) − 273.15 = " + p.processValue(t) + L" °C。");
+    else
+        p.processSteps.push_back(L"多项式结果 ln(R) = " + p.processValue(evaluated) + L"；R = exp(ln R) = " + p.processValue(r) + L" Ω。");
+    if (direction == 0) {
+        p.processSteps.push_back(L"变化率使用温度 → 电阻的 B 系数；A、B 独立拟合或输入，可能不是精确的互逆函数。");
+        for (std::size_t i = 0; i < model.b.size(); ++i)
+            p.processSteps.push_back(L"B[" + std::to_wstring(i) + L"] = " + inputNumber(model.b[i]) + L"。");
+    }
+    const double kelvin = t + 273.15;
+    const double bResistance = model.resistance(t);
+    const double bDerivative = polynomialSlope(model.b, 1 / kelvin).second;
+    p.processSteps.push_back(L"令 x = 1/T，B′(x) = Σ i·B[i]·x^(i−1)；T = " + p.processValue(kelvin) + L" K，x = " + p.processValue(1 / kelvin) + L" K⁻¹，B′(x) = " + p.processValue(bDerivative) + L"，B 曲线电阻 R_B = " + p.processValue(bResistance) + L" Ω。");
+    p.processSteps.push_back(L"链式法则：dR/dt = −R_B × B′(1/T) / T² = −" + p.processValue(bResistance) + L" × " + p.processValue(bDerivative) + L" / " + p.processValue(kelvin) + L"² = " + p.processValue(slope) + L" Ω/°C；按显示温标换算后 = " + p.processValue(slope / unit.span()) + L" Ω/" + unit.symbol() + L"。");
     p.division("ntc", {lo, hi}, unit, L"Ω", [model](double t) { return model.resistance(t); });
 }
 } // 命名空间 toolbox

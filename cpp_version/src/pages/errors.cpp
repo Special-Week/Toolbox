@@ -27,7 +27,7 @@ static void sampleProcess(Page &p, const Values &values, const Statistics &s, bo
             p.processSteps.push_back(L"测量点 " + std::to_wstring(i + 1) + L"：残差 vᵢ = xᵢ − x̄ = " + inputNumber(values[i]) + L" − " + inputNumber(s.mean) + L" = " + p.processValue(s.residuals[i]) + L"。");
         }
     }
-    p.processSteps.push_back(L"样本标准差 s = √[Σvᵢ²/(n − 1)] = " + p.processValue(s.sd) + L"；程序使用补偿求和和 hypot 累积。");
+    p.processSteps.push_back(L"样本标准差 s = √[Σvᵢ²/(n − 1)] = " + p.processValue(s.sd) + (s.centered ? L"；程序使用中心化均值、补偿求和及 hypot 累积。" : L"；程序使用缩放均值、补偿求和及 hypot 累积。"));
 }
 static void uncertaintyComponentProcess(Page &p, const Component &component, const UncertaintyDetail &detail, const std::wstring &parent) {
     const auto path = parent.empty() ? component.name : parent + L" / " + component.name;
@@ -403,23 +403,25 @@ void renderErrors(Page &p) {
             std::string k = "pressure." + std::to_string(i);
             int source = p.select(k + ".unit", L"分量单位", names);
             bool relative = p.select(k + ".type", L"误差类型", {L"相对误差（量程百分比）", L"绝对误差"}) == 0;
-            double span = 1;
+            double span = 1, lo = 0, hi = 0;
             if (relative) {
-                double lo = p.number(k + ".low", L"量程下限", 0),
-                       hi = p.number(k + ".high", L"量程上限", 100);
+                lo = p.number(k + ".low", L"量程下限", 0);
+                hi = p.number(k + ".high", L"量程上限", 100);
                 p.check();
                 span = Range(lo, hi).span;
             }
             double error = p.number(k + ".error", relative ? L"误差 (%)" : L"绝对误差", .02);
             p.check();
-            contributions.push_back(
-                convert(Dimension::Pressure, error * (relative ? span / 100 : 1), source, target));
+            const double absoluteError = error * (relative ? span / 100 : 1);
+            contributions.push_back(convert(Dimension::Pressure, absoluteError, source, target));
             if (i) p.processSteps.push_back(L"");
             if (relative)
-                p.processSteps.push_back(L"分量 " + std::to_wstring(i + 1) + L"：量程跨度 = " + p.processValue(span) + L" " + names[source] + L"；绝对误差 = 相对误差 × 跨度 / 100 = " + inputNumber(error) + L" × " + p.processValue(span) + L" / 100 = " + p.processValue(error * span / 100) + L" " + names[source] + L"。");
+                p.processSteps.push_back(L"分量 " + std::to_wstring(i + 1) + L"：量程跨度 = 上限 − 下限 = " + inputNumber(hi) + L" − " + inputNumber(lo) + L" = " + p.processValue(span) + L" " + names[source] + L"；绝对误差 = 相对误差 × (跨度 / 100) = " + inputNumber(error) + L" × (" + p.processValue(span) + L" / 100) = " + p.processValue(absoluteError) + L" " + names[source] + L"。");
             else
                 p.processSteps.push_back(L"分量 " + std::to_wstring(i + 1) + L"：输入绝对误差 = " + inputNumber(error) + L" " + names[source] + L"。");
-            p.processSteps.push_back(L"统一单位：" + p.processValue(error * (relative ? span / 100 : 1)) + L" " + names[source] + L" × (" + inputNumber(list[source].factor) + L" / " + inputNumber(list[target].factor) + L") = " + p.processValue(contributions.back()) + L" " + names[target] + L"。");
+            p.processSteps.push_back(source == target
+                ? L"统一单位：分量单位与目标单位相同，直接使用 " + p.processValue(contributions.back()) + L" " + names[target] + L"。"
+                : L"统一单位：" + p.processValue(absoluteError) + L" " + names[source] + L" × (" + inputNumber(list[source].factor) + L" / " + inputNumber(list[target].factor) + L") = " + p.processValue(contributions.back()) + L" " + names[target] + L"。");
         }
     }
     double combined = rss(contributions), linear = 0, largest = 0;

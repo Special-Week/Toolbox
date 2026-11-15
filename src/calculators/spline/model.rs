@@ -150,6 +150,123 @@ impl UniformCubicSpline {
         }
     }
 
+    /// 说明实际使用的归一化基准和缩放因子。
+    pub(crate) fn normalization_steps(&self) -> Vec<String> {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        let last = self.points.last().expect("样条至少有两个型值点");
+        let (index, point) = self
+            .points
+            .iter()
+            .enumerate()
+            .max_by(|(_, a), (_, b)| {
+                (a.y - self.origin.y)
+                    .abs()
+                    .total_cmp(&(b.y - self.origin.y).abs())
+            })
+            .expect("样条至少有两个型值点");
+        let max_difference = (point.y - self.origin.y).abs();
+        let mut lines = vec![
+            format!(
+                "归一化基准为首个型值点 Q₀：x₀ = {}，y₀ = {}。",
+                n(self.origin.x),
+                n(self.origin.y)
+            ),
+            format!(
+                "横坐标缩放因子 sₓ = x末 − x₀ = {} − {} = {}。",
+                n(last.x),
+                n(self.origin.x),
+                c(self.scale.x)
+            ),
+        ];
+        lines.push(if max_difference == 0.0 {
+            "所有型值点的纵坐标都等于 y₀，maxᵢ|yᵢ − y₀| = 0；程序将 sᵧ 设为 1，避免除以零。".to_owned()
+        } else {
+            format!("纵坐标缩放因子 sᵧ = maxᵢ|yᵢ − y₀|；最大差值来自 Q{}：|{} − {}| = {}，所以 sᵧ = {}。", index, n(point.y), n(self.origin.y), c(max_difference), c(self.scale.y))
+        });
+        lines.push("各型值点归一化：Xᵢ = (xᵢ − x₀)/sₓ，Yᵢ = (yᵢ − y₀)/sᵧ；计算后按 y = y₀ + sᵧY 恢复纵坐标。".to_owned());
+        lines
+    }
+
+    /// 使用与 y_at_x 相同的分段和反算，展示预览点所用的归一化多项式。
+    pub(crate) fn process_at_x(&self, x: f64) -> Result<Vec<String>, String> {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        let insertion = self.points.partition_point(|point| point.x < x);
+        if let Some(point) = self.points.get(insertion)
+            && point.x == x
+        {
+            return Ok(vec![format!(
+                "x = {} 恰为 Q{} 的横坐标，直接返回原始 y = {}。",
+                n(x),
+                insertion,
+                n(point.y)
+            )]);
+        }
+        let target = (x - self.origin.x) / self.scale.x;
+        let (segment, lower, upper, branch) = if insertion == 0 || insertion == self.points.len() {
+            let right = insertion == self.points.len();
+            let segment = self.endpoint_polynomial(right);
+            let (lower, upper) = external_bracket(segment.x, target, right)?;
+            (
+                segment,
+                lower,
+                upper,
+                if right {
+                    "右端外推".to_owned()
+                } else {
+                    "左端外推".to_owned()
+                },
+            )
+        } else {
+            (
+                self.segments[insertion - 1],
+                0.0,
+                1.0,
+                format!("Q{}～Q{} 插值", insertion - 1, insertion),
+            )
+        };
+        let u = invert(segment.x, target, lower, upper)?;
+        let y = segment.y.value(u).mul_add(self.scale.y, self.origin.y);
+        Ok(vec![
+            format!(
+                "x = {}；{}；目标归一化横坐标 X = (x − x₀)/sₓ = ({} − {})/{} = {}。",
+                n(x),
+                branch,
+                n(x),
+                n(self.origin.x),
+                c(self.scale.x),
+                c(target)
+            ),
+            format!(
+                "X(u) = a + bu + cu² + du³；本段 x 系数 a、b、c、d = {}、{}、{}、{}；在 [{}，{}] 内用带括区间的 Newton 法反求，必要时二分，得到 u = {}。",
+                n(segment.x.a),
+                n(segment.x.b),
+                n(segment.x.c),
+                n(segment.x.d),
+                n(lower),
+                n(upper),
+                c(u)
+            ),
+            format!(
+                "Y(u) = a + bu + cu² + du³；本段 y 系数 a、b、c、d = {}、{}、{}、{}。",
+                n(segment.y.a),
+                n(segment.y.b),
+                n(segment.y.c),
+                n(segment.y.d)
+            ),
+            format!(
+                "恢复坐标 y = y₀ + sᵧY(u) = {} + {} × {} = {}；多项式及恢复坐标使用融合乘加。",
+                n(self.origin.y),
+                c(self.scale.y),
+                c(segment.y.value(u)),
+                c(y)
+            ),
+        ])
+    }
+
     /// 将端点平移为局部参数零点，保留自然条件（二阶导数为零）下的端点三次式。
     fn endpoint_polynomial(&self, right: bool) -> Segment {
         let index = if right { self.segments.len() - 1 } else { 0 };
@@ -290,13 +407,13 @@ fn invert(polynomial: Cubic, target: f64, mut lower: f64, mut upper: f64) -> Res
     if !parameter.is_finite() || parameter <= lower || parameter >= upper {
         parameter = lower + (upper - lower) / 2.0;
     }
-    let tolerance = 8.0 * f64::EPSILON * target.abs().max(1.0);
-    for _ in 0..80 {
+    // 横坐标残差小并不代表参数已收敛：在水平切线附近尤其如此。
+    for _ in 0..1200 {
         let error = polynomial.value(parameter) - target;
         if !error.is_finite() {
             break;
         }
-        if error.abs() <= tolerance {
+        if error == 0.0 {
             return Ok(parameter);
         }
         if error < 0.0 {
@@ -306,10 +423,25 @@ fn invert(polynomial: Cubic, target: f64, mut lower: f64, mut upper: f64) -> Res
         }
         let derivative = polynomial.derivative(parameter);
         let candidate = parameter - error / derivative;
+        if candidate == parameter {
+            return Ok(parameter);
+        }
+        let midpoint = lower + (upper - lower) / 2.0;
+        if midpoint == lower || midpoint == upper {
+            return Ok(
+                if (polynomial.value(lower) - target).abs()
+                    <= (polynomial.value(upper) - target).abs()
+                {
+                    lower
+                } else {
+                    upper
+                },
+            );
+        }
         parameter = if candidate.is_finite() && candidate > lower && candidate < upper {
             candidate
         } else {
-            lower + (upper - lower) / 2.0
+            midpoint
         };
     }
     Err("反求样条参数未收敛，请检查 x 间距或外推范围".to_owned())
@@ -350,5 +482,53 @@ pub(crate) fn sample_x(minimum: f64, maximum: f64, step: f64, count: usize, inde
         maximum
     } else {
         (index as f64).mul_add(step, minimum)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn inversion_resolves_flat_endpoint_at_small_scales() {
+        // 此样条第一段及左端外推满足 x = y³，可独立验证反算。
+        let points = [
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 1.0, y: 1.0 },
+            Point { x: 6.0, y: 2.0 },
+        ];
+        let spline = UniformCubicSpline::interpolate(&points).unwrap();
+        for x in [-1e-15_f64, 1e-300, 1e-15, 1e-12, 1e-9, 0.125, 1.0] {
+            let expected = x.cbrt();
+            let actual = spline.y_at_x(x).unwrap();
+            assert!(
+                (actual - expected).abs() <= expected.abs() * 1e-11,
+                "x={x:e}, actual={actual:e}, expected={expected:e}"
+            );
+        }
+    }
+
+    #[test]
+    fn inversion_reconstructs_many_points_on_each_segment() {
+        let points = [
+            Point { x: -2.0, y: 4.0 },
+            Point { x: -1.0, y: 1.0 },
+            Point { x: 0.2, y: -3.0 },
+            Point { x: 1.1, y: 0.0 },
+            Point { x: 2.0, y: 5.0 },
+        ];
+        let spline = UniformCubicSpline::interpolate(&points).unwrap();
+        for (i, segment) in spline.segments.iter().enumerate() {
+            for j in 0..=1000 {
+                let u = j as f64 / 1000.0;
+                let x = segment.x.value(u).mul_add(spline.scale.x, spline.origin.x);
+                let expected = segment.y.value(u).mul_add(spline.scale.y, spline.origin.y);
+                let actual = spline.y_at_x(x).unwrap();
+                assert!(
+                    (actual - expected).abs() <= 1e-10 * expected.abs().max(1.0),
+                    "segment={i}, u={u}, x={x}, actual={actual}, expected={expected}"
+                );
+            }
+        }
     }
 }

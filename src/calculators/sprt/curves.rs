@@ -50,10 +50,16 @@ const A: &[f64] = &[
     0.11868632,
     -0.05248134,
 ];
-pub(crate) fn reference(t: f64) -> f64 {
-    if t >= 0.0 {
-        polynomial(C, (t - 481.0) / 481.0)
+pub(crate) fn reference_form(t: f64) -> (&'static [f64], f64, bool) {
+    if t >= super::model::TRIPLE_POINT_C {
+        (C, (t - 481.0) / 481.0, false)
     } else {
-        polynomial(A, (((t + 273.15) / 273.16).ln() + 1.5) / 1.5).exp()
+        (A, (((t + 273.15) / 273.16).ln() + 1.5) / 1.5, true)
     }
+}
+
+pub(crate) fn reference(t: f64) -> f64 {
+    let (coefficients, x, exponential) = reference_form(t);
+    let value = polynomial(coefficients, x);
+    if exponential { value.exp() } else { value }
 }

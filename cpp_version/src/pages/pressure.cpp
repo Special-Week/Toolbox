@@ -215,7 +215,11 @@ void renderPressure(Page &p) {
             modelPressure *= lapse == 0 ? std::exp(-9.80665 * (end - base) / (287.05287 * temperature)) : std::pow((temperature + lapse * (end - base)) / temperature, -9.80665 / (287.05287 * lapse));
             p.processSteps.push_back(L"");
             p.processSteps.push_back(L"层内高度 " + inputNumber(base) + L"～" + p.processValue(end) + L" m，起始温度 T₀ = " + p.processValue(temperature) + L" K，温度梯度 L = " + inputNumber(lapse) + L" K/m，起始气压 p₀ = " + p.processValue(startPressure) + L" Pa。");
-            p.processSteps.push_back(std::wstring(lapse == 0 ? L"恒温层 p = p₀ × exp[−g(h−h₀)/(R T₀)] = " : L"梯度层 p = p₀ × [(T₀+L(h−h₀))/T₀]^(−g/(R L)) = ") + p.processValue(modelPressure) + L" Pa；g = 9.80665，R = 287.05287。");
+            if (lapse == 0) {
+                p.processSteps.push_back(L"恒温层 p = p₀ × exp[−g(h−h₀)/(R T₀)] = " + p.processValue(startPressure) + L" × exp[−9.80665 × (" + p.processValue(end) + L"−" + inputNumber(base) + L") / (287.05287 × " + p.processValue(temperature) + L")] = " + p.processValue(modelPressure) + L" Pa；g = 9.80665，R = 287.05287。");
+            } else {
+                p.processSteps.push_back(L"梯度层 p = p₀ × [(T₀+L(h−h₀))/T₀]^(−g/(R L)) = " + p.processValue(startPressure) + L" × [(" + p.processValue(temperature) + L" + " + inputNumber(lapse) + L" × (" + p.processValue(end) + L"−" + inputNumber(base) + L")) / " + p.processValue(temperature) + L"]^(−9.80665 / (287.05287 × " + inputNumber(lapse) + L")) = " + p.processValue(modelPressure) + L" Pa；g = 9.80665，R = 287.05287。");
+            }
             if (h <= layer[0]) break;
             base = layer[0];
         }

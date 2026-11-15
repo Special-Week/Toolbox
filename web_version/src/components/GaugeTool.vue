@@ -6,6 +6,7 @@ import type { State, Tool } from "../types";
 import ResultTable from "./ResultTable.vue";
 import NumericInput from "./NumericInput.vue";
 import SpecOptions from "./SpecOptions.vue";
+import CalculationProcess from "./CalculationProcess.vue";
 import { download } from "../format";
 interface Option {
   value: string;
@@ -20,6 +21,7 @@ interface Field {
   suggestions?: Option[];
 }
 interface Report {
+  process: string[];
   title: string;
   metrics: { label: string; value: string }[];
   tables: { title: string; headings: string[]; rows: string[][] }[];
@@ -230,6 +232,7 @@ async function copy() {
           :rows="table.rows"
         />
       </section>
+      <CalculationProcess :lines="page.report.process" />
     </template>
   </div>
 </template>

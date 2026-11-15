@@ -2,6 +2,7 @@
 use crate::calculators::{calibration::TemperatureUnit, common::*};
 use crate::{app::ToolboxApp, catalog::ToolDef};
 use eframe::egui;
+mod process;
 pub(crate) mod website;
 impl ToolboxApp {
     pub(crate) fn render_humidity(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -74,20 +75,15 @@ impl ToolboxApp {
             if known == 1 || known == 2 {
                 v = unit.celsius(v);
             }
-            Ok::<_, String>((
-                website::calculate(
-                    t,
-                    self.number(tool, "pressure", "101.325")? * 1000.0,
-                    known,
-                    v,
-                )?,
-                unit,
-            ))
+            let pressure = self.number(tool, "pressure", "101.325")? * 1000.0;
+            let result = website::calculate(t, pressure, known, v)?;
+            let steps = process::steps(t, pressure, known, v, unit, &result)?;
+            Ok::<_, String>((result, unit, steps))
         })
         .inner;
         match result {
             Err(e) => render_error_message(ui, &e),
-            Ok((r, u)) => {
+            Ok((r, u, steps)) => {
                 let temp = |t: Option<f64>| {
                     t.map(|t| format!("{} {}", format_number(u.display(t)), u.symbol()))
                         .unwrap_or("无有限值（干燥空气）".into())
@@ -118,6 +114,7 @@ impl ToolboxApp {
                     ("湿球温度", temp(Some(r.wet))),
                 ]);
                 render_metrics(ui, "换算结果", &metrics);
+                calculation_process(ui, "humidity_process", &steps);
             }
         }
         info_note(ui, tool.kind);

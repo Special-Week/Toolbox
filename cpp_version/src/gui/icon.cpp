@@ -9,7 +9,7 @@ ID2D1Bitmap *App::loadDynamicMathBitmap(const std::wstring &formula) {
     if (!target_) return nullptr;
     const auto existing = dynamicMathBitmaps_.find(formula);
     if (existing != dynamicMathBitmaps_.end()) return existing->second;
-    const auto image = renderMath(formula);
+    const auto image = renderMath(formula, mathRenderScale(), mathPixelScale());
     if (!image) return nullptr;
     ID2D1Bitmap *bitmap = nullptr;
     const auto properties = D2D1::BitmapProperties(

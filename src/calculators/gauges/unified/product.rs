@@ -29,7 +29,7 @@ impl ThreadClass {
     }
 
     /// 在 2A 基础公差上换算；采用计算值，不先截成六位英寸小数。
-    fn tolerance_factor(self) -> f64 {
+    pub(super) fn tolerance_factor(self) -> f64 {
         match self {
             Self::OneA => 1.5,
             Self::TwoA => 1.,

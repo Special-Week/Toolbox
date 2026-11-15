@@ -48,6 +48,47 @@ pub(super) fn calculate(input: &Input<'_>) -> Result<Report, String> {
     out.metric("工件容隙 (mm)", product.allowance_mm);
     out.metric("旋合长度 Le (mm)", product.engagement_mm);
     geometry(&mut out, d, p, d2, d1, 60., 1);
+    {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        let pitch_in = 1.0 / input.tpi;
+        let engagement_in = product.engagement_mm / INCH;
+        out.trace(format!("规格 {}：公称直径 = {} inch × 25.4 = {} mm；每英寸牙数 = {}，螺距 = 25.4/TPI = {} mm（{} inch）。", input.size, n(d_in), c(d), n(input.tpi), c(p), c(pitch_in)));
+        out.trace(format!(
+            "基本中径 = [D(inch) − 3√3P(inch)/8] × 25.4 = {} mm；基本小径 = D(mm) − 5√3P(mm)/8 = {} mm。",
+            c(d2),
+            c(d1)
+        ));
+        out.trace(format!("系列 {}、等级 {}：旋合长度 Le = {} inch；D、Le、P 均以 inch 代入，基础中径公差 T₂A = [0.0015·∛D + 0.0015·√Le + 0.015·P^(2/3)] inch，乘以 25.4 后为 {} mm。", series.as_deref().unwrap_or("非标"), input.class, c(engagement_in), c(product.base_tolerance_mm)));
+        out.trace(format!("代入 T₂A = [0.0015 × ∛{} + 0.0015 × √{} + 0.015 × {}^(2/3)] × 25.4 = {} mm；等级公差 = T₂A × 等级系数 = {} × {} = {} mm。", n(d_in), c(engagement_in), c(pitch_in), c(product.base_tolerance_mm), c(product.base_tolerance_mm), n(class.tolerance_factor()), c(product.tolerance_mm)));
+        out.trace(format!(
+            "容隙 = 基础公差 × {} = {} mm；{}。",
+            if matches!(input.class, "1A" | "2A") {
+                "0.3"
+            } else {
+                "0"
+            },
+            c(product.allowance_mm),
+            if class.external() {
+                "外螺纹上限 = 基本中径 − 容隙，下限 = 上限 − 等级公差"
+            } else {
+                "内螺纹下限 = 基本中径，上限 = 下限 + 等级公差"
+            }
+        ));
+        out.trace(format!(
+            "所选等级公差 = {} mm；容隙 = {} mm；工件中径上下限 = {}～{} mm。{}",
+            c(product.tolerance_mm),
+            c(product.allowance_mm),
+            c(lo),
+            c(hi),
+            if class.external() {
+                "外螺纹上限 = 基本中径 − 容隙，下限 = 上限 − 公差。"
+            } else {
+                "内螺纹下限 = 基本中径，上限 = 下限 + 公差。"
+            }
+        ));
+    }
     if class.external() {
         out.metric("基本外螺纹小径 (mm)", root);
     }
@@ -70,6 +111,11 @@ pub(super) fn calculate(input: &Input<'_>) -> Result<Report, String> {
     };
     let ta = optional_mm(x, "顶径公差");
     let tw = optional_mm(w, "中径公差");
+    {
+        use crate::calculators::common::format_process_computed as c;
+        out.trace(format!("量规中径制造公差 U = {} mm；顶径公差 Ta = {} mm、校对中径公差 = {} mm（未收录时为 —），均按对应规格查表。", c(u), c(ta), c(tw)));
+        out.trace(if class.external() { format!("外螺纹环规：通端中径 = 工件上限 − U～工件上限 = {}～{} mm；止端 = 工件下限～工件下限 + U = {}～{} mm。", c(hi-u), c(hi), c(lo), c(lo+u)) } else { format!("内螺纹塞规：通端中径 = 工件下限～工件下限 + U = {}～{} mm；止端 = 工件上限 − U～工件上限 = {}～{} mm。", c(lo), c(lo+u), c(hi-u), c(hi)) });
+    }
     out.metric("中径制造公差 U (mm)", u);
     out.metric("顶径公差 Ta · 参考 (mm)", ta);
     out.note("工作量规中径按 U 计算；大径、小径及校对尺寸供参考。");
@@ -83,6 +129,7 @@ pub(super) fn calculate(input: &Input<'_>) -> Result<Report, String> {
         let ng_major = ng.pd[1] + 0.2 * p + u / 2.;
         ng.major = [ng_major - ta, ng_major];
         ng.minor_max = d1;
+        super::trace::unified_plugs(&mut out, &go, &ng, d, d1, lo, hi, u, ta, p);
         out.tables
             .push(gauge_table("工作塞规 · 检内螺纹", &[go, ng]));
         out.show_inches();
@@ -115,6 +162,7 @@ pub(super) fn calculate(input: &Input<'_>) -> Result<Report, String> {
             g
         })
         .collect();
+    super::trace::unified_rings(&mut out, &rg, &rn, &cal, lo, hi, major, root, u, tw, p);
     if !valid(tw) {
         out.note("该规格未收录校对中径公差，相应界限不计算。");
     }

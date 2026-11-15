@@ -288,7 +288,7 @@ pub(crate) fn page(kind: GaugeKind, state: Value, changed: &str) -> Value {
         Ok(r) => (
             json!({"title":r.title,"metrics":r.metrics.iter().map(|(k,c)|json!({"label":k,"value":c.display})).collect::<Vec<_>>(),
             "tables":r.tables.iter().map(|t|json!({"title":t.title,"headings":t.headings,"rows":t.rows.iter().map(|r|r.iter().map(|c|&c.display).collect::<Vec<_>>()).collect::<Vec<_>>()})).collect::<Vec<_>>(),
-            "notes":r.notes,"text":r.text(explanation,&convention)}),
+            "notes":r.notes,"process":r.process,"text":r.text(explanation,&convention)}),
             String::new(),
         ),
         Err(e) => (Value::Null, e),

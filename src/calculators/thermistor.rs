@@ -13,6 +13,14 @@ pub(crate) struct BetaThermistor {
 }
 
 impl BetaThermistor {
+    pub(crate) fn inverse_temperature(&self, resistance: f64) -> f64 {
+        1.0 / self.t0 + (resistance.ln() - self.r0.ln()) / self.beta
+    }
+
+    pub(crate) fn log_resistance(&self, kelvin: f64) -> f64 {
+        self.r0.ln() + self.beta * (1.0 / kelvin - 1.0 / self.t0)
+    }
+
     pub(crate) fn new(r0: f64, t0_c: f64, beta: f64) -> Result<Self, String> {
         let t0 = t0_c + 273.15;
         finite(&[r0, t0, beta])?;
@@ -27,7 +35,7 @@ impl BetaThermistor {
             return Err("电阻必须是大于 0 的有限数字".to_owned());
         }
         // 两个对数相减可避免直接计算 R/R0 时上溢或下溢。
-        let inverse = 1.0 / self.t0 + (resistance.ln() - self.r0.ln()) / self.beta;
+        let inverse = self.inverse_temperature(resistance);
         if inverse <= 0.0 {
             return Err("电阻对应的温度超出 β 模型范围".to_owned());
         }
@@ -41,7 +49,7 @@ impl BetaThermistor {
         if !kelvin.is_finite() || kelvin <= 0.0 {
             return Err("温度必须高于绝对零度".to_owned());
         }
-        let resistance = (self.r0.ln() + self.beta * (1.0 / kelvin - 1.0 / self.t0)).exp();
+        let resistance = self.log_resistance(kelvin).exp();
         finite(&[resistance])?;
         if resistance <= 0.0 {
             return Err("电阻低于双精度可表示范围".to_owned());

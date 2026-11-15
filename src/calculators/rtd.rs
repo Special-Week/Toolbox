@@ -156,13 +156,14 @@ impl ToolboxApp {
                 (model.temperature(r)?, r)
             };
             let slope = model.slope(temperature)?;
-            Ok::<_, String>((model, temperature, resistance, slope, unit))
+            Ok::<_, String>((model, temperature, resistance, slope, unit, direction))
         })
         .inner;
 
+        let mut process = None;
         ui.add_space(13.0);
         match parameters {
-            Ok((model, temperature, resistance, slope, unit)) => {
+            Ok((model, temperature, resistance, slope, unit, direction)) => {
                 render_metrics(
                     ui,
                     "换算结果",
@@ -187,6 +188,140 @@ impl ToolboxApp {
                         ),
                     ],
                 );
+                let mut steps = vec![
+                    format!(
+                        "分度号 {}；R₀ = {} Ω；曲线范围 {}～{} °C。",
+                        model.graduation.name,
+                        format_process_number(model.r0),
+                        format_process_number(model.graduation.min),
+                        format_process_number(model.graduation.max)
+                    ),
+                    format!(
+                        "当前温度 = {} °C = {} {}；电阻 = {} Ω。",
+                        if direction == 0 {
+                            format_process_number(temperature)
+                        } else {
+                            format_process_computed(temperature)
+                        },
+                        if direction == 0 {
+                            format_process_number(unit.display_temperature(temperature))
+                        } else {
+                            format_process_computed(unit.display_temperature(temperature))
+                        },
+                        unit.symbol(),
+                        if direction == 0 {
+                            format_process_computed(resistance)
+                        } else {
+                            format_process_number(resistance)
+                        }
+                    ),
+                ];
+                steps.push(temperature_conversion_note(unit.symbol()).to_owned());
+                if let Some([a, b, c]) = model.cvd_coefficients() {
+                    steps.push(format!(
+                        "CVD 系数 A = {}，B = {}，C = {}。",
+                        format_process_number(a),
+                        format_process_number(b),
+                        format_process_number(c)
+                    ));
+                    steps.push(
+                        if temperature < 0.0 {
+                            "R/R₀ = 1 + A·t + B·t² + C·(t−100)·t³，t 使用 °C。"
+                        } else {
+                            "R/R₀ = 1 + A·t + B·t²；非负温度不使用 C 项，t 使用 °C。"
+                        }
+                        .to_owned(),
+                    );
+                    steps.push(format!(
+                        "代入 t = {} °C、R₀ = {} Ω；按上述系数计算 R₀ × f(t)。",
+                        if direction == 0 {
+                            format_process_number(temperature)
+                        } else {
+                            format_process_computed(temperature)
+                        },
+                        format_process_number(model.r0)
+                    ));
+                    if temperature < 0.0 {
+                        steps.push(format!("R = {} × [1 + {}×({}) + {}×({})² + {}×({}−100)×({})³] Ω（程序按展开后的多项式求值）。", format_process_number(model.r0), format_process_number(a), if direction == 0 { format_process_number(temperature) } else { format_process_computed(temperature) }, format_process_number(b), if direction == 0 { format_process_number(temperature) } else { format_process_computed(temperature) }, format_process_number(c), if direction == 0 { format_process_number(temperature) } else { format_process_computed(temperature) }, if direction == 0 { format_process_number(temperature) } else { format_process_computed(temperature) }));
+                    } else {
+                        steps.push(format!(
+                            "R = {} × [1 + {}×({}) + {}×({})²] Ω。",
+                            format_process_number(model.r0),
+                            format_process_number(a),
+                            if direction == 0 {
+                                format_process_number(temperature)
+                            } else {
+                                format_process_computed(temperature)
+                            },
+                            format_process_number(b),
+                            if direction == 0 {
+                                format_process_number(temperature)
+                            } else {
+                                format_process_computed(temperature)
+                            }
+                        ));
+                    }
+                } else if let Some(form) = model.polynomial_form(temperature) {
+                    steps.push(format!("分段参考曲线：{}。", form.segment));
+                    if let Some((low, high)) = form.bounds {
+                        steps.push(format!(
+                            "当前分段边界 {}～{} °C；连接点按程序先匹配的分段处理。",
+                            format_process_number(low),
+                            format_process_number(high)
+                        ));
+                    }
+                    steps.push(format!(
+                        "x = t + {} = {}；R/R₀ = {} × Σ c[i]·xⁱ，t 用 °C。",
+                        format_process_number(form.shift),
+                        format_process_computed(form.argument),
+                        format_process_number(form.scale)
+                    ));
+                    steps.extend(
+                        form.coefficients()
+                            .iter()
+                            .enumerate()
+                            .map(|(i, c)| format!("c[{i}] = {}", format_process_number(*c))),
+                    );
+                    steps.push(format!(
+                        "多项式按秦九韶法得到 R/R₀ = {}；R = R₀ × (R/R₀)。",
+                        format_process_computed(form.value_and_slope().0)
+                    ));
+                }
+                if let Ok(calculated) = model.resistance(temperature) {
+                    steps.push(format!(
+                        "曲线正算电阻 = {} Ω{}。",
+                        format_process_computed(calculated),
+                        if direction == 1 {
+                            "（反算校验）"
+                        } else {
+                            ""
+                        }
+                    ));
+                }
+                steps.push(format!(
+                    "电阻比 R/R₀ = {} / {} = {}。",
+                    if direction == 0 {
+                        format_process_computed(resistance)
+                    } else {
+                        format_process_number(resistance)
+                    },
+                    format_process_number(model.r0),
+                    format_process_computed(resistance / model.r0)
+                ));
+                steps.push(
+                    if direction == 0 {
+                        "将摄氏温度代入所选曲线，再乘以 R₀ 得到电阻。"
+                    } else {
+                        "在所选曲线有效温区内，以输入电阻通过有界二分法反算温度。"
+                    }
+                    .to_owned(),
+                );
+                steps.push(format!(
+                    "曲线解析变化率 dR/dt = {} Ω/{}。",
+                    format_process_computed(slope / unit.span_factor()),
+                    unit.symbol()
+                ));
+                process = Some(steps);
                 ui.add_space(13.0);
                 self.render_rtd_tolerances(ui, tool, &model, temperature, unit);
                 let table_unit = crate::calculators::calibration::TemperatureUnit(match unit {
@@ -207,6 +342,9 @@ impl ToolboxApp {
             Err(error) => {
                 render_error_message(ui, &error);
             }
+        }
+        if let Some(lines) = &process {
+            calculation_process(ui, "industrial_rtd_process", lines);
         }
         ui.add_space(12.0);
         info_note(ui, tool.kind);

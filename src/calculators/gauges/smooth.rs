@@ -100,6 +100,86 @@ pub(super) fn calculate(d: f64, mode: usize, letter: &str, grade: usize) -> Resu
         "轴用环规"
     };
     let mut out = Report::new(format!("光滑量规 · {label} · {d} {letter}{grade}"));
+    {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        out.trace(format!("基本尺寸 D = {} mm；所选 {label}，公差带 {letter}{grade}。按基本尺寸所在档查表：IT = {} μm，T1 = {} μm，Z1 = {} μm；除以 1000 得 IT = {} mm，T1 = {} mm，Z1 = {} mm。", n(d), n(itu), n(t1u), n(z1u), c(it), c(t1), c(z1)));
+        out.trace(if symmetric {
+            format!(
+                "对称公差带：下偏差 = −IT/2 = −{}/2 = {} mm，上偏差 = +IT/2 = {}/2 = {} mm。",
+                c(it),
+                c(ei),
+                c(it),
+                c(es)
+            )
+        } else if hole && "ABCDEFGH".contains(letter) {
+            format!(
+                "查表基本偏差 EI = {} μm = {} mm；上偏差 ES = EI + IT = {} + {} = {} mm。",
+                n(v),
+                c(ei),
+                c(ei),
+                c(it),
+                c(es)
+            )
+        } else if hole {
+            format!(
+                "查表基本偏差 ES = {} μm = {} mm；下偏差 EI = ES − IT = {} − {} = {} mm。",
+                n(v),
+                c(es),
+                c(es),
+                c(it),
+                c(ei)
+            )
+        } else if "abcdefgh".contains(letter) {
+            format!(
+                "查表基本偏差 es = {} μm = {} mm；下偏差 ei = es − IT = {} − {} = {} mm。",
+                n(v),
+                c(es),
+                c(es),
+                c(it),
+                c(ei)
+            )
+        } else {
+            format!(
+                "查表基本偏差 ei = {} μm = {} mm；上偏差 es = ei + IT = {} + {} = {} mm。",
+                n(v),
+                c(ei),
+                c(ei),
+                c(it),
+                c(es)
+            )
+        });
+        out.trace(format!(
+            "工件尺寸下限 = D + 下偏差 = {} + {} = {} mm；上限 = D + 上偏差 = {} + {} = {} mm。",
+            n(d),
+            c(ei),
+            c(d + ei),
+            n(d),
+            c(es),
+            c(d + es)
+        ));
+        out.trace(String::new());
+        if hole {
+            out.trace(format!("孔用通端上下限 = D + EI + Z1 ± T1/2 = {} + {} + {} ± {}/2 = {}～{} mm；磨损极限 = D + EI = {} mm。", n(d), c(ei), c(z1), c(t1), c(go[0]), c(go[1]), c(wear)));
+            out.trace(format!(
+                "孔用止端下限 = D + ES − T1 = {} + {} − {} = {} mm；上限 = D + ES = {} + {} = {} mm。",
+                n(d), c(es), c(t1),
+                c(ng[0]),
+                n(d), c(es),
+                c(ng[1])
+            ));
+        } else {
+            out.trace(format!("轴用通端上下限 = D + es − Z1 ± T1/2 = {} + {} − {} ± {}/2 = {}～{} mm；磨损极限 = D + es = {} mm。", n(d), c(es), c(z1), c(t1), c(go[0]), c(go[1]), c(wear)));
+            out.trace(format!(
+                "轴用止端下限 = D + ei = {} + {} = {} mm；上限 = D + ei + T1 = {} + {} + {} = {} mm。",
+                n(d), c(ei),
+                c(ng[0]),
+                n(d), c(ei), c(t1),
+                c(ng[1])
+            ));
+        }
+    }
     out.parameter("基本尺寸 D (mm)", d);
     out.metric("工件公差带", format!("{letter}{grade}"));
     out.metric("工件公差 IT (μm)", itu);

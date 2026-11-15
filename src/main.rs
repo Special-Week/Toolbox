@@ -26,6 +26,7 @@ fn main() -> eframe::Result<()> {
     // 发布版在 Windows 上使用 GUI 子系统，启动时不额外弹出控制台窗口。
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
+            .with_title(concat!("工具箱 · 桌面版 v", env!("CARGO_PKG_VERSION")))
             .with_icon(icon::data().clone())
             .with_inner_size([1220.0, 820.0])
             .with_min_inner_size([620.0, 520.0]),

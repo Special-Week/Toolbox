@@ -2,7 +2,7 @@
 use crate::calculators::numerics::finite;
 
 // c2 = h*c/k，采用 SI 精确定义常数，单位为 µm·K。
-const C2: f64 = 6.62607015e-34 * 299792458.0 / 1.380649e-23 * 1e6;
+pub(super) const C2: f64 = 6.62607015e-34 * 299792458.0 / 1.380649e-23 * 1e6;
 
 pub(crate) enum Response {
     Single(f64),
@@ -41,7 +41,7 @@ impl Spectrum {
 
     /// 对数域累加光谱信号，避免低温短波长时直接计算指数或微小辐射而溢出/下溢。
     /// 比较与反算中共同的辐射常数可约去，保留 λ⁻⁵ 和响应积分权重即可。
-    fn log_radiance(&self, kelvin: f64) -> f64 {
+    pub(super) fn log_radiance(&self, kelvin: f64) -> f64 {
         if kelvin <= 0.0 {
             return f64::NEG_INFINITY;
         }

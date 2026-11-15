@@ -20,6 +20,7 @@ impl ToolboxApp {
             return;
         }
         let mut table = None;
+        let mut process = None;
         let result = panel(ui, |ui| {
             let sh = self.select_index(
                 ui,
@@ -46,6 +47,7 @@ impl ToolboxApp {
                 0,
             );
             let mut residuals = Vec::new();
+            let mut fitted_points = Vec::new();
             let model = if source == 0 {
                 self.read_thermistor_coefficients(ui, tool, order, sh)?
             } else {
@@ -94,13 +96,14 @@ impl ToolboxApp {
                         format!("{} °C", format_number(t - model.temperature(*r)?)),
                     ));
                 }
+                fitted_points = points;
                 model
             };
             if source == 1 {
                 let mut coefficients = Vec::new();
                 for (name, values) in [("A", &model.a), ("B", &model.b)] {
                     for (i, coefficient) in values.iter().enumerate() {
-                        coefficients.push((format!("{name}[{i}]"), format_number(*coefficient)));
+                        coefficients.push((format!("{name}[{i}]"), format_process_number(*coefficient)));
                     }
                 }
                 ui.collapsing("拟合系数与校准点残差", |ui| {
@@ -167,7 +170,9 @@ impl ToolboxApp {
                 let t = unit.celsius(input);
                 (t, model.resistance(t)?)
             };
-            let slope = (model.resistance(t + 1.0)? - model.resistance(t - 1.0)?) / 2.0;
+            let upper_resistance = model.resistance(t + 1.0)?;
+            let lower_resistance = model.resistance(t - 1.0)?;
+            let slope = (upper_resistance - lower_resistance) / 2.0;
             self.input(
                 ui,
                 tool,
@@ -189,6 +194,88 @@ impl ToolboxApp {
             if min >= max || t < min || t > max {
                 return Err("温度须处于所填校准温区内，温区下限须小于上限".into());
             }
+            let mut steps = vec![
+                format!(
+                    "{} 阶{}；{}；校准温区 {}～{} °C。",
+                    order,
+                    if sh {
+                        " Steinhart–Hart 形式（二次项固定为零）"
+                    } else {
+                        "完整多项式"
+                    },
+                    if source == 0 {
+                        "手动输入系数"
+                    } else {
+                        "校准点最小二乘拟合系数"
+                    },
+                    format_process_number(min),
+                    format_process_number(max)
+                ),
+                format!(
+                    "温度 = {} °C = {} K；电阻 R = {} Ω。",
+                    if direction == 0 { format_process_computed(t) } else { format_process_number(t) },
+                    format_process_computed(t + 273.15),
+                    if direction == 0 { format_process_number(r) } else { format_process_computed(r) }
+                ),
+            ];
+            steps.push(temperature_conversion_note(unit.symbol()).to_owned());
+            if source == 1 {
+                steps.push("拟合 A 时使用 x=ln(R)、y=1/T；拟合 B 时使用 x=1/T、y=ln(R)。分别最小化各自的平方残差，T 用 K、R 用 Ω；采用列缩放与 QR 求解。".to_owned());
+                if sh { steps.push("拟合时二次项系数固定为 0，不作为未知量。".to_owned()); }
+                for (i, (point_t, point_r)) in fitted_points.iter().enumerate() {
+                    steps.push(String::new());
+                    steps.push(format!("校准点 {}：t = {} °C，R = {} Ω，ln(R) = {}，1/T = {} K⁻¹。", i + 1, format_process_number(*point_t), format_process_number(*point_r), format_process_computed(point_r.ln()), format_process_computed(1.0 / (*point_t + 273.15))));
+                }
+            }
+            let (prefix, coefficients, x) = if direction == 0 {
+                steps.push("电阻 → 温度：1/T = Σ A[i]·ln(R)ⁱ；T 用 K，R 用 Ω。".to_owned());
+                ("A", &model.a, r.ln())
+            } else {
+                steps.push("温度 → 电阻：ln(R) = Σ B[i]·(1/T)ⁱ；T 用 K，R 用 Ω。".to_owned());
+                ("B", &model.b, 1.0 / (t + 273.15))
+            };
+            steps.extend(
+                coefficients
+                    .iter()
+                    .enumerate()
+                    .map(|(i, value)| format!("{prefix}[{i}] = {}", format_process_number(*value))),
+            );
+            let polynomial = crate::calculators::calibration::polynomial(coefficients, x);
+            if direction == 0 {
+                steps.push(format!(
+                    "ln(R) = {}；多项式得到 1/T = {} K⁻¹，反算温度 = {} {}。",
+                    format_process_computed(x),
+                    format_process_computed(polynomial),
+                    format_process_computed(unit.display(t)),
+                    unit.symbol()
+                ));
+            } else {
+                steps.push(format!(
+                    "1/T = {} K⁻¹；多项式得到 ln(R) = {}，取指数得到 R = {} Ω。",
+                    format_process_computed(x),
+                    format_process_computed(polynomial),
+                    format_process_computed(r)
+                ));
+            }
+            steps.push("电阻变化率使用温度 → 电阻的 B 系数曲线；A、B 独立拟合或输入，可能不是精确的互逆函数。".to_owned());
+            if direction == 0 {
+                steps.extend(model.b.iter().enumerate().map(|(i, value)| format!("变化率使用 B[{i}] = {}", format_process_number(*value))));
+            }
+            if let Ok(at_temperature) = model.resistance(t) {
+                steps.push(format!("B 曲线在当前温度的电阻 = {} Ω。", format_process_computed(at_temperature)));
+            }
+            steps.push(format!(
+                "B 曲线采用以 t 为中心、间隔 1 °C 的差分：dR/dt ≈ [R(t+1)−R(t−1)]/2 = ({} − {}) / 2 = {} Ω/°C；按显示温标换算后 = {} Ω/{}。",
+                format_process_computed(upper_resistance),
+                format_process_computed(lower_resistance),
+                format_process_computed(slope),
+                format_process_computed(slope / unit.span()),
+                unit.symbol()
+            ));
+            if t - 1.0 < min || t + 1.0 > max {
+                steps.push("差分点超出所填校准温区；此变化率包含温区外的曲线外推。".to_owned());
+            }
+            process = Some(steps);
             table = Some((model, unit, min, max));
             Ok(vec![
                 (
@@ -206,6 +293,9 @@ impl ToolboxApp {
         show_result_or_error(ui, "换算结果", result);
         if let Some((m, u, min, max)) = table {
             self.render_division_table(ui, tool, "ntc", (min, max), u, "Ω", |t| m.resistance(t));
+        }
+        if let Some(lines) = &process {
+            calculation_process(ui, "thermistor_polynomial_process", lines);
         }
         self.calculation_note(ui, tool);
     }

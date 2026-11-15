@@ -34,6 +34,153 @@ pub fn catalog_json() -> String {
     json!({"tools":tools,"rtd":sensors::rtd_catalog(),"zones":sensors::zone_catalog(),"lowRanges":sensors::low_catalog(),"defaults":sensors::defaults()}).to_string()
 }
 
+#[cfg(test)]
+mod explanation_catalog_tests {
+    use super::*;
+
+    #[test]
+    fn all_explanations_and_variants_reach_the_web_catalog() {
+        let catalog: Value = serde_json::from_str(&catalog_json()).unwrap();
+        let tools = catalog["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), TOOLS.len());
+        for tool in TOOLS {
+            let exported = tools.iter().find(|item| item["id"] == tool.id).unwrap();
+            assert_eq!(
+                exported["note"],
+                calculators::explanations::for_tool(tool.kind)
+            );
+            assert_eq!(
+                exported["formula"],
+                calculators::explanations::formula(tool.kind)
+            );
+            let variants = exported["noteModes"].as_array().unwrap();
+            assert_eq!(
+                variants.len(),
+                calculators::explanations::variants(tool.kind).len()
+            );
+            for &(mode, note, formula) in calculators::explanations::variants(tool.kind) {
+                let exported = variants.iter().find(|item| item["mode"] == mode).unwrap();
+                assert_eq!(exported["note"], note);
+                assert_eq!(exported["formula"], formula);
+            }
+        }
+    }
+
+    #[test]
+    fn every_calculator_returns_a_process_for_default_input() {
+        let mut checked = 0;
+        for tool in TOOLS {
+            match tool.kind {
+                ToolKind::PdfDownload => continue,
+                ToolKind::Gauge(kind) => {
+                    let page = calculators::gauges::api::page(kind, json!({}), "");
+                    assert!(
+                        page["error"].as_str().unwrap_or("").is_empty(),
+                        "{}: {}",
+                        tool.id,
+                        page["error"]
+                    );
+                    assert!(
+                        !page["report"]["process"].as_array().unwrap().is_empty(),
+                        "{}",
+                        tool.id
+                    );
+                }
+                _ => {
+                    let out = calculate_inner(tool.id, "{}")
+                        .unwrap_or_else(|e| panic!("{}: {e}", tool.id));
+                    assert!(!out.process.is_empty(), "{} 缺少计算过程", tool.id);
+                }
+            }
+            checked += 1;
+        }
+        assert_eq!(checked, 49);
+    }
+
+    #[test]
+    fn process_follows_selected_models_inputs_and_boundaries() {
+        let process = |id: &str, input: Value| {
+            calculate_inner(id, &input.to_string())
+                .unwrap_or_else(|e| panic!("{id}: {e}"))
+                .process
+                .join("\n")
+                .replace('\u{2063}', "")
+        };
+        for (known, value, expected) in [
+            (0, 50., "输入相对湿度"),
+            (1, 10., "输入露点"),
+            (2, 15., "输入湿球"),
+            (3, 7.5, "输入混合比"),
+        ] {
+            let text = process(
+                "temperature_humidity_conversion",
+                json!({"known":known,"value":value}),
+            );
+            assert!(text.contains(expected), "{known}: {text}");
+            assert!(text.contains("水汽分压"));
+        }
+        for model in 0..2 {
+            let text = process(
+                "blackbody_radiation_source",
+                json!({"model":model,"temperature":100.,"response":1}),
+            );
+            assert!(text.contains(if model == 0 { "有效波长" } else { "Planck" }));
+        }
+        for direction in 0..2 {
+            let value = if direction == 0 {
+                100.
+            } else {
+                4.096230218723254
+            };
+            let text = process(
+                "working_thermocouple",
+                json!({"type":3,"direction":direction,"value":value}),
+            );
+            assert!(text.contains("c[0]"));
+            assert!(text.contains("指数项 a₀"));
+        }
+        let text = process("bspline_interpolation", json!({}));
+        assert!(text.contains("sᵧ"));
+        assert!(text.contains("归一化"));
+        assert_eq!(text.matches("X(u) =").count(), 1);
+        let text = process("error_analysis", json!({"value":100.02,"reference":100.}));
+        assert!(text.contains("绝对误差 Δ"));
+        let text = process(
+            "uncertainty_calculation",
+            json!({"components":[{"kind":0,"values":[10.02,10.01,10.03],"sensitivity":1}]}),
+        );
+        assert!(text.contains("测量点 1："));
+        assert!(!text.contains("测量点 1：\n\n"));
+        assert!(
+            calculate_inner(
+                "temperature_humidity_conversion",
+                &json!({"known":0,"value":101}).to_string()
+            )
+            .is_err()
+        );
+        for (kind, state) in [
+            (catalog::GaugeKind::Metric, json!({"side":"塞规（内螺纹）"})),
+            (catalog::GaugeKind::Metric, json!({"side":"环规（外螺纹）"})),
+            (
+                catalog::GaugeKind::Unified,
+                json!({"side":"环规（外螺纹）"}),
+            ),
+        ] {
+            let page = calculators::gauges::api::page(kind, state, "");
+            assert!(page["error"].as_str().unwrap_or("").is_empty(), "{page}");
+            let text = page["report"]["process"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|x| x.as_str().unwrap())
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(text.contains("中径"));
+            assert!(text.contains("工作"));
+        }
+    }
+}
+
 fn kind_name(kind: ToolKind) -> &'static str {
     match kind {
         ToolKind::WorkingThermocouple => "thermocouple",
@@ -76,9 +223,40 @@ pub(crate) fn calculate_inner(id: &str, input: &str) -> Result<Output, String> {
             let mut out = Output::default();
             out.headings = vec!["换算结果".into(), "单位名称".into(), "单位符号".into()];
             for (i, u) in units.iter().enumerate() {
-                let result = units::convert_unit(d, value, source, i)
-                    .map(|v| json!(v))
-                    .unwrap_or_else(|e| json!(e));
+                let converted = units::convert_unit(d, value, source, i);
+                if i > 0 {
+                    out.process.push(String::new());
+                }
+                match converted {
+                    Ok(v) => {
+                        let c = calculators::common::format_process_computed;
+                        let (sf, so) = units[source].conversion_coefficients();
+                        let (tf, to) = u.conversion_coefficients();
+                        let formula = if i == source {
+                            format!("同单位直接返回输入 = {}", value)
+                        } else if matches!(d, catalog::Dimension::Temperature) {
+                            let kelvin = value.mul_add(sf, so).max(0.);
+                            format!(
+                                "K = max({value} × {sf} + {so}, 0) = {}；目标 = (K − {to}) / {tf} = {}",
+                                c(kelvin),
+                                c(v)
+                            )
+                        } else {
+                            format!(
+                                "目标 = 输入 × (源系数/目标系数) = {value} × ({sf}/{tf}) = {}",
+                                c(v)
+                            )
+                        };
+                        out.process.push(format!(
+                            "{} → {}：{} {}。",
+                            units[source].code, u.code, formula, u.code
+                        ));
+                    }
+                    Err(ref e) => out
+                        .process
+                        .push(format!("{} → {}：{}。", units[source].code, u.code, e)),
+                }
+                let result = converted.map(|v| json!(v)).unwrap_or_else(|e| json!(e));
                 out.rows.push(vec![result, json!(u.name), json!(u.code)]);
             }
             out.metric("输入数值", value, units[source].code);

@@ -20,6 +20,7 @@ pub(crate) struct ResultSet {
     pub wet: f64,
     pub saturated: f64,
     pub vapor: f64,
+    pub raw_vapor: f64,
     pub volume_fraction: f64,
     /// 以干空气为分母的水汽体积比，单位 μL/L；不同于以总空气计的体积分数。
     pub ppm: f64,
@@ -36,8 +37,11 @@ pub(crate) fn calculate(t: f64, p: f64, known: usize, value: f64) -> Result<Resu
     if p <= 0.0 {
         return Err("大气压必须大于 0".into());
     }
+    if !matches!(known, 1..=3) && !(0.0..=100.0).contains(&value) {
+        return Err("相对湿度必须在 0%～100% 内".into());
+    }
     let saturated = saturation(t)?;
-    let vapor = match known {
+    let raw_vapor = match known {
         1 => saturation(value)?,
         2 => saturation(value)? - 0.000662 * p * (t - value),
         3 => {
@@ -49,13 +53,22 @@ pub(crate) fn calculate(t: f64, p: f64, known: usize, value: f64) -> Result<Resu
         }
         _ => saturated * value / 100.0,
     };
-    let mut rh = vapor / saturated * 100.0;
-    if rh.abs() < 1e-10 {
-        rh = 0.0;
-    }
-    if (rh - 100.0).abs() < 1e-8 {
-        rh = 100.0;
-    }
+    let raw_rh = raw_vapor * 100.0 / saturated;
+    // 仅修正反算时越过边界的微小数值误差，并让后续计算使用同一分压。
+    let vapor = if raw_rh < 0.0 && raw_rh >= -1e-10 {
+        0.0
+    } else if raw_rh > 100.0 && raw_rh <= 100.0 + 1e-8 {
+        saturated
+    } else {
+        raw_vapor
+    };
+    let rh = if vapor == 0.0 {
+        0.0
+    } else if vapor == saturated {
+        100.0
+    } else {
+        vapor * 100.0 / saturated
+    };
     if !(0.0..=100.0).contains(&rh) || vapor >= p {
         return Err(
             "输入应满足 0 ≤ 相对湿度 ≤ 100%，水汽分压小于大气压；露/霜点及湿球不高于环境温度"
@@ -63,7 +76,8 @@ pub(crate) fn calculate(t: f64, p: f64, known: usize, value: f64) -> Result<Resu
         );
     }
     let (dew, frost) = if vapor > 0.0 {
-        let z = (vapor / 611.2).ln();
+        // 对极小分压先取对数，避免相除时下溢为零。
+        let z = vapor.ln() - 611.2_f64.ln();
         let dew = if vapor < 657.0 {
             243.12 * z / (17.62 - z)
         } else {
@@ -91,6 +105,7 @@ pub(crate) fn calculate(t: f64, p: f64, known: usize, value: f64) -> Result<Resu
         wet,
         saturated,
         vapor,
+        raw_vapor,
         volume_fraction: vapor / p,
         ppm,
         absolute,

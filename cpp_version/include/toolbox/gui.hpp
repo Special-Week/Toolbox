@@ -188,6 +188,9 @@ class App {
     static LRESULT CALLBACK procedure(HWND, UINT, WPARAM, LPARAM);
 
   public:
+    // 每个屏幕像素至少对应三个公式采样点，限制高 DPI 下的缓存尺寸。
+    float mathRenderScale() const { return dpi_ < 96.f ? 3.f : dpi_ > 192.f ? 6.f : dpi_ / 32.f; }
+    float mathPixelScale() const { return dpi_ / 96.f; }
     std::array<std::vector<int>, 2> uncertaintyColumns;
     State calibrationSnapshot;
     bool calibrationValid = false;

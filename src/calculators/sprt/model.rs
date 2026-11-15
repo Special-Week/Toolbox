@@ -4,6 +4,16 @@ use crate::calculators::{
     calibration::{inverse, least_squares, polynomial},
     numerics::finite,
 };
+/// 水三相点是高、低温参考函数的分界。
+pub(crate) const TRIPLE_POINT_C: f64 = 0.01;
+
+pub(crate) fn high_for_temperature(t: f64, high_enabled: bool, low_enabled: bool) -> bool {
+    high_enabled && (!low_enabled || t >= TRIPLE_POINT_C)
+}
+
+pub(crate) fn high_for_resistance(r: f64, rtp: f64, high_enabled: bool, low_enabled: bool) -> bool {
+    high_enabled && (!low_enabled || r >= rtp)
+}
 #[derive(Clone, Copy)]
 pub(crate) struct Sprt {
     pub rtp: f64,
@@ -34,6 +44,37 @@ impl Default for Sprt {
     }
 }
 impl Sprt {
+    /// 返回实际选用的参考函数系数、归一化自变量及温度变换方式。
+    pub(crate) fn reference_function(
+        &self,
+        w: f64,
+        wr: f64,
+        high: bool,
+    ) -> (&'static [f64], f64, bool) {
+        if high || (self.low_quadratic && w >= 1.0) {
+            (D, (wr - 2.64) / 1.64, false)
+        } else {
+            (B, (wr.powf(1.0 / 6.0) - 0.65) / 0.35, true)
+        }
+    }
+    /// 给定实际电阻比与所选分支，返回偏差修正后的参考电阻比。
+    pub(crate) fn reference_ratio(&self, w: f64, high: bool) -> f64 {
+        if high {
+            w - self.a * (w - 1.0)
+                - self.b * (w - 1.0).powi(2)
+                - self.c * (w - 1.0).powi(3)
+                - self.d * (w - self.w660).max(0.0).powi(2)
+        } else {
+            w - self.a4 * (w - 1.0)
+                - self.b4
+                    * if self.low_quadratic {
+                        (w - 1.0).powi(2)
+                    } else {
+                        (w - 1.0) * w.ln()
+                    }
+        }
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         finite(&[
             self.rtp, self.a, self.b, self.c, self.a4, self.b4, self.d, self.w660,
@@ -63,27 +104,16 @@ impl Sprt {
         if !slope.is_finite() || slope <= 0.0 {
             return Err("偏差系数使电阻比曲线不再单调，请检查校准系数".into());
         }
-        let wr = if high {
-            w - self.a * (w - 1.0)
-                - self.b * (w - 1.0).powi(2)
-                - self.c * (w - 1.0).powi(3)
-                - self.d * (w - self.w660).max(0.0).powi(2)
-        } else {
-            w - self.a4 * (w - 1.0)
-                - self.b4
-                    * if self.low_quadratic {
-                        (w - 1.0).powi(2)
-                    } else {
-                        (w - 1.0) * w.ln()
-                    }
-        };
+        let wr = self.reference_ratio(w, high);
         if wr <= 0.0 {
             return Err("偏差系数使参考电阻比非正".into());
         }
-        let t = if high || (self.low_quadratic && w >= 1.0) {
-            polynomial(D, (wr - 2.64) / 1.64)
+        let (coefficients, x, low_reference) = self.reference_function(w, wr, high);
+        let value = polynomial(coefficients, x);
+        let t = if low_reference {
+            273.16 * value - 273.15
         } else {
-            273.16 * polynomial(B, (wr.powf(1.0 / 6.0) - 0.65) / 0.35) - 273.15
+            value
         };
         finite(&[t])?;
         Ok(t)
@@ -92,7 +122,7 @@ impl Sprt {
         self.temperature_branch(r, r >= self.rtp)
     }
     pub fn resistance(&self, t: f64) -> Result<f64, String> {
-        self.resistance_branch(t, t >= 0.0)
+        self.resistance_branch(t, high_for_temperature(t, true, true))
     }
     pub fn resistance_branch(&self, t: f64, high: bool) -> Result<f64, String> {
         self.validate()?;
@@ -103,7 +133,7 @@ impl Sprt {
             |w| self.temperature_branch(w * self.rtp, high),
             t,
             if high { 0.99 } else { 0.01 },
-            if high || (self.low_quadratic && t >= 0.0) {
+            if high || (self.low_quadratic && t >= TRIPLE_POINT_C) {
                 4.5
             } else {
                 1.01
@@ -176,5 +206,102 @@ impl Sprt {
             - self.c * (w - 1.0).powi(3))
             / (w - self.w660).powi(2);
         finite(&[self.d])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reference_ratio_uses_the_selected_deviation_and_round_trips() {
+        let mut model = Sprt {
+            a: 0.001,
+            b: 0.002,
+            c: 0.003,
+            a4: 0.01,
+            b4: 0.02,
+            d: 0.004,
+            w660: 3.0,
+            ..Sprt::default()
+        };
+        assert!((model.reference_ratio(3.5, true) - 3.437125).abs() < 1e-12);
+        assert!((model.reference_ratio(0.8, false) - 0.8011074257947431).abs() < 1e-12);
+        model.low_quadratic = true;
+        assert!((model.reference_ratio(0.8, false) - 0.8012).abs() < 1e-12);
+
+        let model = Sprt::default();
+        for temperature in [-150.0, -20.0, 0.0, 20.0, 100.0, 419.527, 660.323] {
+            let resistance = model.resistance(temperature).unwrap();
+            let restored = model.temperature(resistance).unwrap();
+            assert!(
+                (restored - temperature).abs() < 1e-5,
+                "{temperature}: {restored}"
+            );
+        }
+    }
+
+    #[test]
+    fn triple_point_selects_consistent_branches_and_respects_enabled_ranges() {
+        let model = Sprt {
+            a4: 0.003,
+            b4: 0.001,
+            ..Sprt::default()
+        };
+        for temperature in [-0.005, 0.0, 0.005, 0.009, 0.01, 0.011] {
+            let resistance = model.resistance(temperature).unwrap();
+            let restored = model.temperature(resistance).unwrap();
+            assert!(
+                (restored - temperature).abs() < 1e-8,
+                "{temperature}: {restored}"
+            );
+            assert_eq!(
+                high_for_temperature(temperature, true, true),
+                high_for_resistance(resistance, model.rtp, true, true),
+                "{temperature}: {resistance}"
+            );
+        }
+        assert!(high_for_temperature(0.0, true, false));
+        assert!(high_for_resistance(
+            model.rtp * 0.999,
+            model.rtp,
+            true,
+            false
+        ));
+        assert!(!high_for_temperature(0.0, false, true));
+        assert!(!high_for_resistance(
+            model.rtp * 1.001,
+            model.rtp,
+            false,
+            true
+        ));
+    }
+
+    #[test]
+    fn reference_function_data_reconstructs_the_selected_temperature() {
+        for low_quadratic in [false, true] {
+            let model = Sprt {
+                low_quadratic,
+                ..Sprt::default()
+            };
+            for (w, high) in [
+                (0.8, false),
+                (1.0, false),
+                (1.2, false),
+                (1.2, true),
+                (3.0, true),
+            ] {
+                let wr = model.reference_ratio(w, high);
+                let (coefficients, x, low) = model.reference_function(w, wr, high);
+                let value = polynomial(coefficients, x);
+                let reconstructed = if low { 273.16 * value - 273.15 } else { value };
+                let actual = model.temperature_branch(w * model.rtp, high).unwrap();
+                assert!(
+                    (actual - reconstructed).abs() < 1e-9,
+                    "{w} {high} {low_quadratic}: {actual} / {reconstructed}"
+                );
+                assert_eq!(low, !high && !(low_quadratic && w >= 1.0));
+            }
+        }
     }
 }

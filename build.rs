@@ -6,7 +6,12 @@ fn main() {
             .set_icon("assets/toolbox.ico")
             .set("FileDescription", "工具箱")
             .set("ProductName", "Toolbox")
-            .set("OriginalFilename", "Toolbox.exe")
+            .set("FileVersion", concat!("v", env!("CARGO_PKG_VERSION")))
+            .set("ProductVersion", concat!("v", env!("CARGO_PKG_VERSION")))
+            .set(
+                "OriginalFilename",
+                concat!("Toolbox_rust_v", env!("CARGO_PKG_VERSION"), ".exe"),
+            )
             .compile()
             .expect("无法编译程序图标，请确认 Windows SDK 或 MinGW 资源编译器已安装");
     }

@@ -1,5 +1,5 @@
 //! 热电阻预设目录与有界双向换算；曲线统一表示 R/R₀，再按当前 R₀ 缩放。
-use super::curves::{Curve, PT385};
+use super::curves::{Curve, PT385, PolynomialForm};
 use crate::calculators::common::format_number;
 
 #[derive(Clone, Copy, PartialEq)]
@@ -254,6 +254,16 @@ pub(crate) struct RtdModel {
 }
 
 impl RtdModel {
+    pub(crate) fn polynomial_form(&self, temperature: f64) -> Option<PolynomialForm> {
+        self.curve.polynomial_form(temperature)
+    }
+    pub(crate) fn cvd_coefficients(&self) -> Option<[f64; 3]> {
+        match self.curve {
+            Curve::Cvd(coefficients) => Some(coefficients),
+            _ => None,
+        }
+    }
+
     pub(crate) fn new(
         graduation: &'static Graduation,
         r0: f64,

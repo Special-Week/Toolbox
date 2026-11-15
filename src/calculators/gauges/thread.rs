@@ -226,8 +226,15 @@ pub(super) fn half_metrics(out: &mut Report, trap: bool, p: f64) {
     }
 }
 
-pub(super) fn minor_table(out: &mut Report, base: f64, lo: f64, hi: f64, tolerance: Option<f64>) {
-    reference_table(out, "小径", base, lo, hi, tolerance);
+pub(super) fn minor_table(
+    out: &mut Report,
+    base: f64,
+    lo: f64,
+    hi: f64,
+    tolerance: Option<f64>,
+    upper_anchor: bool,
+) {
+    reference_table(out, "小径", base, lo, hi, tolerance, upper_anchor);
 }
 
 /// 工件直径公差与量规制造公差分别列示；缺失公差时不伪造零宽度的上下限。
@@ -238,7 +245,26 @@ fn reference_table(
     lo: f64,
     hi: f64,
     tolerance: Option<f64>,
+    upper_anchor: bool,
 ) {
+    {
+        use crate::calculators::common::format_process_computed as c;
+        out.trace(String::new());
+        if let Some(tolerance) = tolerance {
+            let (anchor, result, operator, direction) = if upper_anchor {
+                (hi, lo, "−", "下界")
+            } else {
+                (lo, hi, "+", "上界")
+            };
+            out.trace(format!("{diameter}参考界限（非独立制造公差）：基本尺寸 = {} mm；按所选规格查得公差 = {} μm = {} mm；参考{} = {} {} {} / 1000 = {} mm，另一界限为 {} mm。", c(base), c(tolerance), c(tolerance / 1000.0), direction, c(anchor), operator, c(tolerance), c(result), c(anchor)));
+        } else {
+            out.trace(format!(
+                "{diameter}基本尺寸 = {} mm；该组合未收录公差，参考上下界不计算。",
+                c(base)
+            ));
+        }
+    }
+
     let mut t = Table::new(
         &format!("{diameter}参考界限（非独立制造公差）"),
         &[
@@ -349,7 +375,8 @@ pub(super) fn calculate(
     } else {
         1.
     };
-    let td = td * kv;
+    let td_raw = td;
+    let td = td_raw * kv;
     let offset = if ring {
         deviation(
             &db["ei"],
@@ -366,6 +393,33 @@ pub(super) fn calculate(
         deviation(&db["ei"], used, "内螺纹G-EI")?
     };
     let f = factors(trap, td, offset < 0.)?;
+    {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        let k2 = if trap { 0.5 } else { 3. * 3_f64.sqrt() / 8. };
+        let k1 = if trap { 1.0 } else { 5. * 3_f64.sqrt() / 8. };
+        out.trace(format!(
+            "基本中径 D₂ = D − k₂P = {} − {} × {} = {} mm；k₂ = {}。",
+            n(d),
+            n(k2),
+            n(p),
+            c(d2),
+            if trap { "0.5" } else { "3√3/8" }
+        ));
+        out.trace(format!(
+            "基本小径 D₁ = D − k₁P = {} − {} × {} = {} mm；k₁ = {}。",
+            n(d),
+            n(k1),
+            n(p),
+            c(d1),
+            if trap { "1" } else { "5√3/8" }
+        ));
+        out.trace(format!("{}螺纹公差带 {grade}；按直径档和最接近的螺距 {} mm 查表，原中径公差 = {} μm；工件中径公差 = 查表值 × 多线系数 = {} × {} = {} μm，基本偏差为 {} μm。", if ring { "外" } else { "内" }, n(used), n(td_raw), n(td_raw), n(kv), c(td), n(offset)));
+        out.trace(format!("量规要素按工件中径公差及偏差符号查表并由 μm 除以 1000 换算成 mm：TPL={}、ZPL={}、TR={}、ZR={}、TCP={}、m={}；通/止端磨损储备：塞规 {}/{}、环规 {}/{} mm。", c(f.tpl), c(f.zpl), c(f.tr), c(f.zr), c(f.tcp), c(f.m), c(f.sgo), c(f.sng), c(f.rgo), c(f.rng)));
+        out.trace(if ring { "工作环规：通端中径中心 = D₂ + es − ZR；止端中心 = D₂ + es − Td − TR/2；各中径上下限 = 中心 ± TR/2。磨损极限分别为中心 + 对应磨损储备；校对规按环规中心、上下限和磨损极限及 TCP、m 生成。" } else { "工作塞规：通端中径中心 = D₂ + EI + ZPL，上下限 = 中心 ± TPL/2；止端中径上下限 = 工件中径上限和该上限 + TPL。磨损极限 = 对应下限 − 磨损储备。" });
+        out.trace("公差和基本偏差的单位为 μm，代入尺寸公式前除以 1000；小径参考界限和长度仅在内置表有对应数据时给出。" );
+    }
     out.metric("工件中径公差 (μm)", td);
     out.metric(
         if ring {
@@ -395,16 +449,58 @@ pub(super) fn calculate(
         out.metric("内螺纹基本大径 D₄ (mm)", d + 2. * ac);
     }
     let truncation = if trap { 2. * ac } else { 0.2 * p };
+    {
+        use crate::calculators::common::format_process_computed as c;
+        if trap {
+            out.trace(format!("按螺距 {} mm 档取牙顶间隙 ac = {} mm；截短量 = 2ac = 2 × {} = {} mm；内螺纹大径基准 D₄ = D + 2ac = {} + {} = {} mm。", c(p), c(ac), c(ac), c(truncation), c(d), c(truncation), c(d + 2.0 * ac)));
+        } else {
+            out.trace(format!(
+                "截短量 2F₁ = 0.2P = 0.2 × {} = {} mm。",
+                c(p),
+                c(truncation)
+            ));
+        }
+    }
     if ring {
         let (mut work, cal) = ring_set(d, d2, d1, offset / 1000., td / 1000., f, truncation);
+        {
+            use crate::calculators::common::{
+                format_process_computed as c, format_process_number as n,
+            };
+            out.trace(format!(
+                "止端中径中心 = D₂ + es − Td − TR/2 = {} + {} − {} − {}/2 = {} mm。",
+                c(d2),
+                c(offset / 1000.),
+                c(td / 1000.),
+                n(f.tr),
+                c(work[1].center)
+            ));
+        }
         let (lg, ln) = lengths(trap, true, d, p, &mut out.notes);
         work[0].length = lg;
         work[1].length = ln;
+        super::trace::rings(
+            &mut out,
+            &work,
+            &cal,
+            d,
+            d2,
+            d1,
+            offset / 1000.,
+            td / 1000.,
+            f,
+            truncation,
+            false,
+        );
         out.tables.push(gauge_table("工作环规 · 检外螺纹", &work));
         out.tables.push(gauge_table("校对塞规 · 检工作环规", &cal));
         if trap {
             // 外螺纹小径 d₃ 的基本偏差恒为零，不能叠加中径的 es，也不能向基本尺寸以上加公差。
             let base = d - p - 2. * ac;
+            {
+                use crate::calculators::common::format_process_computed as c;
+                out.trace(format!("外螺纹基本小径 d₃ = D − P − 2ac = {} − {} − {} = {} mm；其上界取基本小径，不叠加中径偏差。", c(d), c(p), c(truncation), c(base)));
+            }
             let minor = if lines == 1 {
                 trapezoidal_minor_tolerance(d, used, num, letter, &mut out.notes)
             } else {
@@ -417,11 +513,21 @@ pub(super) fn calculate(
                 base - minor.unwrap_or(0.) / 1000.,
                 base,
                 minor,
+                true,
             );
         } else {
             // td 是外螺纹大径公差；不能将这张表误用于工件小径。
             let major_tolerance = minor_tolerance(&db["td"], used, num);
             let upper = d + offset / 1000.;
+            {
+                use crate::calculators::common::format_process_computed as c;
+                out.trace(format!(
+                    "外螺纹大径参考上界 = D + es/1000 = {} + {}/1000 = {} mm。",
+                    c(d),
+                    c(offset),
+                    c(upper)
+                ));
+            }
             reference_table(
                 &mut out,
                 "大径",
@@ -429,6 +535,7 @@ pub(super) fn calculate(
                 upper - major_tolerance.unwrap_or(0.) / 1000.,
                 upper,
                 major_tolerance,
+                true,
             );
             out.note("未收录普通外螺纹小径的独立极限规则，不使用大径公差推算小径。");
         }
@@ -457,11 +564,42 @@ pub(super) fn calculate(
         };
         work[0].length = lg;
         work[1].length = ln;
+        {
+            use crate::calculators::common::format_process_computed as c;
+            out.trace(format!("工件中径下限 = D₂ + EI/1000 = {} + {}/1000 = {} mm；上限 = 下限 + Td/1000 = {} + {}/1000 = {} mm。", c(d2), c(offset), c(d2 + offset / 1000.), c(d2 + offset / 1000.), c(td), c(d2 + offset / 1000. + td / 1000.)));
+            if !trap {
+                out.trace(format!("工作塞规大径基准 = D + EI/1000 = {} + {}/1000 = {} mm；小径基准 = D₁ + EI/1000 = {} + {}/1000 = {} mm。", c(d), c(offset), c(d + offset / 1000.), c(d1), c(offset), c(minor)));
+            } else {
+                out.trace(format!("梯形工作塞规大径基准采用 D₄ = {} mm；小径基准 = D₁ + EI/1000 = {} + {}/1000 = {} mm。", c(d + 2.0 * ac), c(d1), c(offset), c(minor)));
+            }
+            super::trace::plugs(
+                &mut out,
+                &work,
+                if trap {
+                    d + 2. * ac
+                } else {
+                    d + offset / 1000.
+                },
+                d2 + offset / 1000.,
+                d2 + offset / 1000. + td / 1000.,
+                minor,
+                f,
+                trap,
+                truncation,
+            );
+        }
         out.tables.push(gauge_table("工作塞规 · 检内螺纹", &work));
         // Tr 内螺纹小径固定采用 4 级，与中径的 7/8/9 级分开。
         let td1 = minor_tolerance(&db["td1"], used, if trap { "4" } else { num });
         let base = if trap { d1 } else { d1 + offset / 1000. };
-        minor_table(&mut out, d1, base, base + td1.unwrap_or(0.) / 1000., td1);
+        minor_table(
+            &mut out,
+            d1,
+            base,
+            base + td1.unwrap_or(0.) / 1000.,
+            td1,
+            false,
+        );
     }
     out.notes.dedup();
     out.checked()
@@ -493,6 +631,23 @@ pub(super) fn rebar(angle: usize, index: usize, lines: usize) -> Result<Report, 
     let es = deviation(&db["ei"], pe, "外螺纹f-es")? / 1000.;
     let fi = factors(false, ti, false)?;
     let fe = factors(false, te, true)?;
+    {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        out.trace(format!("钢筋基本大径、中径、小径和螺距来自所选 {}°、规格序号 {} 的内置表，不套用普通螺纹几何公式。", angle, index + 1));
+        out.trace(format!("套筒借用 6H：按螺距 {} mm 档取中径公差 {} μm；丝头借用 6f：按 {} mm 档取中径公差 {} μm、基本偏差 es = {} mm。", n(pi), n(ti), n(pe), n(te), c(es)));
+        out.trace(format!(
+            "量规要素查表并换算为 mm：套筒 TPL={}、ZPL={}；丝头 TR={}、ZR={}、TCP={}、m={}。",
+            c(fi.tpl),
+            c(fi.zpl),
+            c(fe.tr),
+            c(fe.zr),
+            c(fe.tcp),
+            c(fe.m)
+        ));
+        out.trace("套筒工件中径范围为 D₂～D₂+6H 公差；丝头为 D₂+es−6f 公差～D₂+es。通止塞规、环规和校对规按所选要素计算；钢筋专用 ZZ/ZS 校对规大径以工件中径为基准。" );
+    }
     out.metric("套筒 6H 中径公差 (μm)", ti);
     out.metric("丝头 6f 中径公差 (μm)", te);
     out.metric("丝头 es (μm)", es * 1000.);
@@ -513,13 +668,48 @@ pub(super) fn rebar(angle: usize, index: usize, lines: usize) -> Result<Report, 
     cal[4].major = [zz_major - fe.tpl, zz_major + fe.tpl];
     let zs_major = zz_major - fe.tr / 2. + fe.rng;
     cal[5].major = [zs_major - fe.tpl, zs_major + fe.tpl];
+    {
+        use crate::calculators::common::format_process_computed as c;
+        out.trace(format!(
+            "套筒工件中径下限 = D₂ = {} mm，上限 = D₂ + 6H 公差/1000 = {} + {}/1000 = {} mm。",
+            c(d2),
+            c(d2),
+            c(ti),
+            c(d2 + ti / 1000.)
+        ));
+        super::trace::plugs(
+            &mut out,
+            &plugs,
+            d,
+            d2,
+            d2 + ti / 1000.,
+            d1,
+            fi,
+            false,
+            0.2 * p,
+        );
+        out.trace(format!("丝头工件中径上限 = D₂ + es = {} + {} = {} mm，下限 = 上限 − 6f 公差/1000 = {} − {}/1000 = {} mm。", c(d2), c(es), c(d2 + es), c(d2 + es), c(te), c(d2 + es - te / 1000.)));
+        super::trace::rings(
+            &mut out,
+            &rings,
+            &cal,
+            d,
+            d2,
+            d1,
+            es,
+            te / 1000.,
+            fe,
+            0.2 * p,
+            true,
+        );
+    }
     out.tables
         .push(gauge_table("套筒内螺纹 6H · 工作塞规", &plugs));
     out.tables
         .push(gauge_table("丝头外螺纹 6f · 工作环规", &rings));
     out.tables.push(gauge_table("校对塞规", &cal));
     let td1 = minor_tolerance(&db["td1"], pi, "6");
-    minor_table(&mut out, d1, d1, d1 + td1.unwrap_or(0.) / 1000., td1);
+    minor_table(&mut out, d1, d1, d1 + td1.unwrap_or(0.) / 1000., td1, false);
     out.note("工件公差和量规位置要素为借用体系；多头不另增公差系数。具体旋合判定按产品实际执行标准。复核牙型与标准后使用。");
     out.checked()
 }

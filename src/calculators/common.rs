@@ -122,6 +122,186 @@ pub(crate) fn input_row(ui: &mut egui::Ui, label: &str, value: &mut String, hint
 
 pub(crate) use super::format::{format_number, format_unit, parse_number};
 
+/// 用可还原 f64 的最短十进制表示展示复核所需的输入和中间值。
+pub(crate) fn format_process_number(value: f64) -> String {
+    if value.is_finite() {
+        value.to_string()
+    } else {
+        "—".to_owned()
+    }
+}
+
+/// 标记已计算的数值，既可整理默认显示，也可还原完整双精度。
+pub(crate) fn format_process_computed(value: f64) -> String {
+    format!("\u{2063}{}\u{2063}", format_process_number(value))
+}
+
+/// 保留用户指定的高位数修约结果，其他计算值按默认显示精度整理。
+pub(crate) fn format_process_rounded(value: f64, digits: Option<usize>) -> String {
+    if digits.is_some_and(|digits| digits > 13) {
+        format_process_number(value)
+    } else {
+        format_process_computed(value)
+    }
+}
+
+/// 对明显的浮点尾数适当减少显示位数，不改变实际计算。
+fn format_process_result(value: f64) -> String {
+    if !value.is_finite() {
+        return "—".to_owned();
+    }
+    if value == 0.0 {
+        return "0".to_owned();
+    }
+    let original = value.to_string();
+    let digits: String = original
+        .chars()
+        .filter(char::is_ascii_digit)
+        .skip_while(|c| *c == '0')
+        .collect();
+    let tail = original.contains('.')
+        && digits.len() >= 13
+        && (digits.contains("0000000") || digits.contains("9999999"));
+    let rounded = if tail {
+        format!("{value:.11e}")
+    } else {
+        format!("{value:.12e}")
+    }
+    .parse::<f64>()
+    .unwrap_or(value);
+    if rounded.is_finite() && rounded != 0.0 {
+        rounded
+    } else {
+        value
+    }
+    .to_string()
+}
+
+/// 相近数相减时，避免显示修约掩盖对结果有意义的差值。
+fn safe_substitution(
+    expression: &str,
+    results: &std::collections::HashMap<String, String>,
+) -> bool {
+    sensitive_numbers(expression, results).is_empty()
+}
+
+fn sensitive_numbers(
+    expression: &str,
+    results: &std::collections::HashMap<String, String>,
+) -> std::collections::HashSet<String> {
+    static DIFFERENCE: std::sync::OnceLock<regex::Regex> = std::sync::OnceLock::new();
+    let difference = DIFFERENCE.get_or_init(|| regex::Regex::new(
+        r"(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*−\s*(-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)"
+    ).unwrap());
+    let mut preserve = std::collections::HashSet::new();
+    for captures in difference.captures_iter(expression) {
+        let left = &captures[1];
+        let right = &captures[2];
+        let (Ok(a), Ok(b)) = (left.parse::<f64>(), right.parse::<f64>()) else {
+            continue;
+        };
+        let shown_a = results
+            .get(left)
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(a);
+        let shown_b = results
+            .get(right)
+            .and_then(|s| s.parse::<f64>().ok())
+            .unwrap_or(b);
+        let actual = a - b;
+        let shown = shown_a - shown_b;
+        if !actual.is_finite()
+            || !shown.is_finite()
+            || (shown - actual).abs() > actual.abs() * 1e-12
+        {
+            preserve.insert(left.to_owned());
+            preserve.insert(right.to_owned());
+        }
+    }
+    preserve
+}
+
+/// 整理公式结果，并在后续代入该结果时使用相同的显示值。
+fn compact_process_line(
+    line: &str,
+    results: &mut std::collections::HashMap<String, String>,
+) -> String {
+    use std::sync::OnceLock;
+    static NUMBER: OnceLock<regex::Regex> = OnceLock::new();
+    static NUMBERS: OnceLock<regex::Regex> = OnceLock::new();
+    let number = NUMBER
+        .get_or_init(|| regex::Regex::new(r"^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?").unwrap());
+    let numbers = NUMBERS
+        .get_or_init(|| regex::Regex::new(r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?").unwrap());
+    let mut out = String::with_capacity(line.len());
+    let mut offset = 0;
+    let mut context_start = 0;
+    while let Some(relative) = line[offset..].find(" = ") {
+        let equals = offset + relative;
+        let after_equals = equals + 3;
+        let context = &line[context_start..equals];
+        let arithmetic = [" + ", " − ", " × ", " / ", "√", "Σ", "exp(", "ln(", "^"]
+            .iter()
+            .any(|part| context.contains(part));
+        let piece = &line[offset..equals];
+        if arithmetic && !piece.contains('；') && safe_substitution(context, results) {
+            out.push_str(&numbers.replace_all(piece, |caps: &regex::Captures<'_>| {
+                results
+                    .get(&caps[0])
+                    .cloned()
+                    .unwrap_or_else(|| caps[0].to_owned())
+            }));
+        } else {
+            out.push_str(piece);
+        }
+        out.push_str(" = ");
+        let rest = &line[after_equals..];
+        if let Some(matched) = number.find(rest) {
+            let token = matched.as_str();
+            let suffix = &rest[token.len()..];
+            let continues = [" + ", " − ", " × ", " / ", "⁴", "³", "²", "^"]
+                .iter()
+                .any(|part| suffix.starts_with(part));
+            if continues {
+                let expression = rest
+                    .split_once(" = ")
+                    .map_or(rest, |(expression, _)| expression);
+                out.push_str(if safe_substitution(expression, results) {
+                    results.get(token).map(String::as_str).unwrap_or(token)
+                } else {
+                    token
+                });
+            } else if arithmetic && !continues {
+                if let Ok(value) = token.parse::<f64>() {
+                    let formatted = format_process_result(value);
+                    if formatted != token {
+                        results.insert(token.to_owned(), formatted.clone());
+                    }
+                    out.push_str(&formatted);
+                } else {
+                    out.push_str(token);
+                }
+            } else {
+                out.push_str(token);
+            }
+            offset = after_equals + token.len();
+        } else {
+            offset = after_equals;
+        }
+        context_start = after_equals;
+    }
+    out.push_str(&line[offset..]);
+    out
+}
+
+pub(crate) fn temperature_conversion_note(symbol: &str) -> &'static str {
+    match symbol {
+        "°F" => "温标换算：t(°C) = [t(°F) − 32] / 1.8；温差只除以 1.8。",
+        "K" => "温标换算：t(°C) = T(K) − 273.15；开尔文温差与摄氏温差数值相同。",
+        _ => "参考函数中的温度 t 使用摄氏度 °C。",
+    }
+}
+
 pub(crate) fn show_result_or_error(ui: &mut egui::Ui, title: &str, result: Results) {
     match result {
         Ok(metrics) => render_metrics(ui, title, &metrics),
@@ -203,19 +383,126 @@ pub(crate) fn collapsible_note(
         });
 }
 
+/// 仅在当前计算成功时调用，过程数据与结果由同一次计算产生。
+pub(crate) fn calculation_process(ui: &mut egui::Ui, id: &str, lines: &[String]) {
+    calculation_process_lazy(ui, id, || lines);
+}
+
+/// 仅在展开时构建较长的逐点过程，避免页面重绘重复反算。
+pub(crate) fn calculation_process_lazy<T: AsRef<[String]>>(
+    ui: &mut egui::Ui,
+    id: &str,
+    make_lines: impl FnOnce() -> T,
+) {
+    ui.add_space(10.0);
+    collapsible_note(ui, id, "计算过程", |ui| {
+        let lines = make_lines();
+        let mut display = ProcessDisplay::new(ui, id);
+        for line in lines.as_ref() {
+            if line.is_empty() {
+                ui.add_space(ui.text_style_height(&egui::TextStyle::Body));
+            } else {
+                display.line(ui, line);
+            }
+        }
+        ui.label("部分计算结果和后续代入值经过显示修约，实际计算精度不变。");
+    });
+}
+
+pub(crate) struct ProcessDisplay {
+    results: std::collections::HashMap<String, String>,
+}
+
+impl ProcessDisplay {
+    pub(crate) fn new(_ui: &mut egui::Ui, _id: &str) -> Self {
+        Self {
+            results: std::collections::HashMap::new(),
+        }
+    }
+
+    pub(crate) fn line(&mut self, ui: &mut egui::Ui, line: &str) {
+        let displayed = process_display_line(line, false, &mut self.results);
+        super::formula_layout::show(ui, &displayed);
+    }
+}
+
+fn process_display_line(
+    line: &str,
+    full_precision: bool,
+    results: &mut std::collections::HashMap<String, String>,
+) -> String {
+    let raw = line.replace('\u{2063}', "");
+    if full_precision {
+        return super::math_notation::parenthesize_negative_subtrahends(&raw).into_owned();
+    }
+    let mut candidate = results.clone();
+    for (i, part) in line.split('\u{2063}').enumerate() {
+        if i % 2 == 1 {
+            if let Ok(value) = part.parse::<f64>() {
+                candidate.insert(part.to_owned(), format_process_result(value));
+            }
+        }
+    }
+    // 只保留有相消风险的操作数；同一行的其他结果仍按显示规则整理。
+    let preserve = sensitive_numbers(&raw, &candidate);
+    if !preserve.is_empty() {
+        let mut displayed = String::new();
+        for (index, part) in line.split('\u{2063}').enumerate() {
+            if index % 2 == 0 || preserve.contains(part) {
+                displayed.push_str(part);
+            } else if let Ok(value) = part.parse::<f64>() {
+                let formatted = format_process_result(value);
+                results.insert(part.to_owned(), formatted.clone());
+                displayed.push_str(&formatted);
+            } else {
+                displayed.push_str(part);
+            }
+        }
+        return super::math_notation::parenthesize_negative_subtrahends(&displayed).into_owned();
+    }
+    let prepared = {
+        let mut parts = line.split('\u{2063}');
+        let mut prepared = parts.next().unwrap_or_default().to_owned();
+        while let Some(value) = parts.next() {
+            let Some(next) = parts.next() else {
+                prepared.push_str(value);
+                break;
+            };
+            let formatted = value
+                .parse::<f64>()
+                .map(format_process_result)
+                .unwrap_or_else(|_| value.to_owned());
+            if formatted != value {
+                results.insert(value.to_owned(), formatted.clone());
+            }
+            prepared.push_str(&formatted);
+            prepared.push_str(next);
+        }
+        prepared
+    };
+    let displayed = compact_process_line(&prepared, results);
+    super::math_notation::parenthesize_negative_subtrahends(&displayed).into_owned()
+}
+
+#[cfg(test)]
+pub(crate) fn process_lines_for_test(lines: &[String], full_precision: bool) -> Vec<String> {
+    let mut results = std::collections::HashMap::new();
+    lines
+        .iter()
+        .map(|line| process_display_line(line, full_precision, &mut results))
+        .collect()
+}
+
 /// 计算说明与公式一起展开，切换模型时保留展开状态。
 pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
-    let (summary, mut formula) = super::explanations::selected(kind, mode);
-    if matches!(kind, ToolKind::Uncertainty) && mode == 0 {
-        formula = formula.replace("最低为整数位", "可修约至十位、百位等");
-    }
+    let (summary, formula) = super::explanations::selected(kind, mode);
     if summary.is_empty() && formula.is_empty() {
         return;
     }
     ui.add_space(10.0);
     collapsible_note(ui, "calculation_note", "计算说明", |ui| {
         if !summary.is_empty() {
-            ui.add(egui::Label::new(RichText::new(summary).size(12.0).color(INK)).wrap());
+            note_paragraph(ui, summary);
         }
         if !formula.is_empty() {
             ui.label(
@@ -224,7 +511,7 @@ pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
                     .strong()
                     .color(INK),
             );
-            ui.add(egui::Label::new(RichText::new(formula).size(12.0).color(INK)).wrap());
+            note_paragraph(ui, &formula);
             if matches!(kind, ToolKind::Uncertainty) {
                 ui.add(egui::Label::new(RichText::new("贝塞尔法先用全部测量值计算样本标准差 s，再按 u=s/√n 计算；取测量次数 n 留空时默认为 1。")
                     .size(12.0).color(INK)).wrap());
@@ -245,6 +532,22 @@ pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
             }
         }
     });
+}
+
+fn note_paragraph(ui: &mut egui::Ui, text: &str) {
+    if text
+        .lines()
+        .any(super::formula_layout::has_formattable_math)
+    {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for line in text.lines() {
+                super::formula_layout::show(ui, line);
+            }
+        });
+    } else {
+        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(INK)).wrap());
+    }
 }
 
 impl crate::app::ToolboxApp {
@@ -280,6 +583,204 @@ impl crate::app::ToolboxApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn process_numbers_preserve_coefficients_needed_for_recalculation() {
+        let r0 = 10000.0_f64;
+        let a0 = 1.0 / 298.15 - r0.ln() / 3950.0;
+        let a1 = 1.0 / 3950.0;
+        let displayed_a0 = format_process_number(a0).parse::<f64>().unwrap();
+        let displayed_a1 = format_process_number(a1).parse::<f64>().unwrap();
+        assert_eq!(displayed_a0, a0);
+        assert_eq!(displayed_a1, a1);
+        let recalculated = 1.0 / (displayed_a0 + displayed_a1 * r0.ln()) - 273.15;
+        assert!((recalculated - 25.0).abs() < 1e-10);
+        for value in [f64::MIN_POSITIVE, f64::from_bits(1), f64::MAX, -0.0, 0.0001] {
+            assert_eq!(
+                format_process_number(value)
+                    .parse::<f64>()
+                    .unwrap()
+                    .to_bits(),
+                value.to_bits()
+            );
+        }
+    }
+
+    #[test]
+    fn process_results_hide_float_tails_without_losing_small_values() {
+        let mut results = std::collections::HashMap::new();
+        assert_eq!(format_process_result(10.03 - 10.01), "0.02");
+        assert_eq!(format_process_result(100.02 - 100.0), "0.02");
+        assert_eq!(format_process_result(0.1 + 0.2), "0.3");
+        assert!(format_process_result(1e-30).parse::<f64>().unwrap() > 0.0);
+        assert_eq!(
+            format_process_result(f64::from_bits(1))
+                .parse::<f64>()
+                .unwrap(),
+            f64::from_bits(1)
+        );
+        let largest = format_process_result(f64::MAX).parse::<f64>().unwrap();
+        assert!(largest.is_finite() && (largest / f64::MAX - 1.0).abs() < 1e-12);
+        assert_eq!(
+            format_process_number(1.2345678901234567),
+            "1.2345678901234567"
+        );
+        assert_eq!(
+            compact_process_line("10.03 − 10.01 = 0.019999999999999574。", &mut results),
+            "10.03 − 10.01 = 0.02。"
+        );
+        assert_eq!(
+            compact_process_line(
+                "绝对误差 = 100.02 − 100 = 0.01999999999999602。",
+                &mut results
+            ),
+            "绝对误差 = 100.02 − 100 = 0.02。"
+        );
+        assert_eq!(
+            compact_process_line("c[0] = 1.2345678901234567", &mut results),
+            "c[0] = 1.2345678901234567"
+        );
+        assert_eq!(
+            compact_process_line(
+                "结果 = 1.2345678901234567 × 2 = 2.4691357802469134。",
+                &mut results
+            ),
+            "结果 = 1.2345678901234567 × 2 = 2.469135780247。"
+        );
+        assert_eq!(
+            compact_process_line("平均值 x̄ = Σxᵢ/n = 10.017999999999999。", &mut results),
+            "平均值 x̄ = Σxᵢ/n = 10.018。"
+        );
+        assert_eq!(
+            compact_process_line(
+                "测量点 1：xᵢ = 10.02；xᵢ − x̄ = 10.02 − 10.017999999999999 = 0.002000000000001。",
+                &mut results
+            ),
+            "测量点 1：xᵢ = 10.02；xᵢ − x̄ = 10.02 − 10.018 = 0.002。"
+        );
+        assert_eq!(
+            compact_process_line(
+                "测量点 2：xᵢ = 10.01；xᵢ − x̄ = 10.01 − 10.017999999999999 = -0.007999999999999。",
+                &mut results
+            ),
+            "测量点 2：xᵢ = 10.01；xᵢ − x̄ = 10.01 − 10.018 = -0.008。"
+        );
+        assert_eq!(
+            compact_process_line("样本标准差 s = √Σx² = 0.008366600265340578。", &mut results),
+            "样本标准差 s = √Σx² = 0.008366600265341。"
+        );
+        assert_eq!(
+            compact_process_line(
+                "u = s/√n = 0.008366600265340578 / √1 = 0.008366600265340578。",
+                &mut results
+            ),
+            "u = s/√n = 0.008366600265341 / √1 = 0.008366600265341。"
+        );
+        assert_eq!(
+            compact_process_line("平均值 = Σx/n = 1.000000000000001。", &mut results),
+            "平均值 = Σx/n = 1。"
+        );
+        let precise = compact_process_line(
+            "测量点：x = 1.000000000000002；差值 = 1.000000000000002 − 1.000000000000001 = 0.0000000000000011102230246251565。",
+            &mut results,
+        );
+        assert!(
+            precise.contains("1.000000000000002 − 1.000000000000001"),
+            "{precise}"
+        );
+        assert_eq!(
+            compact_process_line(
+                "输入 x = 1.000000000000001；系数 c[0] = 1.2345678901234567。",
+                &mut results
+            ),
+            "输入 x = 1.000000000000001；系数 c[0] = 1.2345678901234567。"
+        );
+    }
+
+    #[test]
+    fn standalone_results_and_precision_toggle_preserve_important_values() {
+        let mut results = std::collections::HashMap::new();
+        let value = 100.02_f64 - 100.0;
+        let line = format!("误差绝对值 |Δ| = {}。", format_process_computed(value));
+        assert_eq!(
+            process_display_line(&line, false, &mut results),
+            "误差绝对值 |Δ| = 0.02。"
+        );
+        assert_eq!(
+            process_display_line(&line, true, &mut results),
+            format!("误差绝对值 |Δ| = {}。", value)
+        );
+
+        let precise = 1.000000000000001_f64;
+        let input = format!(
+            "输入 = {}；系数 = {}。",
+            format_process_number(precise),
+            format_process_number(precise)
+        );
+        assert_eq!(process_display_line(&input, false, &mut results), input);
+        let rounded = format_process_rounded(precise, Some(17));
+        assert_eq!(rounded, format_process_number(precise));
+
+        let a = 1.000000000000002_f64;
+        let b = 1.000000000000001_f64;
+        let cancellation = format!(
+            "差值 = {} − {} = {}。",
+            format_process_computed(a),
+            format_process_computed(b),
+            format_process_computed(a - b)
+        );
+        let shown = process_display_line(&cancellation, false, &mut results);
+        assert!(
+            shown.contains("1.000000000000002 − 1.000000000000001"),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn parenthesized_subtractions_preserve_significant_differences() {
+        let a = -1.0_f64;
+        let b = -0.9999999999999948_f64;
+        let line = format!(
+            "残差 e = (Y − Ŷ) × s = ({} − {}) × 1.5 = {}。",
+            format_process_computed(a),
+            format_process_computed(b),
+            format_process_computed((a - b) * 1.5)
+        );
+        let mut results = std::collections::HashMap::new();
+        let shown = process_display_line(&line, false, &mut results);
+        assert!(shown.contains("-0.9999999999999948"), "{shown}");
+        assert!(!shown.contains("(-1 − -1)"));
+        assert_eq!(
+            process_display_line(&line, true, &mut results),
+            super::super::math_notation::parenthesize_negative_subtrahends(
+                &line.replace('\u{2063}', "")
+            )
+        );
+        let line = format!(
+            "绝对误差 = {} − {} = {}。",
+            format_process_number(-3.0),
+            format_process_number(-5.0),
+            format_process_computed(2.0)
+        );
+        assert_eq!(
+            process_display_line(&line, false, &mut results),
+            "绝对误差 = -3 − (-5) = 2。"
+        );
+    }
+
+    #[test]
+    fn sensitive_subtraction_keeps_its_operands_without_restoring_unrelated_float_tails() {
+        let temperature = 34.99374148609655_f64;
+        let line = format!(
+            "温差 = {}−35 = {}；误差 = 100.02 − 100 = {}。",
+            format_process_computed(temperature),
+            format_process_computed(temperature - 35.0),
+            format_process_computed(100.02_f64 - 100.0)
+        );
+        let shown = process_display_line(&line, false, &mut std::collections::HashMap::new());
+        assert!(shown.contains("34.99374148609655−35"), "{shown}");
+        assert!(shown.ends_with("误差 = 100.02 − 100 = 0.02。"), "{shown}");
+    }
 
     #[test]
     fn input_text_and_hint_are_centered_vertically() {
@@ -335,11 +836,21 @@ mod tests {
             )
         };
         let contains = |output: &egui::FullOutput, expected: &str| {
-            output.shapes.iter().any(|shape| {
+            if output.shapes.iter().any(|shape| {
                 matches!(
                     &shape.shape, egui::Shape::Text(text) if text.galley.text() == expected
                 )
-            })
+            }) {
+                return true;
+            }
+            let fragments: Vec<_> = expected
+                .lines()
+                .flat_map(super::super::formula_layout::visible_text_fragments)
+                .filter(|part| !part.is_empty())
+                .collect();
+            !fragments.is_empty() && fragments.iter().all(|fragment| output.shapes.iter().any(|shape| {
+                matches!(&shape.shape, egui::Shape::Text(text) if text.galley.text().contains(fragment))
+            }))
         };
         let (summary, formula) = super::super::explanations::selected(kind, 0);
         let initial = render(0, vec![], 0.0);

@@ -10,12 +10,28 @@ pub(crate) struct StandardCouple {
     pub points: Vec<(f64, f64)>,
     pub zone: Option<(f64, f64, Vec<f64>)>,
 }
+
+pub(crate) enum FixedMethod {
+    SLinear,
+    SQuadratic([f64; 3]),
+    BZero,
+    BLinearFrom23,
+    BConstant(usize),
+    BTransition { index: usize, fraction: f64 },
+}
+
+pub(crate) struct FixedAdjustment {
+    pub offsets: Vec<f64>,
+    pub value: f64,
+    pub method: FixedMethod,
+}
+
 impl StandardCouple {
     /// 校准值是实际热电势，不是修正量；仅修正基准多项式的一次与二次系数。
     pub fn fit_zone_coefficients(
         zone: &mut (f64, f64, Vec<f64>),
         points: &[(f64, f64)],
-    ) -> Result<(), String> {
+    ) -> Result<[f64; 2], String> {
         let mut rows = Vec::new();
         let mut rhs = Vec::new();
         for &(t, e) in points {
@@ -29,7 +45,7 @@ impl StandardCouple {
         let c = crate::calculators::calibration::least_squares(&rows, &rhs)?;
         zone.2[1] += c[0];
         zone.2[2] += c[1];
-        Ok(())
+        Ok([c[0], c[1]])
     }
     pub fn emf(&self, t: f64) -> Result<f64, String> {
         if let Some((lo, hi, c)) = &self.zone {
@@ -43,20 +59,29 @@ impl StandardCouple {
             finite(&[e])?;
             return Ok(e);
         }
+        let adjustment = self.fixed_adjustment(t)?;
+        let e = thermocouple_emf(self.kind, t)? + adjustment.value;
+        finite(&[e])?;
+        Ok(e)
+    }
+
+    /// 展示与正算共用同一次固定点偏差和分段插值规则。
+    pub(crate) fn fixed_adjustment(&self, t: f64) -> Result<FixedAdjustment, String> {
         let mut delta = Vec::new();
         for &(p, e) in &self.points {
             finite(&[p, e])?;
             delta.push(e - thermocouple_emf(self.kind, p)?);
         }
         // S 型按固定点偏差作二次插值；B 型采用各校准点邻域及过渡段。
-        let adjustment = if self.kind == "S" {
+        let (value, method) = if self.kind == "S" {
             if self.points.len() != 3 {
                 return Err("S 型需要锌、铝、铜三个校准点".into());
             }
             if t < 400.0 {
-                delta[0] * t / self.points[0].0
+                (delta[0] * t / self.points[0].0, FixedMethod::SLinear)
             } else {
                 let mut value = 0.0;
+                let mut terms = [0.0; 3];
                 for (i, &offset) in delta.iter().enumerate().take(3) {
                     let mut term = offset;
                     for j in 0..3 {
@@ -64,42 +89,54 @@ impl StandardCouple {
                             term *= (t - self.points[j].0) / (self.points[i].0 - self.points[j].0);
                         }
                     }
+                    terms[i] = term;
                     value += term;
                 }
-                value
+                (value, FixedMethod::SQuadratic(terms))
             }
         } else {
             if self.points.len() != 5 {
                 return Err("B 型需要 1100～1500 °C 五个校准点".into());
             }
             let mut value = *delta.last().unwrap();
+            let mut method = FixedMethod::BConstant(4);
             for (i, &(p, _)) in self.points.iter().enumerate() {
                 if t <= p + 30.0 {
                     value = if i == 0 && t < p - 300.0 {
                         if t >= 23.0 {
+                            method = FixedMethod::BLinearFrom23;
                             delta[0] * (t - 23.0) / (p - 23.0)
                         } else {
+                            method = FixedMethod::BZero;
                             0.0
                         }
                     } else {
+                        method = FixedMethod::BConstant(i);
                         delta[i]
                     };
                     break;
                 }
                 if t < p + 70.0 {
                     value = if i == 4 {
+                        method = FixedMethod::BConstant(i);
                         delta[i]
                     } else {
+                        method = FixedMethod::BTransition {
+                            index: i,
+                            fraction: (t - p - 30.0) / 40.0,
+                        };
                         delta[i] + (delta[i + 1] - delta[i]) * (t - p - 30.0) / 40.0
                     };
                     break;
                 }
             }
-            value
+            (value, method)
         };
-        let e = thermocouple_emf(self.kind, t)? + adjustment;
-        finite(&[e])?;
-        Ok(e)
+        Ok(FixedAdjustment {
+            offsets: delta,
+            value,
+            method,
+        })
     }
     /// B 型只选 ≥50 °C 的分支，避免其低温转折带来的多值反算。
     pub fn temperature(&self, e: f64) -> Result<f64, String> {
@@ -116,6 +153,91 @@ impl StandardCouple {
             lo = lo.max(50.0);
         }
         inverse(|t| self.emf(t), e, lo, hi)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn model(kind: &'static str, temperatures: &[f64]) -> StandardCouple {
+        StandardCouple {
+            kind,
+            points: temperatures
+                .iter()
+                .enumerate()
+                .map(|(i, &t)| {
+                    (
+                        t,
+                        thermocouple_emf(kind, t).unwrap() + (i + 1) as f64 * 0.01,
+                    )
+                })
+                .collect(),
+            zone: None,
+        }
+    }
+
+    #[test]
+    fn fixed_point_process_tracks_the_actual_interpolation_branch() {
+        let s = model("S", &[419.527, 660.323, 1084.62]);
+        let low = s.fixed_adjustment(200.0).unwrap();
+        assert!(matches!(low.method, FixedMethod::SLinear));
+        assert_eq!(low.value, low.offsets[0] * 200.0 / s.points[0].0);
+        let at_point = s.fixed_adjustment(660.323).unwrap();
+        assert!(matches!(at_point.method, FixedMethod::SQuadratic(_)));
+        assert!((at_point.value - at_point.offsets[1]).abs() < 1e-14);
+
+        let b = model("B", &[1100.0, 1200.0, 1300.0, 1400.0, 1500.0]);
+        assert!(matches!(
+            b.fixed_adjustment(22.0).unwrap().method,
+            FixedMethod::BZero
+        ));
+        let low = b.fixed_adjustment(500.0).unwrap();
+        assert!(matches!(low.method, FixedMethod::BLinearFrom23));
+        assert_eq!(low.value, low.offsets[0] * (500.0 - 23.0) / (1100.0 - 23.0));
+        assert!(matches!(
+            b.fixed_adjustment(800.0).unwrap().method,
+            FixedMethod::BConstant(0)
+        ));
+        let below_switch = b.fixed_adjustment(800.0 - 1e-8).unwrap().value;
+        let at_switch = b.fixed_adjustment(800.0).unwrap().value;
+        assert!((at_switch - below_switch).abs() > 0.001);
+        assert!(matches!(
+            b.fixed_adjustment(1130.0).unwrap().method,
+            FixedMethod::BConstant(0)
+        ));
+        let transition = b.fixed_adjustment(1150.0).unwrap();
+        assert!(
+            matches!(transition.method, FixedMethod::BTransition { index: 0, fraction } if fraction == 0.5)
+        );
+        assert_eq!(
+            transition.value,
+            transition.offsets[0]
+                + (transition.offsets[1] - transition.offsets[0]) * (1150.0 - 1100.0 - 30.0) / 40.0
+        );
+        assert!(matches!(
+            b.fixed_adjustment(1170.0).unwrap().method,
+            FixedMethod::BConstant(1)
+        ));
+        assert!(matches!(
+            b.fixed_adjustment(1700.0).unwrap().method,
+            FixedMethod::BConstant(4)
+        ));
+        for (model, temperatures) in [
+            (&s, &[200.0, 400.0, 660.323][..]),
+            (
+                &b,
+                &[22.0, 500.0, 800.0, 1130.0, 1150.0, 1170.0, 1700.0][..],
+            ),
+        ] {
+            for &t in temperatures {
+                let adjustment = model.fixed_adjustment(t).unwrap();
+                assert_eq!(
+                    model.emf(t).unwrap(),
+                    thermocouple_emf(model.kind, t).unwrap() + adjustment.value
+                );
+            }
+        }
     }
 }
 

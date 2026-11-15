@@ -374,6 +374,8 @@ impl CalibrationArchives {
                             .width(230.0_f32.min(ui.available_width().max(120.0)))
                             .wrap_mode(egui::TextWrapMode::Truncate)
                             .show_ui(ui, |ui| {
+                                // 档案名称可较长，在菜单宽度内换行，避免遮挡或超出窗口。
+                                ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                                 if !self.entries.iter().any(|entry| entry.tool == tool) {
                                     ui.label("暂无保存的档案");
                                 }

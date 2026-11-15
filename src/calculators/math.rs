@@ -93,6 +93,14 @@ pub(crate) fn isa_temperature(altitude_m: f64) -> f64 {
 
 /// −1000～86000 m 的标准绝对压力 Pa；逐层传递压力，保证边界连续。
 pub(crate) fn isa_pressure(altitude_m: f64) -> Option<f64> {
+    isa_pressure_with_steps(altitude_m, |_, _, _, _, _, _| {})
+}
+
+/// 可选接收每层的计算值；正算、反算和过程展示使用同一分层模型。
+pub(crate) fn isa_pressure_with_steps(
+    altitude_m: f64,
+    mut step: impl FnMut(f64, f64, f64, f64, f64, f64),
+) -> Option<f64> {
     if !(-1000.0..=86000.0).contains(&altitude_m) {
         return None;
     }
@@ -111,11 +119,13 @@ pub(crate) fn isa_pressure(altitude_m: f64) -> Option<f64> {
     ] {
         let end = altitude_m.min(top);
         let temp = isa_temperature(base);
+        let start_pressure = pressure;
         pressure *= if lapse == 0.0 {
             (-G * (end - base) / (R * temp)).exp()
         } else {
             ((temp + lapse * (end - base)) / temp).powf(-G / (R * lapse))
         };
+        step(base, end, temp, lapse, start_pressure, pressure);
         if altitude_m <= top {
             return Some(pressure);
         }
@@ -142,4 +152,36 @@ pub(crate) fn isa_altitude(pressure_pa: f64) -> Option<f64> {
         }
     }
     Some((low + high) / 2.)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn atmosphere_steps_match_forward_and_inverse_models() {
+        for height in [
+            -1000.0, 0.0, 10_999.999, 11_000.0, 11_000.001, 15_000.0, 20_000.0, 32_000.0, 47_000.0,
+            51_000.0, 71_000.0, 86_000.0,
+        ] {
+            let mut steps = Vec::new();
+            let pressure =
+                isa_pressure_with_steps(height, |base, end, temp, lapse, start, end_pressure| {
+                    steps.push((base, end, temp, lapse, start, end_pressure));
+                })
+                .unwrap();
+            assert_eq!(pressure, isa_pressure(height).unwrap());
+            assert_eq!(steps.last().unwrap().1, height);
+            assert_eq!(steps.last().unwrap().5, pressure);
+            for adjacent in steps.windows(2) {
+                assert_eq!(adjacent[0].1, adjacent[1].0);
+                assert_eq!(adjacent[0].5, adjacent[1].4);
+            }
+            assert!((isa_altitude(pressure).unwrap() - height).abs() < 1e-6);
+        }
+        assert!(
+            isa_pressure_with_steps(86_001.0, |_, _, _, _, _, _| panic!("无效高度不能输出过程"))
+                .is_none()
+        );
+    }
 }

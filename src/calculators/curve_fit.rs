@@ -1,7 +1,7 @@
 //! 分析与测量数据的通用校准曲线页面；不绑定仪器类型、测量对象或单位。
 use crate::app::ToolboxApp;
 use crate::calculators::common::{
-    format_number, info_note, panel, render_error_message, render_metrics,
+    calculation_process_lazy, format_number, info_note, panel, render_error_message, render_metrics,
 };
 use crate::catalog::ToolDef;
 use crate::{BLUE, BLUE_SOFT, INK, MUTED, TABLE_STRIPE};
@@ -431,10 +431,43 @@ impl ToolboxApp {
             }) {
                 Ok((points, fit)) => {
                     render_results(ui, &fit, &points, &input.x_label, &input.y_label);
+                    calculation_process_lazy(ui, "curve_fit_process", || fit.process(&points));
                 }
                 Err(error) => render_error_message(ui, &error),
             }
             info_note(ui, tool.kind);
         });
+    }
+}
+
+#[cfg(test)]
+mod process_tests {
+    use super::*;
+
+    #[test]
+    fn process_follows_each_model_predictions_and_residuals() {
+        let points = [(0.0, 1.0), (1.0, 2.2), (2.0, 5.0), (3.0, 10.1), (4.0, 17.0)];
+        for kind in [
+            FitKind::Linear,
+            FitKind::ThroughOrigin,
+            FitKind::Quadratic,
+            FitKind::Cubic,
+        ] {
+            let fit = CurveFit::calculate(&points, kind).unwrap();
+            let text = fit.process(&points).join("\n");
+            for (prediction, residual) in fit.fitted.iter().zip(&fit.residuals) {
+                assert!(text.contains(&prediction.to_string()), "{text}");
+                assert!(text.contains(&residual.to_string()), "{text}");
+            }
+            assert!(text.contains(&fit.rmse.to_string()));
+            assert_eq!(
+                text.contains("常数项固定为 0"),
+                kind == FitKind::ThroughOrigin
+            );
+        }
+        let constant = CurveFit::calculate(&[(0.0, 2.0), (1.0, 2.0)], FitKind::Linear).unwrap();
+        let text = constant.process(&[(0.0, 2.0), (1.0, 2.0)]).join("\n");
+        assert!(text.contains("响应量无变化"));
+        assert!(text.contains("残差标准差未定义"));
     }
 }

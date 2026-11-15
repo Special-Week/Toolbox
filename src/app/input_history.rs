@@ -618,6 +618,1441 @@ mod tests {
         texts
     }
 
+    fn note_text_is_rendered(texts: &[(String, egui::Rect)], note: &str) -> bool {
+        if note.is_empty() || texts.iter().any(|(text, _)| text == note) {
+            return true;
+        }
+        note.lines().all(|line| {
+            line.is_empty()
+                || texts.iter().any(|(text, _)| text == line)
+                || crate::calculators::formula_layout::visible_text_fragments(line)
+                    .iter()
+                    .filter(|part| !part.is_empty())
+                    .all(|part| texts.iter().any(|(text, _)| text.contains(part)))
+        })
+    }
+
+    #[test]
+    fn height_process_tracks_the_result_and_disappears_for_invalid_input() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(directory.path().join("inputs.json"));
+        let ctx = context();
+        let id = "altitude_difference_correction";
+        let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+        let size = [1220.0, 2400.0];
+        let first = frame(&mut app, &ctx, id, size, vec![]);
+        let texts = text_shapes(&first);
+        assert!(!texts.iter().any(|(text, _)| text.contains("ρ × g × ΔH")));
+        let point = texts
+            .iter()
+            .find(|(text, _)| text == "计算过程")
+            .unwrap()
+            .1
+            .center();
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                &ctx,
+                id,
+                size,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        let show = |app: &mut ToolboxApp| {
+            for _ in 0..12 {
+                frame(app, &ctx, id, size, vec![]);
+            }
+            text_shapes(&frame(app, &ctx, id, size, vec![]))
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect::<Vec<_>>()
+        };
+        let liquid = show(&mut app);
+        assert!(!liquid.iter().any(|text| text == "显示完整双精度"));
+        assert!(liquid.iter().any(|text| text.contains("978.899803 Pa")));
+        assert!(liquid.iter().any(|text| text.contains("ρ × g × ΔH")));
+        app.set_value(tool, "height", "-0.1".into());
+        assert!(
+            show(&mut app)
+                .iter()
+                .any(|text| text.contains("-978.899803 Pa"))
+        );
+        app.set_value(tool, "medium", "1".into());
+        app.set_value(tool, "gas.state", "1".into());
+        app.set_value(tool, "gas.pressure_type", "0".into());
+        let gauge = show(&mut app);
+        assert!(
+            gauge
+                .iter()
+                .any(|text| text.contains("标准器绝压 = 表压 + 环境绝压"))
+        );
+        assert!(
+            gauge.iter().any(|text| text.contains("环境气柱压力差")),
+            "{gauge:?}"
+        );
+        app.set_value(tool, "gas.pressure_type", "1".into());
+        let absolute = show(&mut app);
+        assert!(
+            absolute
+                .iter()
+                .any(|text| text.contains("标准器绝压 = 100000 Pa"))
+        );
+        assert!(!absolute.iter().any(|text| text.contains("环境气柱压力差")));
+        app.set_value(tool, "gas.state", "0".into());
+        app.set_value(tool, "height", "0".into());
+        let local_gas = show(&mut app);
+        assert!(
+            local_gas
+                .iter()
+                .any(|text| text.contains("当地介质密度 ρ = 1.204"))
+        );
+        assert!(local_gas.iter().any(|text| text.contains("无高差")));
+        assert!(!local_gas.iter().any(|text| text.contains("环境气柱压力差")));
+        app.set_value(tool, "gas.state", "1".into());
+        app.set_value(tool, "density.gas.normal", "0".into());
+        let invalid = show(&mut app);
+        assert!(
+            invalid
+                .iter()
+                .any(|text| text.contains("密度与重力加速度必须大于 0"))
+        );
+        assert!(!invalid.iter().any(|text| text == "计算过程"));
+    }
+
+    #[test]
+    fn pressure_tools_show_process_for_each_model_and_selection_mode() {
+        let directory = tempfile::tempdir().unwrap();
+        let size = [1220.0, 8000.0];
+        for id in [
+            "pressure_reference_selection",
+            "pressure_transmitter_reference_selection",
+            "altitude_pressure_converter",
+        ] {
+            let mut app = app_at(directory.path().join(format!("{id}.json")));
+            let ctx = context();
+            let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+            let show = |app: &mut ToolboxApp| {
+                for _ in 0..12 {
+                    frame(app, &ctx, id, size, vec![]);
+                }
+                text_shapes(&frame(app, &ctx, id, size, vec![]))
+                    .into_iter()
+                    .map(|(text, _)| text)
+                    .collect::<Vec<_>>()
+            };
+            let open = |app: &mut ToolboxApp| {
+                let out = frame(app, &ctx, id, size, vec![]);
+                let point = text_shapes(&out)
+                    .iter()
+                    .find(|(text, _)| text == "计算过程")
+                    .unwrap()
+                    .1
+                    .center();
+                for pressed in [true, false] {
+                    frame(
+                        app,
+                        &ctx,
+                        id,
+                        size,
+                        vec![
+                            egui::Event::PointerMoved(point),
+                            egui::Event::PointerButton {
+                                pos: point,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: Default::default(),
+                            },
+                        ],
+                    );
+                }
+            };
+            open(&mut app);
+            if id == "altitude_pressure_converter" {
+                assert!(
+                    show(&mut app)
+                        .iter()
+                        .any(|text| text.contains("空气密度 ρ = p /"))
+                );
+                app.set_value(tool, "mode", "1".into());
+                assert!(show(&mut app).iter().any(|text| text.contains("二分反算")));
+                app.set_value(tool, "pressure", "0".into());
+                assert!(!show(&mut app).iter().any(|text| text == "计算过程"));
+            } else {
+                assert!(
+                    show(&mut app)
+                        .iter()
+                        .any(|text| text.contains("量传比 = 被检允差"))
+                );
+                if id == "pressure_reference_selection" {
+                    app.set_value(tool, "dut_low", "10.01".into());
+                    app.set_value(tool, "dut_high", "10.03".into());
+                    app.set_value(tool, "ref_high", "20".into());
+                    let text = show(&mut app);
+                    assert!(
+                        text.iter().any(|s| s.contains("10.03 − 10.01 = 0.02")),
+                        "{text:?}"
+                    );
+                    assert!(
+                        !text.iter().any(|s| s.contains("0.019999999999999574")),
+                        "{text:?}"
+                    );
+                    app.set_value(tool, "dut_low", "0".into());
+                    app.set_value(tool, "dut_high", "1".into());
+                    app.set_value(tool, "ref_high", "1.6".into());
+                    app.set_value(tool, "selection.reference_type", "1".into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|text| text.contains("活塞压力计"))
+                    );
+                } else {
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|text| text.contains("电测分量 ="))
+                    );
+                }
+                for mode in ["1", "2"] {
+                    app.set_value(tool, "selection.mode", mode.into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|text| text.contains("逐一核验目录量程"))
+                    );
+                }
+                app.set_value(tool, "selection.mode", "0".into());
+                app.set_value(tool, "required_ratio", "0".into());
+                assert!(!show(&mut app).iter().any(|text| text == "计算过程"));
+                if id == "pressure_transmitter_reference_selection" {
+                    app.set_value(tool, "required_ratio", "3".into());
+                    app.set_value(tool, "selection.model", "1".into());
+                    open(&mut app);
+                    let legacy = show(&mut app);
+                    assert!(legacy.iter().any(|text| text.contains("压力通道（量程")));
+                    assert!(legacy.iter().any(|text| text.contains("电信号通道")));
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn all_calculation_processes_are_directly_before_the_explanation() {
+        use crate::catalog::ToolKind;
+        let directory = tempfile::tempdir().unwrap();
+        let mut checked = 0;
+        for tool in TOOLS.iter().filter(|tool| {
+            matches!(
+                tool.kind,
+                ToolKind::Unit(_)
+                    | ToolKind::WorkingThermocouple
+                    | ToolKind::IndustrialResistance
+                    | ToolKind::StandardThermocouple
+                    | ToolKind::StandardPlatinumResistor
+                    | ToolKind::Thermistor
+                    | ToolKind::PressureReference
+                    | ToolKind::TransmitterReference
+                    | ToolKind::HeightCorrection
+                    | ToolKind::AltitudePressure
+                    | ToolKind::HumidityConversion
+                    | ToolKind::EarBlackbody
+                    | ToolKind::BlackbodyError
+                    | ToolKind::RadiationCorrection
+                    | ToolKind::Repeatability
+                    | ToolKind::RangeMethod
+                    | ToolKind::ResultantError
+                    | ToolKind::ErrorAnalysis
+                    | ToolKind::Uncertainty
+                    | ToolKind::Gauge(_)
+                    | ToolKind::Transmitter
+                    | ToolKind::BSplineInterpolation
+                    | ToolKind::CalibrationCurveFit
+            )
+        }) {
+            let mut app = app_at(directory.path().join(format!("{}.json", tool.id)));
+            let ctx = context();
+            let out = frame(&mut app, &ctx, tool.id, [1220.0, 18000.0], vec![]);
+            let shapes = text_shapes(&out);
+            let process = shapes
+                .iter()
+                .find(|(s, _)| s == "计算过程")
+                .unwrap_or_else(|| panic!("{} 无计算过程", tool.id))
+                .1;
+            let note = shapes
+                .iter()
+                .find(|(s, _)| s == "计算说明")
+                .unwrap_or_else(|| panic!("{} 无计算说明", tool.id))
+                .1;
+            assert!(process.bottom() < note.top(), "{} 位置不对", tool.id);
+            assert!(
+                note.top() - process.bottom() < 120.0,
+                "{} 中间还有其他内容",
+                tool.id
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 49);
+        for (id, settings) in [
+            (
+                "standard_thermocouple",
+                vec![("stc.calibration", "1"), ("stc.coefficient_source", "1")],
+            ),
+            ("standard_platinum_resistor_sprt", vec![("sprt.model", "1")]),
+            (
+                "standard_platinum_resistor_sprt",
+                vec![("sprt.source", "1")],
+            ),
+            ("thermistor", vec![("ntc.model", "1")]),
+            ("thermistor", vec![("ntc.source", "1")]),
+            (
+                "pressure_transmitter_reference_selection",
+                vec![("selection.model", "1")],
+            ),
+            (
+                "pressure_reference_selection",
+                vec![("selection.mode", "2")],
+            ),
+            ("resultant_error", vec![("components.mode", "1")]),
+            ("uncertainty_calculation", vec![("budget.mode", "1")]),
+        ] {
+            let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+            let mut app = app_at(directory.path().join(format!("{id}_variant.json")));
+            for (key, value) in settings {
+                app.set_value(tool, key, value.into());
+            }
+            let ctx = context();
+            let shapes = text_shapes(&frame(&mut app, &ctx, id, [1220.0, 18000.0], vec![]));
+            let process = shapes
+                .iter()
+                .find(|(s, _)| s == "计算过程")
+                .unwrap_or_else(|| panic!("{id} 模式无计算过程: {shapes:?}"))
+                .1;
+            let note = shapes
+                .iter()
+                .find(|(s, _)| s == "计算说明")
+                .unwrap_or_else(|| panic!("{id} 模式无计算说明"))
+                .1;
+            assert!(
+                process.bottom() < note.top() && note.top() - process.bottom() < 120.0,
+                "{id} 模式的位置不对"
+            );
+        }
+    }
+
+    #[test]
+    fn every_calculation_note_renders_its_actual_summary_and_formula() {
+        let directory = tempfile::tempdir().unwrap();
+        let size = [1220.0, 18000.0];
+        let mut checked = 0;
+        for tool in TOOLS
+            .iter()
+            .filter(|tool| !matches!(tool.kind, crate::catalog::ToolKind::PdfDownload))
+        {
+            let mut app = app_at(directory.path().join(format!("note-{}.json", tool.id)));
+            let ctx = context();
+            let output = frame(&mut app, &ctx, tool.id, size, vec![]);
+            let point = text_shapes(&output)
+                .iter()
+                .find(|(s, _)| s == "计算说明")
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    tool.id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            for _ in 0..12 {
+                frame(&mut app, &ctx, tool.id, size, vec![]);
+            }
+            let output = frame(&mut app, &ctx, tool.id, size, vec![]);
+            let texts = text_shapes(&output);
+            let (summary, formula) = crate::calculators::explanations::selected(tool.kind, 0);
+            assert!(
+                note_text_is_rendered(&texts, summary),
+                "{} 缺少对应摘要",
+                tool.id
+            );
+            assert!(
+                note_text_is_rendered(&texts, &formula),
+                "{} 缺少对应公式",
+                tool.id
+            );
+            checked += 1;
+        }
+        assert_eq!(checked, 49);
+    }
+
+    #[test]
+    fn model_variants_render_the_matching_calculation_note() {
+        let directory = tempfile::tempdir().unwrap();
+        let size = [1220.0, 18000.0];
+        for (id, key, value, mode) in [
+            ("standard_thermocouple", "stc.calibration", "1", 1),
+            ("standard_platinum_resistor_sprt", "sprt.model", "1", 1),
+            ("standard_platinum_resistor_sprt", "sprt.deviation", "1", 2),
+            ("thermistor", "ntc.model", "1", 1),
+            (
+                "pressure_reference_selection",
+                "selection.reference_type",
+                "1",
+                1,
+            ),
+            (
+                "pressure_transmitter_reference_selection",
+                "selection.model",
+                "1",
+                1,
+            ),
+            ("ear_thermometer_blackbody", "ear.model", "1", 1),
+            ("blackbody_radiation_source", "model", "1", 1),
+            ("radiation_thermometer", "model", "1", 1),
+            ("resultant_error", "components.mode", "1", 1),
+            ("uncertainty_calculation", "budget.mode", "1", 1),
+        ] {
+            let tool = TOOLS
+                .iter()
+                .find(|tool| tool.id == id)
+                .unwrap_or_else(|| panic!("不存在工具 {id}"));
+            let mut app = app_at(directory.path().join(format!("{id}-{key}.json")));
+            let ctx = context();
+            frame(&mut app, &ctx, id, size, vec![]);
+            app.set_value(tool, key, value.into());
+            let output = frame(&mut app, &ctx, id, size, vec![]);
+            let point = text_shapes(&output)
+                .iter()
+                .find(|(s, _)| s == "计算说明")
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            for _ in 0..12 {
+                frame(&mut app, &ctx, id, size, vec![]);
+            }
+            let output = frame(&mut app, &ctx, id, size, vec![]);
+            let texts = text_shapes(&output);
+            let (summary, formula) = crate::calculators::explanations::selected(tool.kind, mode);
+            assert!(
+                note_text_is_rendered(&texts, summary),
+                "{id} 模式 {mode} 摘要不符: {:?}",
+                texts.iter().map(|(s, _)| s).collect::<Vec<_>>()
+            );
+            assert!(
+                note_text_is_rendered(&texts, &formula),
+                "{id} 模式 {mode} 公式不符"
+            );
+        }
+    }
+
+    #[test]
+    fn gauge_process_displays_formulas_or_identifies_direct_table_lookups() {
+        let directory = tempfile::tempdir().unwrap();
+        let size = [1220.0, 24000.0];
+        for (id, expected) in [
+            (
+                "gauge_metric",
+                "通端工作塞规：中径名义 = 工件中径下限 + ZPL =",
+            ),
+            (
+                "gauge_trapezoidal",
+                "通端工作塞规：中径名义 = 工件中径下限 + ZPL =",
+            ),
+            ("gauge_unified", "通端工作"),
+            ("gauge_pipe", "按所选规格查内置表"),
+            (
+                "gauge_rebar",
+                "通端工作塞规：中径名义 = 工件中径下限 + ZPL =",
+            ),
+            ("gauge_smooth", "孔用止端下限 = D + ES − T1 ="),
+        ] {
+            let mut app = app_at(directory.path().join(format!("{id}-steps.json")));
+            let ctx = context();
+            let output = frame(&mut app, &ctx, id, size, vec![]);
+            let point = text_shapes(&output)
+                .iter()
+                .find(|(s, _)| s == "计算过程")
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            for _ in 0..12 {
+                frame(&mut app, &ctx, id, size, vec![]);
+            }
+            let output = frame(&mut app, &ctx, id, size, vec![]);
+            let text = text_shapes(&output);
+            assert!(
+                text.iter().any(|(s, _)| s.contains(expected)),
+                "{id} 缺少 {expected}"
+            );
+            assert!(
+                !text
+                    .iter()
+                    .any(|(s, _)| s.contains("以下为本次计算或查表得到的结果")),
+                "{id} 仍在重复结果表"
+            );
+        }
+    }
+
+    #[test]
+    fn spline_process_shows_one_representative_sample() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = "bspline_interpolation";
+        let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+        let mut app = app_at(directory.path().join("spline-process.json"));
+        let ctx = context();
+        let size = [1220.0, 10000.0];
+        let output = frame(&mut app, &ctx, id, size, vec![]);
+        let point = text_shapes(&output)
+            .iter()
+            .find(|(text, _)| text == "计算过程")
+            .unwrap()
+            .1
+            .center();
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                &ctx,
+                id,
+                size,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        for _ in 0..12 {
+            frame(&mut app, &ctx, id, size, vec![]);
+        }
+        let texts = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+        assert_eq!(
+            texts
+                .iter()
+                .filter(|(s, _)| s.starts_with("示例：预览采样点"))
+                .count(),
+            1
+        );
+        assert!(texts.iter().any(|(s, _)| s.contains("左端外推")));
+        assert!(
+            texts
+                .iter()
+                .any(|(s, _)| s.contains("sₓ = x末 − x₀ = 2650 − 250 = 2400"))
+        );
+        assert!(
+            texts
+                .iter()
+                .any(|(s, _)| s.contains("Q8：|48340 − 2002| = 46338，所以 sᵧ = 46338"))
+        );
+        assert!(!texts.iter().any(|(s, _)| s.contains("示例过程无法生成")));
+
+        app.set_value(tool, "x_min", "250".into());
+        app.set_value(tool, "x_max", "260".into());
+        let texts = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+        assert!(
+            texts
+                .iter()
+                .any(|(s, _)| s.contains("示例：预览采样点 2，x = 250.5")),
+            "{texts:?}"
+        );
+        assert!(
+            texts.iter().any(|(s, _)| s.contains("Q0～Q1 插值")),
+            "{texts:?}"
+        );
+        assert_eq!(
+            texts
+                .iter()
+                .filter(|(s, _)| s.starts_with("示例：预览采样点"))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn unit_process_explains_linear_and_temperature_conversions() {
+        let directory = tempfile::tempdir().unwrap();
+        let size = [1220.0, 8000.0];
+        for (id, value, expected) in [
+            ("unit_temperature", "100", ["目标值 = ", "1", " = 373.15 K"]),
+            ("unit_pressure", "101325", ["1", "101325", ") = 1 atm"]),
+        ] {
+            let mut app = app_at(directory.path().join(format!("{id}.json")));
+            let ctx = context();
+            let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+            frame(&mut app, &ctx, id, size, vec![]);
+            app.set_value(tool, "value", value.into());
+            let out = frame(&mut app, &ctx, id, size, vec![]);
+            let shapes = text_shapes(&out);
+            let heading = shapes
+                .iter()
+                .find(|(text, _)| text.starts_with("换算结果 · 全部"))
+                .expect("应显示换算结果标题")
+                .1;
+            let process_header = shapes
+                .iter()
+                .find(|(text, _)| text == "计算过程")
+                .unwrap()
+                .1;
+            let note_header = shapes
+                .iter()
+                .find(|(text, _)| text == "计算说明")
+                .unwrap()
+                .1;
+            assert!(process_header.top() > heading.bottom());
+            assert!(
+                process_header.bottom() < note_header.top(),
+                "计算过程应位于计算说明之前"
+            );
+            let point = process_header.center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            for _ in 0..12 {
+                frame(&mut app, &ctx, id, size, vec![]);
+            }
+            let texts = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+            for part in expected {
+                assert!(
+                    texts.iter().any(|(text, _)| text.contains(part)),
+                    "{id}: {part}: {texts:?}"
+                );
+            }
+            if id == "unit_temperature" {
+                let first = texts
+                    .iter()
+                    .find(|(text, _)| text.starts_with("摄氏度：目标系数"))
+                    .unwrap()
+                    .1;
+                let second = texts
+                    .iter()
+                    .find(|(text, _)| text.starts_with("开尔文：目标系数"))
+                    .unwrap()
+                    .1;
+                assert!(
+                    second.top() - first.bottom() >= 15.0,
+                    "不同单位的计算之间应保留空行"
+                );
+            }
+            app.set_value(tool, "value", "200".into());
+            let updated = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+            assert!(
+                updated
+                    .iter()
+                    .any(|(text, _)| text.starts_with("输入 200 "))
+            );
+            app.set_value(tool, "value", "无效".into());
+            let invalid = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+            assert!(!invalid.iter().any(|(text, _)| text == "计算过程"));
+        }
+    }
+
+    #[test]
+    fn humidity_process_follows_input_modes_and_hides_invalid_results() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = "temperature_humidity_conversion";
+        let mut app = app_at(directory.path().join("humidity.json"));
+        let ctx = context();
+        let size = [1220.0, 10000.0];
+        let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+        let initial = frame(&mut app, &ctx, id, size, vec![]);
+        let point = text_shapes(&initial)
+            .iter()
+            .find(|(text, _)| text == "计算过程")
+            .unwrap()
+            .1
+            .center();
+        for pressed in [true, false] {
+            frame(
+                &mut app,
+                &ctx,
+                id,
+                size,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        for (mode, expected) in [
+            ("0", "输入相对湿度"),
+            ("1", "输入露点的饱和水汽压"),
+            ("2", "输入湿球温度的饱和水汽压"),
+            ("3", "输入混合比"),
+        ] {
+            app.set_value(tool, "known", mode.into());
+            for _ in 0..12 {
+                frame(&mut app, &ctx, id, size, vec![]);
+            }
+            let rendered = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+            assert!(
+                rendered.iter().any(|(text, _)| text.contains(expected)),
+                "{mode}: {rendered:?}"
+            );
+            assert!(
+                rendered
+                    .iter()
+                    .any(|(text, _)| text.contains("干空气基准体积比"))
+            );
+        }
+        app.set_value(tool, "pressure", "0".into());
+        let invalid = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+        assert!(!invalid.iter().any(|(text, _)| text == "计算过程"));
+    }
+
+    #[test]
+    fn radiation_process_tracks_models_responses_and_invalid_inputs() {
+        let directory = tempfile::tempdir().unwrap();
+        let size = [1220.0, 10000.0];
+        for id in [
+            "ear_thermometer_blackbody",
+            "blackbody_radiation_source",
+            "radiation_thermometer",
+        ] {
+            let mut app = app_at(directory.path().join(format!("{id}.json")));
+            let ctx = context();
+            let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+            let initial = frame(&mut app, &ctx, id, size, vec![]);
+            let point = text_shapes(&initial)
+                .iter()
+                .find(|(text, _)| text == "计算过程")
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            let show = |app: &mut ToolboxApp| {
+                for _ in 0..12 {
+                    frame(app, &ctx, id, size, vec![]);
+                }
+                text_shapes(&frame(app, &ctx, id, size, vec![]))
+                    .into_iter()
+                    .map(|(text, _)| text)
+                    .collect::<Vec<_>>()
+            };
+            if id == "ear_thermometer_blackbody" {
+                assert!(show(&mut app).iter().any(|s| s.contains("多次反射平衡")));
+                app.set_value(tool, "ear.model", "1".into());
+                assert!(show(&mut app).iter().any(|s| s.contains("一次反射近似")));
+            } else {
+                assert!(show(&mut app).iter().any(|s| s.contains("采用有效波长法")));
+                app.set_value(tool, "model", "1".into());
+                for (response, expected) in [
+                    ("0", "单一波长"),
+                    ("1", "8～14 μm 平坦波段"),
+                    ("2", "7～18 μm 平坦波段"),
+                ] {
+                    app.set_value(tool, "spectral_response", response.into());
+                    let text = show(&mut app);
+                    assert!(text.iter().any(|s| s.contains(expected)), "{id} {response}");
+                    assert!(text.iter().any(|s| s.contains("目标 ")));
+                }
+            }
+            app.set_value(tool, "emissivity", "0".into());
+            assert!(!show(&mut app).iter().any(|text| text == "计算过程"));
+        }
+    }
+
+    #[test]
+    fn temperature_tools_show_current_process_and_hide_invalid_results() {
+        let directory = tempfile::tempdir().unwrap();
+        let size = [1220.0, 10000.0];
+        for id in [
+            "working_thermocouple",
+            "industrial_thermal_resistance",
+            "standard_thermocouple",
+            "standard_platinum_resistor_sprt",
+            "thermistor",
+        ] {
+            let mut app = app_at(directory.path().join(format!("{id}.json")));
+            let ctx = context();
+            let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+            let show = |app: &mut ToolboxApp| {
+                for _ in 0..12 {
+                    frame(app, &ctx, id, size, vec![]);
+                }
+                text_shapes(&frame(app, &ctx, id, size, vec![]))
+                    .into_iter()
+                    .map(|(text, _)| text)
+                    .collect::<Vec<_>>()
+            };
+            let open = |app: &mut ToolboxApp| {
+                let out = frame(app, &ctx, id, size, vec![]);
+                let texts = text_shapes(&out);
+                let point = texts
+                    .iter()
+                    .find(|(text, _)| text == "计算过程")
+                    .unwrap_or_else(|| panic!("{id}: {texts:?}"))
+                    .1
+                    .center();
+                for pressed in [true, false] {
+                    frame(
+                        app,
+                        &ctx,
+                        id,
+                        size,
+                        vec![
+                            egui::Event::PointerMoved(point),
+                            egui::Event::PointerButton {
+                                pos: point,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: Default::default(),
+                            },
+                        ],
+                    );
+                }
+            };
+            open(&mut app);
+            match id {
+                "working_thermocouple" => {
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("测得热电势 = E(热端)"))
+                    );
+                    let steps = show(&mut app);
+                    assert!(steps.iter().any(|s| s.contains("实际使用分段 0～1372 °C")));
+                    assert!(steps.iter().any(|s| s.contains("c[0] = -0.017600413686")));
+                    // 指数表达式由排版引擎绘制，不再属于文本图形。
+                    assert!(steps.iter().any(|s| s.contains("指数项 =")));
+                    app.set_value(tool, "mode", "1".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("补偿后热电势 =")));
+                    app.set_value(tool, "mode", "0".into());
+                    app.set_value(tool, "tc.unit", "2".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("212 °F")));
+                    app.set_value(tool, "tc.unit", "0".into());
+                    app.set_value(tool, "cold", "9999".into());
+                }
+                "industrial_thermal_resistance" => {
+                    let initial = show(&mut app);
+                    assert!(initial.iter().any(|s| s.contains("CVD 系数 A =")));
+                    assert!(
+                        initial.iter().any(|s| s.contains("电阻 = 138.5055 Ω")),
+                        "{initial:?}"
+                    );
+                    assert!(
+                        !initial.iter().any(|s| s.contains("138.50549999999998")),
+                        "{initial:?}"
+                    );
+                    app.set_value(tool, "rtd.direction", "1".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("有界二分法")));
+                    app.set_value(tool, "rtd.direction", "0".into());
+                    app.set_value(tool, "rtd.unit", "1".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("212 °F")));
+                    app.set_value(tool, "rtd.unit", "0".into());
+                    app.set_value(tool, "rtd.graduation", "3".into());
+                    app.set_value(tool, "rtd.direction", "0".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("分段参考曲线")));
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("c[1] = 0.003974973"))
+                    );
+                    app.set_value(tool, "rtd.pt100_3916.r0", "0".into());
+                }
+                "standard_thermocouple" => {
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("固定点实测热电势"))
+                    );
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("固定点 1 的插值项"))
+                    );
+                    app.set_value(tool, "stc.cold.0", "100".into());
+                    let cold_steps = show(&mut app);
+                    assert!(
+                        cold_steps
+                            .iter()
+                            .any(|s| s.contains("参考端固定点修正") && s.contains("100 °C"))
+                    );
+                    assert!(cold_steps.iter().any(|s| s.contains("参考端参考电势")
+                        && s.contains("固定点修正")
+                        && s.contains("模型电势")));
+                    app.set_value(tool, "stc.S.0.0.t.0", "200".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("S 型低于 400 °C")));
+                    app.set_value(tool, "stc.direction", "1".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("补偿后电势 =")));
+                    app.set_value(tool, "stc.calibration", "1".into());
+                    app.set_value(tool, "stc.direction", "0".into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("使用输入的温区系数"))
+                    );
+                    app.set_value(tool, "stc.coefficient_source", "1".into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("温区系数由校准点拟合"))
+                    );
+                    app.set_value(tool, "stc.calibration", "0".into());
+                    app.set_value(tool, "stc.type", "1".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("B 型标准热电偶")));
+                    app.set_value(tool, "stc.B.0.0.t.0", "1150".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("过渡比例 = 0.5")));
+                    app.set_value(tool, "stc.cold.0", "9999".into());
+                }
+                "standard_platinum_resistor_sprt" => {
+                    assert!(show(&mut app).iter().any(|s| s.contains("实际电阻比 W =")));
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("高温参考函数：x ="))
+                    );
+                    app.set_value(tool, "sprt.direction", "1".into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("偏差修正后的参考电阻比"))
+                    );
+                    app.set_value(tool, "sprt.hr", "6".into());
+                    app.set_value(tool, "sprt.direction", "0".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("低温偏差")));
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("低温参考函数：x ="))
+                    );
+                    app.set_value(tool, "sprt.hr", "1".into());
+                    app.set_value(tool, "sprt.source", "1".into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("使用固定点拟合系数"))
+                    );
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("固定点拟合：每点计算"))
+                    );
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("固定点高温参考函数"))
+                    );
+                    app.set_value(tool, "sprt.model", "1".into());
+                    open(&mut app);
+                    let displayed = show(&mut app);
+                    assert!(displayed.iter().any(|s| s.contains("对每个校准点建立")));
+                    assert!(displayed.iter().any(|s| s.contains(" − 1 = ")));
+                    let rendered = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+                    let points: Vec<_> = rendered
+                        .iter()
+                        .filter(|(text, _)| text.starts_with("校准点：t ="))
+                        .map(|(_, rect)| *rect)
+                        .collect();
+                    assert_eq!(points.len(), 3);
+                    assert!(
+                        points
+                            .windows(2)
+                            .all(|pair| pair[1].top() - pair[0].bottom() >= 15.0),
+                        "不同校准点之间应保留空行"
+                    );
+                    app.set_value(tool, "r0", "0".into());
+                }
+                "thermistor" => {
+                    assert!(show(&mut app).iter().any(|s| s.contains("电阻 → 温度：")));
+                    let shifted_b0 = (20000.0_f64.ln() - 3950.0 / 298.15).to_string();
+                    app.set_value(tool, "ntc.b.3.false.0", shifted_b0);
+                    let details = show(&mut app);
+                    assert!(details.iter().any(|s| s.contains("变化率使用 B[0]")));
+                    let b_resistance = details
+                        .iter()
+                        .find_map(|s| {
+                            s.strip_prefix("B 曲线在当前温度的电阻 = ")?
+                                .strip_suffix(" Ω。")?
+                                .parse::<f64>()
+                                .ok()
+                        })
+                        .expect("应展示 B 曲线在当前温度的电阻");
+                    assert!((b_resistance - 20000.0).abs() < 1e-6);
+                    app.set_value(tool, "mode", "1".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("温度 → 电阻：")));
+                    app.set_value(tool, "ntc.temperature.0", "-20".into());
+                    let boundary = show(&mut app);
+                    assert!(boundary.iter().any(|s| s.contains("间隔 1 °C 的差分")));
+                    assert!(
+                        boundary
+                            .iter()
+                            .any(|s| s.contains("差分点超出所填校准温区"))
+                    );
+                    app.set_value(tool, "ntc.temperature.0", "25".into());
+                    app.set_value(tool, "ntc.source", "1".into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("校准点最小二乘拟合系数"))
+                    );
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("拟合 A 时使用 x="))
+                    );
+                    app.set_value(tool, "ntc.model", "1".into());
+                    open(&mut app);
+                    assert!(show(&mut app).iter().any(|s| s.contains("β = 3950 K")));
+                    app.set_value(tool, "r0", "0".into());
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                !show(&mut app).iter().any(|s| s == "计算过程"),
+                "{id} 无效输入不应显示旧过程"
+            );
+        }
+    }
+
+    #[test]
+    fn thermocouple_reference_details_wrap_in_narrow_windows() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = "working_thermocouple";
+        for width in [370.0, 620.0] {
+            let mut app = app_at(directory.path().join(format!("{width}.json")));
+            let ctx = context();
+            let size = [width, 3000.0];
+            let first = frame(&mut app, &ctx, id, size, vec![]);
+            let point = text_shapes(&first)
+                .iter()
+                .find(|(text, _)| text == "计算过程")
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            for _ in 0..15 {
+                frame(&mut app, &ctx, id, size, vec![]);
+            }
+            let texts = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+            let coefficients: Vec<_> = texts
+                .iter()
+                .filter(|(text, _)| text.starts_with("c["))
+                .collect();
+            assert!(!coefficients.is_empty(), "应展示参考函数系数");
+            for (_, rect) in coefficients {
+                assert!(
+                    rect.left() >= 0.0 && rect.right() <= width,
+                    "{width} 像素窗口内系数越界：{rect:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn uncertainty_total_hides_float_tail_without_precision_toggle() {
+        let directory = tempfile::tempdir().unwrap();
+        let id = "uncertainty_calculation";
+        let mut app = app_at(directory.path().join("uncertainty.json"));
+        let ctx = context();
+        let size = [1220.0, 10000.0];
+        let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+        frame(&mut app, &ctx, id, size, vec![]);
+        for (key, value) in [
+            ("budget.components.count", "1"),
+            ("budget.component.0.type", "1"),
+            ("budget.component.0.distribution", "4"),
+            ("budget.component.0.half_width", "0.1"),
+            ("budget.component.0.sensitivity", "3"),
+        ] {
+            app.set_value(tool, key, value.into());
+        }
+        let click = |app: &mut ToolboxApp, label: &str| {
+            let output = frame(app, &ctx, id, size, vec![]);
+            let point = text_shapes(&output)
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            for _ in 0..12 {
+                frame(app, &ctx, id, size, vec![]);
+            }
+        };
+        click(&mut app, "计算过程");
+        let output = frame(&mut app, &ctx, id, size, vec![]);
+        let text = text_shapes(&output);
+        assert!(
+            text.iter().any(|(s, _)| s.contains("u_c = 0.3。")),
+            "{text:?}"
+        );
+        assert!(
+            !text.iter().any(|(s, _)| s.contains("0.30000000000000004")),
+            "{text:?}"
+        );
+        assert!(!text.iter().any(|(s, _)| s == "显示完整双精度"));
+    }
+
+    #[test]
+    fn error_tools_show_calculation_process_for_each_mode() {
+        let directory = tempfile::tempdir().unwrap();
+        let size = [1220.0, 10000.0];
+        for id in [
+            "repeatability_calculation",
+            "range_method_calculation",
+            "resultant_error",
+            "error_analysis",
+            "uncertainty_calculation",
+        ] {
+            let mut app = app_at(directory.path().join(format!("{id}.json")));
+            let ctx = context();
+            let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+            let show = |app: &mut ToolboxApp| {
+                for _ in 0..12 {
+                    frame(app, &ctx, id, size, vec![]);
+                }
+                text_shapes(&frame(app, &ctx, id, size, vec![]))
+                    .into_iter()
+                    .map(|(text, _)| text)
+                    .collect::<Vec<_>>()
+            };
+            let open = |app: &mut ToolboxApp| {
+                let output = frame(app, &ctx, id, size, vec![]);
+                let point = text_shapes(&output)
+                    .iter()
+                    .find(|(text, _)| text == "计算过程")
+                    .unwrap_or_else(|| panic!("{id}: {:?}", text_shapes(&output)))
+                    .1
+                    .center();
+                for pressed in [true, false] {
+                    frame(
+                        app,
+                        &ctx,
+                        id,
+                        size,
+                        vec![
+                            egui::Event::PointerMoved(point),
+                            egui::Event::PointerButton {
+                                pos: point,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: Default::default(),
+                            },
+                        ],
+                    );
+                }
+            };
+            open(&mut app);
+            match id {
+                "repeatability_calculation" => {
+                    let text = show(&mut app);
+                    assert!(text.iter().any(|s| s.contains("测量点 1：")));
+                    assert!(text.iter().any(|s| s.contains("样本标准差 s =")));
+                    assert!(text.iter().any(|s| s.contains("10.03 − 10.01 = 0.02")));
+                    assert!(!text.iter().any(|s| s.contains("0.019999999999999574")));
+                    app.set_value(tool, "samples.value.0", "无效".into());
+                }
+                "range_method_calculation" => {
+                    assert!(show(&mut app).iter().any(|s| s.contains("极差 R =")));
+                    app.set_value(tool, "range.input_method", "1".into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("输入最大值、最小值"))
+                    );
+                    app.set_value(tool, "range.max", "0".into());
+                }
+                "resultant_error" => {
+                    assert!(show(&mut app).iter().any(|s| s.contains("分量 1：贡献")));
+                    app.set_value(tool, "components.error.0", "-0.02".into());
+                    app.set_value(tool, "components.sensitivity.0", "2".into());
+                    assert!(
+                        show(&mut app)
+                            .iter()
+                            .any(|s| s.contains("2 × -0.02 = -0.04"))
+                    );
+                    app.set_value(tool, "components.mode", "1".into());
+                    open(&mut app);
+                    assert!(show(&mut app).iter().any(|s| s.contains("统一单位：")));
+                    app.set_value(tool, "pressure_error.0.high", "0".into());
+                }
+                "error_analysis" => {
+                    let text = show(&mut app);
+                    assert!(text.iter().any(|s| s.contains("100.02 − 100 = 0.02")));
+                    assert!(
+                        text.iter().any(|s| s.contains("误差绝对值 |Δ| = 0.02。")),
+                        "{text:?}"
+                    );
+                    assert!(
+                        !text.iter().any(|s| s.contains("0.01999999999999602")),
+                        "{text:?}"
+                    );
+                    app.set_value(tool, "true", "0".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("相对误差无定义")));
+                    app.set_value(tool, "measured", "无效".into());
+                }
+                "uncertainty_calculation" => {
+                    assert!(show(&mut app).iter().any(|s| s.contains("B 类均匀分布")));
+                    app.set_value(tool, "budget.component.0.type", "0".into());
+                    let text = show(&mut app);
+                    assert!(text.iter().any(|s| s.contains("贝塞尔法：取测量次数")));
+                    assert!(
+                        text.iter().any(|s| s.contains("0 − (-0.002) = 0.002")),
+                        "{text:?}"
+                    );
+                    assert!(
+                        text.iter().any(|s| s.contains("-0.01 − (-0.002) = -0.008")),
+                        "{text:?}"
+                    );
+                    assert!(
+                        !text.iter().any(|s| s.contains("10.017999999999999")),
+                        "{text:?}"
+                    );
+                    let shapes = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+                    let first = shapes
+                        .iter()
+                        .find(|(s, _)| s.starts_with("测量点 1："))
+                        .unwrap()
+                        .1;
+                    let second = shapes
+                        .iter()
+                        .find(|(s, _)| s.starts_with("测量点 2："))
+                        .unwrap()
+                        .1;
+                    assert!(
+                        second.top() - first.bottom() < 12.0,
+                        "不确定度测量点之间不应有空行"
+                    );
+                    app.set_value(tool, "budget.component.0.a_method", "1".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("极差法：R =")));
+                    app.set_value(tool, "budget.component.0.type", "2".into());
+                    assert!(show(&mut app).iter().any(|s| s.contains("合成分量：")));
+                    app.set_value(tool, "budget.mode", "1".into());
+                    open(&mut app);
+                    let text = show(&mut app);
+                    assert!(text.iter().any(|s| s.contains("A 类分量：")));
+                    assert!(text.iter().any(|s| s.contains("B 类合成 uB")));
+                    let shapes = text_shapes(&frame(&mut app, &ctx, id, size, vec![]));
+                    let first = shapes
+                        .iter()
+                        .find(|(s, _)| s.starts_with("测量点 1："))
+                        .unwrap()
+                        .1;
+                    let second = shapes
+                        .iter()
+                        .find(|(s, _)| s.starts_with("测量点 2："))
+                        .unwrap()
+                        .1;
+                    assert!(
+                        second.top() - first.bottom() < 12.0,
+                        "快捷不确定度测量点之间不应有空行"
+                    );
+                    app.set_value(tool, "a_samples.count", "3".into());
+                    app.set_value(tool, "a_average_count", "4".into());
+                    for (i, value) in ["1", "2", "3"].iter().enumerate() {
+                        app.set_value(tool, &format!("a_samples.value.{i}"), (*value).into());
+                    }
+                    let lines = show(&mut app);
+                    assert!(lines.iter().any(|s| s.contains("uA = ")));
+                    assert!(lines.iter().any(|s| s.contains(" = 0.5。")));
+                    app.set_value(tool, "coverage", "0".into());
+                }
+                _ => unreachable!(),
+            }
+            assert!(
+                !show(&mut app).iter().any(|s| s == "计算过程"),
+                "{id} 无效输入不应保留旧过程"
+            );
+        }
+    }
+
+    #[test]
+    fn transmitter_process_follows_both_directions_and_transfer_functions() {
+        let directory = tempfile::tempdir().unwrap();
+        let tool = TOOLS.iter().find(|tool| tool.id == "transmitter").unwrap();
+        let size = [1220.0, 8000.0];
+        for (direction, function, expected) in [
+            (0, 0, "输出信号 = 下限"),
+            (0, 1, "信号比例 q = √r"),
+            (1, 0, "被测量比例 r = q"),
+            (1, 1, "被测量比例 r = q²"),
+        ] {
+            let mut app = app_at(
+                directory
+                    .path()
+                    .join(format!("{direction}-{function}.json")),
+            );
+            let ctx = context();
+            frame(&mut app, &ctx, tool.id, size, vec![]);
+            app.set_value(tool, "direction", direction.to_string());
+            app.set_value(tool, "function", function.to_string());
+            let output = frame(&mut app, &ctx, tool.id, size, vec![]);
+            let point = text_shapes(&output)
+                .iter()
+                .find(|(text, _)| text == "计算过程")
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    tool.id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            for _ in 0..12 {
+                frame(&mut app, &ctx, tool.id, size, vec![]);
+            }
+            let text: Vec<_> = text_shapes(&frame(&mut app, &ctx, tool.id, size, vec![]))
+                .into_iter()
+                .map(|(text, _)| text)
+                .collect();
+            assert!(
+                text.iter().any(|line| line.contains(expected)),
+                "{direction}/{function}: {text:?}"
+            );
+            if direction == 1 && function == 1 {
+                assert!(
+                    text.iter().any(|line| line.contains("0.5² = 0.25")),
+                    "{text:?}"
+                );
+                assert!(text.iter().any(|line| line.contains("= 25 Pa")), "{text:?}");
+            }
+            app.set_value(
+                tool,
+                if direction == 0 {
+                    "pressure.0.process_input"
+                } else {
+                    "signal_input"
+                },
+                "无效".into(),
+            );
+            let text = text_shapes(&frame(&mut app, &ctx, tool.id, size, vec![]));
+            assert!(!text.iter().any(|(text, _)| text == "计算过程"));
+        }
+    }
+
     #[test]
     fn uncertainty_average_count_applies_in_budget_and_quick_modes() {
         let directory = tempfile::tempdir().unwrap();
@@ -1256,6 +2691,361 @@ mod tests {
             );
         }
         assert_eq!(app.value(tool, "model", "0"), "1");
+    }
+
+    #[test]
+    fn dropdown_items_fill_popup_and_are_clickable_at_the_right_edge() {
+        fn collect_rectangles(shape: &egui::Shape, result: &mut Vec<egui::Rect>) {
+            match shape {
+                egui::Shape::Rect(rect) => result.push(rect.rect),
+                egui::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        collect_rectangles(shape, result);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let directory = tempfile::tempdir().unwrap();
+        for (id, selected_label, other_label, key, expected) in [
+            (
+                "gauge_unified",
+                "塞规（内螺纹）",
+                "环规（外螺纹）",
+                "unified.side",
+                "环规（外螺纹）",
+            ),
+            (
+                "gauge_metric",
+                "塞规（内螺纹）",
+                "环规（外螺纹）",
+                "thread.side",
+                "环规（外螺纹）",
+            ),
+            (
+                "gauge_pipe",
+                "R · 55° 密封锥螺纹",
+                "NPT · 60° 密封锥螺纹",
+                "system",
+                "NPT · 60° 密封锥螺纹",
+            ),
+            ("gauge_smooth", "孔用塞规", "轴用环规", "mode", "轴用环规"),
+            (
+                "blackbody_radiation_source",
+                "有效波长法",
+                "Planck 辐射平衡",
+                "model",
+                "1",
+            ),
+        ] {
+            for width in [370.0, 620.0, 1220.0] {
+                let mut app = app_at(directory.path().join(format!("{id}-menu-{width}.json")));
+                let ctx = context();
+                let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+                let size = [width, 2000.0];
+                let output = frame(&mut app, &ctx, id, size, vec![]);
+                let button = text_shapes(&output)
+                    .iter()
+                    .find(|(text, _)| text == selected_label)
+                    .unwrap()
+                    .1
+                    .center();
+                for pressed in [true, false] {
+                    frame(
+                        &mut app,
+                        &ctx,
+                        id,
+                        size,
+                        vec![
+                            egui::Event::PointerMoved(button),
+                            egui::Event::PointerButton {
+                                pos: button,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: Default::default(),
+                            },
+                        ],
+                    );
+                }
+                let output = frame(&mut app, &ctx, id, size, vec![]);
+                let option = text_shapes(&output)
+                    .iter()
+                    .find(|(text, _)| text == other_label)
+                    .expect("下拉菜单应展开")
+                    .1;
+                let selected = text_shapes(&output)
+                    .iter()
+                    .filter(|(text, rect)| text == selected_label && rect.top() < option.top())
+                    .max_by(|a, b| a.1.top().total_cmp(&b.1.top()))
+                    .unwrap()
+                    .1;
+                let mut rects = Vec::new();
+                for shape in &output.shapes {
+                    collect_rectangles(&shape.shape, &mut rects);
+                }
+                rects.retain(|rect| rect.contains_rect(selected));
+                let popup = rects
+                    .iter()
+                    .filter(|r| {
+                        r.contains_rect(option) && r.top() <= selected.top() && r.height() < 360.0
+                    })
+                    .min_by(|a, b| a.area().total_cmp(&b.area()))
+                    .expect("应有包围选项的菜单背景");
+                let highlight = rects
+                    .iter()
+                    .filter(|r| {
+                        r.height() < 50.0
+                            && r.top() <= selected.top()
+                            && r.bottom() >= selected.bottom()
+                    })
+                    .min_by(|a, b| a.area().total_cmp(&b.area()))
+                    .expect("应有选中项背景");
+                assert!(
+                    highlight.width() >= popup.width() - 20.0,
+                    "选中项应铺满菜单：popup={popup:?}, highlight={highlight:?}"
+                );
+                let point = egui::pos2(highlight.right() - 4.0, option.center().y);
+                for pressed in [true, false] {
+                    frame(
+                        &mut app,
+                        &ctx,
+                        id,
+                        size,
+                        vec![
+                            egui::Event::PointerMoved(point),
+                            egui::Event::PointerButton {
+                                pos: point,
+                                button: egui::PointerButton::Primary,
+                                pressed,
+                                modifiers: Default::default(),
+                            },
+                        ],
+                    );
+                }
+                assert_eq!(app.value(tool, key, ""), expected, "{id} {width}");
+            }
+        }
+    }
+
+    #[test]
+    fn unified_specification_menu_fits_narrow_windows_and_keeps_three_columns() {
+        let directory = tempfile::tempdir().unwrap();
+        for width in [370.0, 620.0, 1220.0] {
+            let mut app = app_at(directory.path().join(format!("spec-menu-{width}.json")));
+            let ctx = context();
+            let id = "gauge_unified";
+            let size = [width, 2000.0];
+            let output = frame(&mut app, &ctx, id, size, vec![]);
+            let button = text_shapes(&output)
+                .iter()
+                .find(|(text, _)| text == "常用规格")
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(button),
+                        egui::Event::PointerButton {
+                            pos: button,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            let output = frame(&mut app, &ctx, id, size, vec![]);
+            let rows: Vec<_> = text_shapes(&output)
+                .into_iter()
+                .filter(|(text, _)| text.contains("inch") && text.contains("mm"))
+                .collect();
+            assert!(!rows.is_empty(), "规格列表应显示英寸和毫米两列");
+            for (text, rect) in &rows {
+                assert!(
+                    rect.left() >= 0.0 && rect.right() <= width,
+                    "{width}: {text} {rect:?}"
+                );
+            }
+            let point = rows[0].1.center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+            assert_eq!(app.value(tool, "size", ""), "No.0");
+        }
+    }
+
+    #[test]
+    fn archive_dropdown_keeps_long_names_visible_within_the_window() {
+        let directory = tempfile::tempdir().unwrap();
+        let long_name = format!("标准热电偶{}", "长".repeat(80));
+        let required = [
+            "stc.type",
+            "stc.calibration",
+            "stc.S.cal.0",
+            "stc.S.cal.1",
+            "stc.S.cal.2",
+        ];
+        let fields = json!({"stc.type":"0", "stc.calibration":"0", "stc.S.cal.0":"1", "stc.S.cal.1":"2", "stc.S.cal.2":"3"});
+        std::fs::write(directory.path().join("calibrations-v1.json"), json!({"version":1,"archives":[{"tool":"standard_thermocouple","name":long_name,"fields":fields,"required":required}]}).to_string()).unwrap();
+        for width in [370.0, 620.0, 1220.0] {
+            let mut app = app_at(directory.path().join(format!("archive-{width}.json")));
+            let ctx = context();
+            let id = "standard_thermocouple";
+            let size = [width, 2000.0];
+            let output = frame(&mut app, &ctx, id, size, vec![]);
+            let button = text_shapes(&output)
+                .iter()
+                .find(|(text, _)| text == "选择已保存的档案")
+                .unwrap()
+                .1
+                .center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(button),
+                        egui::Event::PointerButton {
+                            pos: button,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            let output = frame(&mut app, &ctx, id, size, vec![]);
+            let text = text_shapes(&output)
+                .into_iter()
+                .find(|(text, _)| text == &long_name)
+                .expect("应显示档案名称");
+            assert!(
+                text.1.left() >= 0.0 && text.1.right() <= width,
+                "{width} 下档案名称超出窗口：{:?}",
+                text.1
+            );
+            let point = text.1.center();
+            for pressed in [true, false] {
+                frame(
+                    &mut app,
+                    &ctx,
+                    id,
+                    size,
+                    vec![
+                        egui::Event::PointerMoved(point),
+                        egui::Event::PointerButton {
+                            pos: point,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: Default::default(),
+                        },
+                    ],
+                );
+            }
+            let tool = TOOLS.iter().find(|tool| tool.id == id).unwrap();
+            assert_eq!(
+                app.value(tool, "stc.S.cal.2", ""),
+                "3",
+                "长名称档案应能正常选择和加载"
+            );
+        }
+    }
+
+    #[test]
+    fn general_dropdown_wraps_long_options_and_selects_them() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut app = app_at(directory.path().join("long-options.json"));
+        let ctx = context();
+        let tool = TOOLS
+            .iter()
+            .find(|tool| tool.id == "error_analysis")
+            .unwrap();
+        let long = format!("长选项{}", "测".repeat(80));
+        let options = ["短选项", long.as_str()];
+        let size = [370.0, 1000.0];
+        let draw = |app: &mut ToolboxApp, events| {
+            ctx.run(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size.into())),
+                    events,
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        app.select_index(ui, tool, "test_long", "选项", &options, 0);
+                    });
+                },
+            )
+        };
+        let output = draw(&mut app, vec![]);
+        let button = text_shapes(&output)
+            .iter()
+            .find(|(text, _)| text == "短选项")
+            .unwrap()
+            .1
+            .center();
+        for pressed in [true, false] {
+            draw(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(button),
+                    egui::Event::PointerButton {
+                        pos: button,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        let output = draw(&mut app, vec![]);
+        let option = text_shapes(&output)
+            .into_iter()
+            .find(|(text, _)| text == &long)
+            .expect("应显示长选项")
+            .1;
+        assert!(
+            option.left() >= 0.0 && option.right() <= size[0],
+            "长选项超出窗口：{option:?}"
+        );
+        let point = option.center();
+        for pressed in [true, false] {
+            draw(
+                &mut app,
+                vec![
+                    egui::Event::PointerMoved(point),
+                    egui::Event::PointerButton {
+                        pos: point,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: Default::default(),
+                    },
+                ],
+            );
+        }
+        assert_eq!(app.value(tool, "test_long", ""), "1");
     }
 
     #[test]

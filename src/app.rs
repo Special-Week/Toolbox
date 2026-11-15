@@ -597,6 +597,8 @@ impl ToolboxApp {
                 .width(ui.available_width())
                 .wrap_mode(egui::TextWrapMode::Truncate)
                 .show_ui(ui, |ui| {
+                    // 展开项按菜单宽度换行，长名称不延伸到窗口外。
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
                     for (i, item) in labels.iter().enumerate() {
                         ui.selectable_value(&mut index, i, *item);
                     }
@@ -612,6 +614,7 @@ impl ToolboxApp {
             .iter()
             .map(|unit| format!("{} · {}", unit.name, unit.code))
             .collect::<Vec<_>>();
+        let mut process = None;
         panel(ui, |ui| {
             ui.set_max_width(ui.available_width().min(830.0));
             ui.label(RichText::new("换算参数").size(14.0).strong().color(INK));
@@ -642,9 +645,63 @@ impl ToolboxApp {
                         crate::catalog::convert_unit(dimension, value, selected_unit, target)
                     })
                     .collect::<Result<Vec<_>, _>>()
+                    .map(|results| (value, results))
             });
             match results {
-                Ok(results) => {
+                Ok((value, results)) => {
+                    let (source_factor, source_offset) =
+                        units[selected_unit].conversion_coefficients();
+                    let mut steps = vec![format!(
+                        "输入 {} {}；源单位系数 fₛ = {}，偏移 oₛ = {}。",
+                        format_process_number(value),
+                        units[selected_unit].code,
+                        format_process_number(source_factor),
+                        format_process_number(source_offset)
+                    )];
+                    if matches!(dimension, Dimension::Temperature) {
+                        steps.push("温度值先使用融合乘加得到开尔文 K = max(value × fₛ + oₛ, 0)，再按目标单位计算 (K − oₜ) / fₜ；同单位直接返回输入值。".to_owned());
+                    } else {
+                        steps.push("线性单位直接计算目标值 = 输入值 × (fₛ / fₜ)，避免基准单位中间值溢出；同单位直接返回输入值。".to_owned());
+                    }
+                    for (target, (unit, &result)) in units.iter().zip(&results).enumerate() {
+                        steps.push(String::new());
+                        let (factor, offset) = unit.conversion_coefficients();
+                        let formula = if target == selected_unit {
+                            "同单位，结果等于输入值".to_owned()
+                        } else if matches!(dimension, Dimension::Temperature) {
+                            let kelvin = value.mul_add(source_factor, source_offset).max(0.0);
+                            format!(
+                                "K = max({} × {} + {}, 0) = {}，目标值 = ({} − {}) / {}",
+                                format_process_number(value),
+                                format_process_number(source_factor),
+                                format_process_number(source_offset),
+                                format_process_computed(kelvin),
+                                format_process_computed(kelvin),
+                                format_process_number(offset),
+                                format_process_number(factor)
+                            )
+                        } else {
+                            format!(
+                                "目标值 = {} × ({} / {})",
+                                format_process_number(value),
+                                format_process_number(source_factor),
+                                format_process_number(factor)
+                            )
+                        };
+                        steps.push(format!(
+                            "{}：目标系数 fₜ = {}，偏移 oₜ = {}；{} = {} {}。",
+                            unit.name,
+                            format_process_number(factor),
+                            format_process_number(offset),
+                            formula,
+                            if target == selected_unit {
+                                format_process_number(result)
+                            } else {
+                                format_process_computed(result)
+                            },
+                            unit.code
+                        ));
+                    }
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(format!(
@@ -662,6 +719,7 @@ impl ToolboxApp {
                                 .color(MUTED),
                         );
                     });
+                    process = Some(steps);
                     ui.add_space(4.0);
                     for (unit, result) in units.iter().zip(results) {
                         ui.horizontal(|ui| {
@@ -689,6 +747,9 @@ impl ToolboxApp {
                 Err(error) => render_error_message(ui, &error),
             }
         });
+        if let Some(lines) = &process {
+            calculation_process(ui, "unit_conversion_process", lines);
+        }
         info_note(ui, tool.kind);
     }
 

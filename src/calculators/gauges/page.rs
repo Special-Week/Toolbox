@@ -28,6 +28,10 @@ fn size_gauge_menu(ui: &mut egui::Ui, captions: &[String]) {
         .fold(0_f32, f32::max);
     let available = (ui.ctx().screen_rect().width() - 32.).max(120.);
     ui.set_width((text_width + 44.).max(180.).min(available));
+    style_gauge_menu(ui);
+}
+
+fn style_gauge_menu(ui: &mut egui::Ui) {
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Wrap);
     ui.spacing_mut().interact_size.y = 32.;
     ui.spacing_mut().item_spacing.y = 3.;
@@ -62,7 +66,49 @@ impl ToolboxApp {
                         }
                     });
                 match response.inner {
-                    Ok(report) => render_report(ui, tool, &report),
+                    Ok(report) => {
+                        render_report(ui, tool, &report);
+                        calculation_process_lazy(ui, "gauge_process", || {
+                            let mut steps = report.process.clone();
+                            for note in &report.notes {
+                                steps.push(format!("取值说明：{note}"));
+                            }
+                            for table in report.tables.iter().filter(|_| matches!(kind, GaugeKind::Pipe)) {
+                                steps.push(String::new());
+                                steps.push(format!(
+                                    "{}：按所选规格查内置表，以下数值为表中数据；结果表按五位小数显示。",
+                                    table.title
+                                ));
+                                for row in &table.rows {
+                                    steps.push(String::new());
+                                    steps.push(
+                                        table
+                                            .headings
+                                            .iter()
+                                            .zip(row)
+                                            .map(|(heading, cell)| {
+                                                format!(
+                                                    "{} = {}",
+                                                    heading,
+                                                    cell.raw
+                                                        .split_whitespace()
+                                                        .map(|part| part
+                                                            .parse::<f64>()
+                                                            .ok()
+                                                            .map(format_process_computed)
+                                                            .unwrap_or_else(|| part.to_owned()))
+                                                        .collect::<Vec<_>>()
+                                                        .join(" ")
+                                                )
+                                            })
+                                            .collect::<Vec<_>>()
+                                            .join("；"),
+                                    );
+                                }
+                            }
+                            steps
+                        });
+                    }
                     Err(message) => render_error_message(ui, &message),
                 }
                 info_note(ui, tool.kind);
@@ -208,7 +254,8 @@ impl ToolboxApp {
                         value.as_str()
                     })
                     .show_ui(ui, |ui| {
-                        size_gauge_menu(ui, options);
+                        // 列表宽度沿用下拉按钮，避免选项高亮只覆盖菜单的一小部分。
+                        style_gauge_menu(ui);
                         for item in options {
                             ui.selectable_value(value, item.clone(), RichText::new(item).size(14.));
                         }
@@ -670,6 +717,461 @@ fn render_report(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 独立计算说明中可直接解析的数值四则运算，检查等号两边一致。
+    fn check_numeric_equations(report: &Report, checked: &mut usize) {
+        use std::sync::OnceLock;
+        static EQUATION: OnceLock<regex::Regex> = OnceLock::new();
+        static TOKEN: OnceLock<regex::Regex> = OnceLock::new();
+        static RANGE: OnceLock<regex::Regex> = OnceLock::new();
+        let number = r"-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?";
+        let equations = EQUATION.get_or_init(|| {
+            regex::Regex::new(&format!(
+                r"(?P<expr>{number}(?:\s*(?:\+|−|×|/)\s*{number})+)\s*=\s*(?P<result>{number})"
+            ))
+            .unwrap()
+        });
+        let token = TOKEN.get_or_init(|| regex::Regex::new(&format!(r"{number}|[+−×/]")).unwrap());
+        let ranges = RANGE.get_or_init(|| regex::Regex::new(&format!(r"(?P<center>{number}(?:\s*(?:\+|−|×|/)\s*{number})*)\s*±\s*(?P<half>{number})(?:\s*/\s*(?P<div>{number}))?\s*=\s*(?P<low>{number})～(?P<high>{number})")).unwrap());
+        let evaluate = |expression: &str| {
+            let parts: Vec<_> = token.find_iter(expression).map(|m| m.as_str()).collect();
+            let mut sum = 0.0;
+            let mut term = parts[0].parse::<f64>().unwrap();
+            let mut scale = term.abs().max(1.0);
+            for pair in parts[1..].chunks_exact(2) {
+                let value = pair[1].parse::<f64>().unwrap();
+                scale = scale.max(value.abs());
+                match pair[0] {
+                    "+" => {
+                        sum += term;
+                        term = value;
+                    }
+                    "−" => {
+                        sum += term;
+                        term = -value;
+                    }
+                    "×" => term *= value,
+                    "/" => term /= value,
+                    _ => unreachable!(),
+                }
+            }
+            (sum + term, scale)
+        };
+        let metric = |label: &str| {
+            report
+                .metrics
+                .iter()
+                .find(|(name, _)| name == label)
+                .and_then(|(_, value)| value.raw.parse::<f64>().ok())
+        };
+        if let (Some(p), Some(d2), Some(angle), Some(lines), Some(lead), Some(slope), Some(wire)) = (
+            metric("螺距 P (mm)"),
+            metric("基本中径 D₂ (mm)"),
+            metric("牙型角 (°)"),
+            metric("线数 / 头数"),
+            metric("导程 L (mm)"),
+            metric("螺旋升角 ψ (°)"),
+            metric("最佳三针直径 d₀ (mm)"),
+        ) {
+            let calculated_lead = lines * p;
+            let calculated_slope = (calculated_lead / (std::f64::consts::PI * d2))
+                .atan()
+                .to_degrees();
+            let calculated_wire = p / (2.0 * (angle / 2.0).to_radians().cos());
+            for (label, expected, actual) in [
+                ("导程", calculated_lead, lead),
+                ("螺旋升角", calculated_slope, slope),
+                ("最佳三针直径", calculated_wire, wire),
+            ] {
+                assert!(
+                    (expected - actual).abs() <= 1e-12 * expected.abs().max(1.0),
+                    "{} 的{label}计算不符",
+                    report.title
+                );
+                *checked += 1;
+            }
+        }
+        for full in [true, false] {
+            for line in crate::calculators::common::process_lines_for_test(&report.process, full) {
+                for captures in equations.captures_iter(&line) {
+                    let whole = captures.name("expr").unwrap();
+                    if line[..whole.start()]
+                        .trim_end()
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || ".^×/−±".contains(c))
+                    {
+                        continue;
+                    }
+                    let (expected, scale) = evaluate(whole.as_str());
+                    let actual = captures
+                        .name("result")
+                        .unwrap()
+                        .as_str()
+                        .parse::<f64>()
+                        .unwrap();
+                    let tolerance = if full { 1e-12 } else { 2e-11 } * scale.max(actual.abs());
+                    assert!(
+                        (expected - actual).abs() <= tolerance,
+                        "{}：完整精度={full}，算式 {} = {}，独立计算为 {expected}；原文：{line}",
+                        report.title,
+                        whole.as_str(),
+                        actual
+                    );
+                    *checked += 1;
+                }
+                for captures in ranges.captures_iter(&line) {
+                    let start = captures.name("center").unwrap().start();
+                    if line[..start]
+                        .trim_end()
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || ".^×/−+±".contains(c))
+                    {
+                        continue;
+                    }
+                    let (center, scale) = evaluate(&captures["center"]);
+                    let half = captures["half"].parse::<f64>().unwrap()
+                        / captures
+                            .name("div")
+                            .map_or(1.0, |m| m.as_str().parse::<f64>().unwrap());
+                    let low = captures["low"].parse::<f64>().unwrap();
+                    let high = captures["high"].parse::<f64>().unwrap();
+                    let tolerance = if full { 1e-12 } else { 2e-11 }
+                        * scale.max(center.abs()).max(half.abs()).max(1.0);
+                    assert!(
+                        (center - half - low).abs() <= tolerance
+                            && (center + half - high).abs() <= tolerance,
+                        "{}：完整精度={full}，上下限代入不符：{line}",
+                        report.title
+                    );
+                    *checked += 2;
+                }
+            }
+        }
+    }
+
+    fn check_calculated_results_are_explained(report: &Report) {
+        let text = report.process.join("\n").replace('\u{2063}', "");
+        for table in &report.tables {
+            for row in &table.rows {
+                for (heading, cell) in table.headings.iter().zip(row) {
+                    for token in cell.raw.split_whitespace() {
+                        if token.parse::<f64>().is_ok() {
+                            assert!(
+                                text.contains(token),
+                                "{} / {} / {} 的 {} 未在计算过程中说明",
+                                report.title,
+                                table.title,
+                                heading,
+                                token
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn numeric_substitutions_match_across_gauge_modes_and_boundaries() {
+        let mut checked = 0;
+        let mut reports = 0;
+        for trap in [false, true] {
+            for diameter in [3.0, 10.0, 20.0, 24.0, 60.0, 100.0, 120.0] {
+                for pitch in [0.5, 1.5, 2.5, 5.0, 12.0, 13.0] {
+                    for grade in thread::grades(trap, diameter, pitch) {
+                        for lines in if trap { &[1, 2, 5][..] } else { &[1][..] } {
+                            if let Ok(report) =
+                                thread::calculate(trap, diameter, pitch, &grade, *lines)
+                            {
+                                check_numeric_equations(&report, &mut checked);
+                                check_calculated_results_are_explained(&report);
+                                reports += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        for (size, _, tpi, _) in imperial::un_series().into_iter().step_by(7) {
+            for class in ["1A", "2A", "3A", "1B", "2B", "3B"] {
+                if let Ok(report) = unified::calculate(&unified::Input {
+                    size: &size,
+                    tpi,
+                    class,
+                }) {
+                    check_numeric_equations(&report, &mut checked);
+                    check_calculated_results_are_explained(&report);
+                    reports += 1;
+                }
+            }
+        }
+        for row in rows(&super::super::un_data::data()["manufacturing"]) {
+            let low = n(row, "diameter_lower_in");
+            let high = n(row, "diameter_upper_in");
+            let tpi = n(row, "tpi");
+            for diameter in [(low + high) / 2.0, high] {
+                for class in ["2A", "2B"] {
+                    if let Ok(report) = unified::calculate(&unified::Input {
+                        size: &diameter.to_string(),
+                        tpi,
+                        class,
+                    }) {
+                        check_numeric_equations(&report, &mut checked);
+                        check_calculated_results_are_explained(&report);
+                        reports += 1;
+                    }
+                }
+            }
+        }
+        for angle in [60, 70, 75] {
+            for index in 0..rows(&database()["REBAR"][angle.to_string()]).len() {
+                for lines in [1, 4] {
+                    if let Ok(report) = thread::rebar(angle, index, lines) {
+                        check_numeric_equations(&report, &mut checked);
+                        check_calculated_results_are_explained(&report);
+                        reports += 1;
+                    }
+                }
+            }
+        }
+        for mode in 0..=2 {
+            for diameter in [0.5, 1.0, 1.000001, 3.0, 3.000001, 10.0, 20.0, 100.0, 500.0] {
+                for letter in smooth::letters(mode == 0) {
+                    for grade in [6, 7, 8, 16] {
+                        if let Ok(report) = smooth::calculate(diameter, mode, &letter, grade) {
+                            check_numeric_equations(&report, &mut checked);
+                            check_calculated_results_are_explained(&report);
+                            reports += 1;
+                        }
+                    }
+                }
+            }
+        }
+        for npt in [false, true] {
+            for size in pipe::sizes(npt) {
+                if let Ok(report) = pipe::calculate(npt, &size) {
+                    check_numeric_equations(&report, &mut checked);
+                    reports += 1;
+                }
+            }
+        }
+        assert!(reports > 1000, "仅检查 {reports} 个有效组合");
+        assert!(checked > 10000, "仅检查 {checked} 个数值算式");
+        println!("核查了 {reports} 个有效量规组合和 {checked} 条数值代入等式（含两种显示精度）");
+    }
+
+    #[test]
+    fn process_uses_actual_geometry_and_lookup_branches() {
+        let mut reports = vec![
+            thread::calculate(false, 20.0, 2.5, "6H", 1).unwrap(),
+            thread::calculate(false, 20.0, 2.5, "6g", 1).unwrap(),
+            thread::calculate(true, 24.0, 5.0, "8H", 2).unwrap(),
+            thread::calculate(true, 24.0, 5.0, "8e", 2).unwrap(),
+            unified::calculate(&unified::Input {
+                size: "1/2",
+                tpi: 20.0,
+                class: "2A",
+            })
+            .unwrap(),
+            unified::calculate(&unified::Input {
+                size: "1/2",
+                tpi: 20.0,
+                class: "2B",
+            })
+            .unwrap(),
+            pipe::calculate(false, "1/2").unwrap(),
+            pipe::calculate(true, "1/2").unwrap(),
+            thread::rebar(75, 0, 1).unwrap(),
+            thread::rebar(60, 0, 2).unwrap(),
+        ];
+        for mode in 0..=2 {
+            reports
+                .push(smooth::calculate(20.0, mode, if mode == 0 { "H" } else { "h" }, 7).unwrap());
+        }
+        for report in reports {
+            let text = report.process.join("\n");
+            assert!(!text.is_empty(), "{}", report.title);
+            assert!(
+                text.contains("查表") || text.contains("内置表") || text.contains("查询内置"),
+                "{}: {text}",
+                report.title
+            );
+            for (label, value) in &report.metrics {
+                if label == "基本中径 D₂ (mm)" || label == "工件尺寸下限 (mm)" {
+                    assert!(
+                        text.contains(&value.raw),
+                        "{}: {label}={} {text}",
+                        report.title,
+                        value.raw
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn ring_process_matches_actual_stop_center_for_metric_and_trapezoidal() {
+        for (trap, diameter, pitch, grade, lines) in [
+            (false, 20.0, 2.5, "6g", 1),
+            (true, 24.0, 5.0, "8e", 1),
+            (true, 24.0, 5.0, "8e", 3),
+        ] {
+            let report = thread::calculate(trap, diameter, pitch, grade, lines).unwrap();
+            let text = report.process.join("\n");
+            assert!(text.contains("止端中心 = D₂ + es − Td − TR/2"), "{text}");
+            assert!(!text.contains("− Td/2 − TR/2"), "{text}");
+            let actual_center = &report.tables[0].rows[1][3].raw;
+            assert!(
+                text.contains(&format!("\u{2063}{actual_center}\u{2063} mm")),
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn unified_process_converts_inch_tolerance_for_every_grade() {
+        for class in ["1A", "2A", "3A", "1B", "2B", "3B"] {
+            let report = unified::calculate(&unified::Input {
+                size: "1/2",
+                tpi: 20.0,
+                class,
+            })
+            .unwrap();
+            let text = report.process.join("\n");
+            assert!(text.contains("P 均以 inch 代入"), "{class}: {text}");
+            assert!(text.contains("乘以 25.4 后为"), "{class}: {text}");
+            let tolerance = &report
+                .metrics
+                .iter()
+                .find(|(name, _)| name == "2A 基础中径公差 (mm)")
+                .unwrap()
+                .1
+                .raw;
+            assert!(
+                text.contains(&format!("\u{2063}{tolerance}\u{2063} mm")),
+                "{class}: {text}"
+            );
+        }
+    }
+
+    #[test]
+    fn detailed_gauge_steps_cover_the_values_in_each_calculated_row() {
+        let mut reports = vec![
+            thread::calculate(false, 20.0, 2.5, "6H", 1).unwrap(),
+            thread::calculate(false, 20.0, 2.5, "6g", 1).unwrap(),
+            thread::calculate(true, 24.0, 5.0, "8H", 2).unwrap(),
+            thread::calculate(true, 24.0, 5.0, "8e", 2).unwrap(),
+            thread::rebar(75, 0, 1).unwrap(),
+            thread::rebar(60, 0, 2).unwrap(),
+        ];
+        for class in ["1A", "2A", "3A", "1B", "2B", "3B"] {
+            reports.push(
+                unified::calculate(&unified::Input {
+                    size: "1/2",
+                    tpi: 20.0,
+                    class,
+                })
+                .unwrap(),
+            );
+        }
+        for mode in 0..=2 {
+            reports
+                .push(smooth::calculate(20.0, mode, if mode == 0 { "H" } else { "h" }, 7).unwrap());
+        }
+        for report in reports {
+            let text = report.process.join("\n").replace('\u{2063}', "");
+            for table in &report.tables {
+                for row in &table.rows {
+                    for (heading, cell) in table.headings.iter().zip(row) {
+                        for token in cell.raw.split_whitespace() {
+                            if token.parse::<f64>().is_ok() {
+                                assert!(
+                                    text.contains(token),
+                                    "{} / {} / {} 的结果 {} 没有对应计算步骤：{text}",
+                                    report.title,
+                                    table.title,
+                                    heading,
+                                    token
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn metric_plug_and_minor_reference_show_substitution_instead_of_only_results() {
+        let report = thread::calculate(false, 20.0, 2.5, "6H", 1).unwrap();
+        let text = report.process.join("\n").replace('\u{2063}', "");
+        assert!(text.contains("中径名义 = 工件中径下限 + ZPL ="));
+        assert!(text.contains("中径下限 = 名义 − TPL/2 ="));
+        assert!(text.contains("大径下限 = 大径基准 + ZPL − TPL ="));
+        assert!(text.contains("磨损极限 = 通端中径下限 − 通端磨损储备 ="));
+        assert!(text.contains("小径参考界限（非独立制造公差）"));
+        assert!(text.contains("参考上界 ="));
+        assert!(text.contains("止端中径名义按本模型"));
+        assert!(!text.contains("以下为本次计算或查表得到的结果"));
+        let d2 = 20.0 - 3.0 * 3.0_f64.sqrt() / 8.0 * 2.5;
+        let factors = factors(false, 224.0, false).unwrap();
+        let center = d2 + factors.zpl;
+        let lower = center - factors.tpl / 2.0;
+        let upper = center + factors.tpl / 2.0;
+        let table = &report.tables[0];
+        assert_eq!(table.rows[0][1].raw.parse::<f64>().unwrap(), lower);
+        assert_eq!(table.rows[0][2].raw.parse::<f64>().unwrap(), upper);
+        assert_eq!(table.rows[0][3].raw.parse::<f64>().unwrap(), center);
+        assert_eq!(
+            table.rows[0][7].raw.parse::<f64>().unwrap(),
+            lower - factors.sgo
+        );
+        assert!(text.contains(&format!("{} + {} = {} mm", d2, factors.zpl, center)));
+        let d1 = 20.0 - 5.0 * 3.0_f64.sqrt() / 8.0 * 2.5;
+        assert_eq!(report.tables[1].rows[0][1].raw.parse::<f64>().unwrap(), d1);
+        assert_eq!(
+            report.tables[1].rows[0][2].raw.parse::<f64>().unwrap(),
+            d1 + 450.0 / 1000.0
+        );
+    }
+
+    #[test]
+    fn unavailable_minor_limits_are_not_presented_as_computed_values() {
+        let report = thread::calculate(true, 24.0, 5.0, "8e", 2).unwrap();
+        let table = report
+            .tables
+            .iter()
+            .find(|table| table.title.contains("小径参考界限"))
+            .unwrap();
+        assert_eq!(table.rows[0][1].raw, "—");
+        assert_eq!(table.rows[0][2].raw, "—");
+        let text = report.process.join("\n");
+        assert!(text.contains("该组合未收录公差，参考上下界不计算"));
+    }
+
+    #[test]
+    fn questionable_npt_six_inch_value_remains_unavailable() {
+        let report = pipe::calculate(true, "6").unwrap();
+        let ring = report
+            .tables
+            .iter()
+            .find(|table| table.title.contains("NPT 工作环规"))
+            .unwrap();
+        let row = ring
+            .rows
+            .iter()
+            .find(|row| row[0].raw == "基面中径 D₂")
+            .unwrap();
+        assert_eq!(row[1].raw, "—");
+        assert!(
+            report
+                .notes
+                .iter()
+                .any(|note| note.contains("NPT 6 环规中径原表值存在疑点"))
+        );
+    }
 
     #[test]
     fn result_notes_are_collapsed_but_remain_visibly_flagged() {

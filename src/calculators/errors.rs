@@ -15,14 +15,15 @@ impl ToolboxApp {
             let count = self.dynamic_count(ui, tool, "samples", "测量值", 5, 2, 50);
             let values =
                 self.dynamic_values(ui, tool, "samples.value", count, "测量值", &defaults, "");
+            let mut process = None;
             let result = (|| {
                 let values = values?;
                 let stats = statistics(&values)?;
                 let (mean, sd, min, max) = (stats.mean, stats.sd, stats.min, stats.max);
                 finite(&[max - min])?;
                 ui.collapsing("各项残差", |ui| {
-                    for (i, value) in values.iter().enumerate() {
-                        ui.label(format!("测量 {}：{}", i + 1, format_number(value - mean)));
+                    for (i, residual) in stats.residuals.iter().enumerate() {
+                        ui.label(format!("测量 {}：{}", i + 1, format_number(*residual)));
                     }
                 });
                 let rsd = if mean == 0.0 {
@@ -32,6 +33,31 @@ impl ToolboxApp {
                     finite(&[percent])?;
                     format!("{} %", format_number(percent))
                 };
+                let mut steps = super::error_process::samples(&values, &stats, true);
+                steps.push(String::new());
+                steps.push(format!(
+                    "极差 R = 最大值 − 最小值 = {} − {} = {}。",
+                    format_process_number(max),
+                    format_process_number(min),
+                    format_process_computed(max - min)
+                ));
+                steps.push(format!(
+                    "平均值标准差 = s/√n = {} / √{} = {}。",
+                    format_process_computed(sd),
+                    values.len(),
+                    format_process_computed(stats.standard_error)
+                ));
+                steps.push(if mean == 0.0 {
+                    "平均值为 0，相对标准偏差无定义。".to_owned()
+                } else {
+                    format!(
+                        "相对标准偏差 = s/|x̄| × 100 = {} / |{}| × 100 = {}%。",
+                        format_process_computed(sd),
+                        format_process_computed(mean),
+                        format_process_computed(sd / mean.abs() * 100.0)
+                    )
+                });
+                process = Some(steps);
                 Ok(vec![
                     ("测量次数", values.len().to_string()),
                     ("平均值", format_number(mean)),
@@ -42,6 +68,9 @@ impl ToolboxApp {
                 ])
             })();
             show_result_or_error(ui, "统计结果", result);
+            if let Some(lines) = &process {
+                calculation_process(ui, "repeatability_process", lines);
+            }
         });
         self.calculation_note(ui, tool);
     }
@@ -88,6 +117,7 @@ impl ToolboxApp {
             } else {
                 Ok(Vec::new())
             };
+            let mut process = None;
             let result = (|| {
                 let values = if input_method == 0 {
                     values?
@@ -107,6 +137,40 @@ impl ToolboxApp {
                 let range = max - min;
                 finite(&[range])?;
                 let sd = range / d2;
+                let mut steps = vec![if input_method == 0 {
+                    format!(
+                        "输入 {} 个测量值：{}。",
+                        n,
+                        values
+                            .iter()
+                            .map(|x| format_process_number(*x))
+                            .collect::<Vec<_>>()
+                            .join("，")
+                    )
+                } else {
+                    format!("输入最大值、最小值及测量次数 n = {}。", n)
+                }];
+                steps.push(format!(
+                    "极差 R = 最大值 − 最小值 = {} − {} = {}。",
+                    format_process_number(max),
+                    format_process_number(min),
+                    format_process_computed(range)
+                ));
+                steps.push(format!(
+                    "n = {}，查极差系数 d₂ = {}；重复性标准差 s ≈ R/d₂ = {} / {} = {}。",
+                    n,
+                    format_process_number(d2),
+                    format_process_computed(range),
+                    format_process_number(d2),
+                    format_process_computed(sd)
+                ));
+                steps.push(format!(
+                    "平均值标准差 = s/√n = {} / √{} = {}。",
+                    format_process_computed(sd),
+                    n,
+                    format_process_computed(sd / (n as f64).sqrt())
+                ));
+                process = Some(steps);
                 Ok(vec![
                     ("测量次数", n.to_string()),
                     ("极差 R", format_number(range)),
@@ -116,6 +180,9 @@ impl ToolboxApp {
                 ])
             })();
             show_result_or_error(ui, "极差法结果", result);
+            if let Some(lines) = &process {
+                calculation_process(ui, "range_method_process", lines);
+            }
         });
         self.calculation_note(ui, tool);
     }
@@ -193,6 +260,7 @@ impl ToolboxApp {
                         .map_err(|e| format!("第 {} 项：{e}", index + 1)),
                 );
             }
+            let mut process = None;
             let result = (|| {
                 let errors = errors.into_iter().collect::<Result<Vec<_>, _>>()?;
                 let sensitivities = sensitivities.into_iter().collect::<Result<Vec<_>, _>>()?;
@@ -204,6 +272,40 @@ impl ToolboxApp {
                 let combined = rss(contributions.iter().copied())?;
                 let linear_bound = contributions.iter().map(|x| x.abs()).sum::<f64>();
                 finite(&[linear_bound])?;
+                let mut steps = Vec::new();
+                for (i, ((error, sensitivity), contribution)) in errors
+                    .iter()
+                    .zip(&sensitivities)
+                    .zip(&contributions)
+                    .enumerate()
+                {
+                    if i > 0 {
+                        steps.push(String::new());
+                    }
+                    steps.push(format!(
+                        "分量 {}：贡献 qᵢ = 灵敏系数 × 误差 = {} × {} = {}。",
+                        i + 1,
+                        format_process_number(*sensitivity),
+                        format_process_number(*error),
+                        format_process_computed(*contribution)
+                    ));
+                }
+                steps.push(String::new());
+                steps.push(format!(
+                    "合成误差 = √Σqᵢ² = {}；程序用 hypot 逐项累加，避免中间平方溢出。",
+                    format_process_computed(combined)
+                ));
+                steps.push(format!(
+                    "最坏情况界限 = Σ|qᵢ| = {}；最大单项贡献 = {}。",
+                    format_process_computed(linear_bound),
+                    format_process_computed(
+                        contributions
+                            .iter()
+                            .map(|x| x.abs())
+                            .fold(0.0_f64, f64::max)
+                    )
+                ));
+                process = Some(steps);
                 Ok(vec![
                     ("分量个数", errors.len().to_string()),
                     ("合成误差（平方和根）", format_number(combined)),
@@ -220,6 +322,9 @@ impl ToolboxApp {
                 ])
             })();
             show_result_or_error(ui, "合成结果", result);
+            if let Some(lines) = &process {
+                calculation_process(ui, "resultant_error_process", lines);
+            }
         });
         self.calculation_note(ui, tool);
     }
@@ -239,6 +344,7 @@ impl ToolboxApp {
                 "",
                 "留空时使用真值",
             );
+            let mut process = None;
             let result = (|| {
                 let measured = self.number(tool, "measured", "100.02")?;
                 let truth = self.number(tool, "true", "100")?;
@@ -264,6 +370,49 @@ impl ToolboxApp {
                     finite(&[percent])?;
                     format!("{} %", format_number(percent))
                 };
+                let mut steps = vec![
+                    format!(
+                        "绝对误差 Δ = 测量值 − 真值 = {} − {} = {}。",
+                        format_process_number(measured),
+                        format_process_number(truth),
+                        format_process_computed(delta)
+                    ),
+                    format!(
+                        "误差绝对值 |Δ| = {}。",
+                        format_process_computed(delta.abs())
+                    ),
+                    String::new(),
+                ];
+                steps.push(if truth == 0.0 {
+                    "真值为 0，相对误差无定义。".to_owned()
+                } else {
+                    format!(
+                        "相对误差 = Δ/真值 × 100 = {} / {} × 100 = {}%。",
+                        format_process_computed(delta),
+                        format_process_number(truth),
+                        format_process_computed(delta / truth * 100.0)
+                    )
+                });
+                steps.push(if reference == 0.0 {
+                    if reference_text.trim().is_empty() {
+                        "引用值留空，使用真值；引用值为 0，引用误差无定义。".to_owned()
+                    } else {
+                        "引用值为 0，引用误差无定义。".to_owned()
+                    }
+                } else {
+                    format!(
+                        "{}引用误差 = Δ/引用值 × 100 = {} / {} × 100 = {}%。",
+                        if reference_text.trim().is_empty() {
+                            "引用值留空，使用真值；"
+                        } else {
+                            ""
+                        },
+                        format_process_computed(delta),
+                        format_process_number(reference),
+                        format_process_computed(delta / reference * 100.0)
+                    )
+                });
+                process = Some(steps);
                 Ok(vec![
                     ("绝对误差 Δ", format_number(delta)),
                     ("相对误差 δ", relative),
@@ -272,6 +421,9 @@ impl ToolboxApp {
                 ])
             })();
             show_result_or_error(ui, "误差结果", result);
+            if let Some(lines) = &process {
+                calculation_process(ui, "error_analysis_process", lines);
+            }
         });
         self.calculation_note(ui, tool);
     }
@@ -383,8 +535,11 @@ impl ToolboxApp {
             1,
         ) == 1;
         let a_values = a_values.unwrap_or_else(|| Err("A 类数据未能读取".to_owned()));
+        let mut process_lines = None;
         let result = (|| {
             let data = a_values?;
+            let mut a_stats = None;
+            let mut a_average_count = None;
             let raw_u_a = if data.is_empty() {
                 0.0
             } else {
@@ -399,9 +554,12 @@ impl ToolboxApp {
                     "",
                 ))?;
                 let stats = statistics(&data)?;
+                let sd = stats.sd;
+                a_stats = Some(stats);
+                a_average_count = count;
                 match count {
-                    Some(count) => stats.sd / (count as f64).sqrt(),
-                    None => stats.sd,
+                    Some(count) => sd / (count as f64).sqrt(),
+                    None => sd,
                 }
             };
             let a_rounding = a_rounding.transpose()?;
@@ -448,6 +606,89 @@ impl ToolboxApp {
             finite(&[k * combined])?;
             let (rounded, rounded_expanded) =
                 super::uncertainty::model::rounded_combined(combined, k, digits, carry)?;
+            let mut steps = vec!["A 类分量：".to_owned()];
+            if let Some(stats) = &a_stats {
+                steps.extend(super::error_process::samples(&data, stats, false));
+                let count = a_average_count.unwrap_or(1);
+                steps.push(format!(
+                    "取测量次数 n = {}{}；uA = s/√n = {} / √{} = {}。",
+                    count,
+                    if a_average_count.is_none() {
+                        "（留空默认 1 次）"
+                    } else {
+                        ""
+                    },
+                    format_process_computed(stats.sd),
+                    count,
+                    format_process_computed(raw_u_a)
+                ));
+                steps.push(format!(
+                    "{}；修约后 uA = {}。",
+                    super::error_process::rounding(a_rounding),
+                    format_process_rounded(u_a, a_rounding.and_then(|r| r.digits))
+                ));
+            } else {
+                steps.push("未使用 A 类数据，uA = 0。".to_owned());
+            }
+            for (i, (width, (raw, rounded_value, rounding))) in
+                b_widths.iter().zip(&b_values).enumerate()
+            {
+                steps.push(String::new());
+                let distribution_name = [
+                    "均匀分布",
+                    "三角分布",
+                    "正态分布 k=2",
+                    "正态分布 k=3",
+                    "两点分布",
+                    "反正弦分布",
+                ]
+                .get(distribution)
+                .copied()
+                .unwrap_or("反正弦分布");
+                steps.push(format!(
+                    "B 类分量 {}：{}，{} = {}，除数 d = {}；u = 输入值/d = {} / {} = {}。",
+                    i + 1,
+                    distribution_name,
+                    if matches!(distribution, 2 | 3) {
+                        "证书扩展不确定度"
+                    } else {
+                        "区间半宽"
+                    },
+                    format_process_number(*width),
+                    format_process_number(divisor),
+                    format_process_number(*width),
+                    format_process_number(divisor),
+                    format_process_computed(*raw)
+                ));
+                steps.push(format!(
+                    "{}；修约后 u = {}。",
+                    super::error_process::rounding(Some(*rounding)),
+                    format_process_rounded(*rounded_value, rounding.digits)
+                ));
+            }
+            steps.push(String::new());
+            steps.push(format!(
+                "B 类合成 uB = √Σuᵢ² = {}；程序使用 hypot 逐项累加。",
+                format_process_computed(u_b)
+            ));
+            steps.push(format!(
+                "u_c = √[(cA·uA)² + (cB·uB)²] = √[({} × {})² + ({} × {})²] = {}。",
+                format_process_number(a_sensitivity),
+                format_process_rounded(u_a, a_rounding.and_then(|r| r.digits)),
+                format_process_number(b_sensitivity),
+                format_process_computed(u_b),
+                format_process_computed(combined)
+            ));
+            super::error_process::combined(
+                &mut steps,
+                combined,
+                k,
+                digits,
+                carry,
+                rounded,
+                rounded_expanded,
+            );
+            process_lines = Some(steps);
             if !b_values.is_empty() {
                 ui.collapsing("B 类分量修约明细", |ui| {
                     for (i, (raw, rounded, rounding)) in b_values.iter().enumerate() {
@@ -475,6 +716,9 @@ impl ToolboxApp {
             ])
         })();
         show_result_or_error(ui, "不确定度结果", result);
+        if let Some(lines) = &process_lines {
+            calculation_process(ui, "uncertainty_quick_process", lines);
+        }
         self.calculation_note(ui, tool);
     }
 }

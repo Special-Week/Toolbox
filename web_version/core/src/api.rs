@@ -108,6 +108,7 @@ pub(crate) fn celsius_in_bounds(unit: TemperatureUnit, value: f64, bounds: (f64,
 
 #[derive(Default, Serialize)]
 pub(crate) struct Output {
+    pub process: Vec<String>,
     pub metrics: Vec<Metric>,
     pub headings: Vec<String>,
     pub rows: Vec<Vec<Value>>,

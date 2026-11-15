@@ -12,6 +12,25 @@
 /tarpaulin-report.html
 *.profraw
 *.profdata
+*.log
+*.tmp
+*.tmp.*
+*.bak
+*.orig
+*.rej
+
+# 本地一次性核查脚本、测试程序及其报告。
+/cpp_version/tests/calculation_process.cpp
+/cpp_version/tests/math_engine.cpp
+/cpp_version/tests/run-calculation-tests.ps1
+/cpp_version/tests/run-math-engine-tests.ps1
+/web_version/scripts/audit-formulas.mjs
+/web_version/scripts/notes.test.cjs
+/web_version/scripts/process-arithmetic.test.mjs
+/web_version/scripts/process-wasm.test.mjs
+/web_version/scripts/process.test.cjs
+/docs/calculation-description-audit.md
+/docs/formula-render-audit.md
 
 # Python 开发脚本缓存与本地环境。
 __pycache__/

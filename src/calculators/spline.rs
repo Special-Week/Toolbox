@@ -2,7 +2,8 @@
 //! 求 y(x) 必须先反求单调分支上的参数；CSV 导出使用独立线程和原子替换。
 use crate::app::ToolboxApp;
 use crate::calculators::common::{
-    format_number, info_note, panel, render_error_message, render_metrics,
+    calculation_process_lazy, format_number, format_process_computed, format_process_number,
+    info_note, panel, render_error_message, render_metrics,
 };
 use crate::catalog::ToolDef;
 use crate::{BLUE, INK, MUTED};
@@ -241,6 +242,49 @@ fn render_spline(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) {
     ui.add_space(4.0);
     ui.label(RichText::new("插值曲线").size(14.0).strong().color(INK));
     draw_chart(ui, &spline, &points, &curve, minimum, maximum);
+    calculation_process_lazy(ui, "bspline_process", || {
+        let mut steps = vec![format!(
+            "输入 {} 个 Q 型值点，x 严格递增；以首点为基准，对 x、y 分别归一化，端点二阶导数为零。",
+            points.len()
+        )];
+        steps.extend(spline.normalization_steps());
+        steps.push(String::new());
+        steps.extend([
+        "内部控制点分别满足 Pᵢ₋₁ + 4Pᵢ + Pᵢ₊₁ = 6Qᵢ，程序用三对角消元求解；每段 x(u)、y(u) 均为三次多项式。".to_owned(),
+        format!("采样范围 {}～{}，步进 {}；区间数按 (最大值−最小值)/步进计算，接近整数时按整数处理，点数 = ceil(区间数)+1 = {}。最后一点固定为最大值。", format_process_number(minimum), format_process_number(maximum), format_process_number(step), sample_count),
+        format!("以下选取一个预览点说明分段与反算；全部 {} 个采样点采用相同方法。", sample_count),
+    ]);
+        let is_interpolated = |point: &Point| !points.iter().any(|q| q.x == point.x);
+        let sample = preview
+            .iter()
+            .enumerate()
+            .find(|(_, point)| {
+                point.x > points[0].x
+                    && point.x < points[points.len() - 1].x
+                    && is_interpolated(point)
+            })
+            .or_else(|| {
+                preview
+                    .iter()
+                    .enumerate()
+                    .find(|(_, point)| is_interpolated(point))
+            })
+            .or_else(|| preview.iter().enumerate().next());
+        if let Some((index, point)) = sample {
+            steps.push(String::new());
+            steps.push(format!(
+                "示例：预览采样点 {}，x = {}，y = {}。",
+                index + 1,
+                format_process_computed(point.x),
+                format_process_computed(point.y)
+            ));
+            match spline.process_at_x(point.x) {
+                Ok(lines) => steps.extend(lines),
+                Err(error) => steps.push(format!("示例过程无法生成：{error}")),
+            }
+        }
+        steps
+    });
     info_note(ui, tool.kind);
 }
 
@@ -420,5 +464,82 @@ fn write_csv(
 impl ToolboxApp {
     pub(crate) fn render_bspline(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
         render_spline(self, ui, tool);
+    }
+}
+
+#[cfg(test)]
+mod process_tests {
+    use super::*;
+
+    #[test]
+    fn normalization_explains_actual_scales_and_constant_y_fallback() {
+        let points: Vec<_> = DEFAULT_POINTS
+            .iter()
+            .map(|&(x, y)| Point { x, y })
+            .collect();
+        let spline = UniformCubicSpline::interpolate(&points).unwrap();
+        let text = spline
+            .normalization_steps()
+            .join("\n")
+            .replace('\u{2063}', "");
+        assert!(text.contains("x₀ = 250，y₀ = 2002"), "{text}");
+        assert!(text.contains("sₓ = x末 − x₀ = 2650 − 250 = 2400"), "{text}");
+        assert!(text.contains("sᵧ = maxᵢ|yᵢ − y₀|"), "{text}");
+        assert!(
+            text.contains("Q8：|48340 − 2002| = 46338，所以 sᵧ = 46338"),
+            "{text}"
+        );
+        assert!(text.contains("Yᵢ = (yᵢ − y₀)/sᵧ"));
+
+        let points = [
+            Point { x: 0.0, y: 10.0 },
+            Point { x: 1.0, y: -11.0 },
+            Point { x: 2.0, y: 28.0 },
+        ];
+        let text = UniformCubicSpline::interpolate(&points)
+            .unwrap()
+            .normalization_steps()
+            .join("\n")
+            .replace('\u{2063}', "");
+        assert!(text.contains("Q1：|-11 − 10| = 21，所以 sᵧ = 21"), "{text}");
+
+        let points = [Point { x: 0.0, y: 7.0 }, Point { x: 1.0, y: 7.0 }];
+        let text = UniformCubicSpline::interpolate(&points)
+            .unwrap()
+            .normalization_steps()
+            .join("\n");
+        assert!(text.contains("maxᵢ|yᵢ − y₀| = 0"));
+        assert!(text.contains("将 sᵧ 设为 1"));
+        let points = [Point { x: 0.0, y: 7.0 }, Point { x: 1.0, y: 8.0 }];
+        let text = UniformCubicSpline::interpolate(&points)
+            .unwrap()
+            .normalization_steps()
+            .join("\n");
+        assert!(text.contains("最大差值来自 Q1"));
+        assert!(!text.contains("避免除以零"));
+    }
+
+    #[test]
+    fn process_tracks_knots_interpolation_and_both_extrapolation_branches() {
+        let points = [
+            Point { x: 0.0, y: 0.0 },
+            Point { x: 1.0, y: 1.0 },
+            Point { x: 2.0, y: 4.0 },
+        ];
+        let spline = UniformCubicSpline::interpolate(&points).unwrap();
+        for (x, branch) in [
+            (-0.5, "左端外推"),
+            (0.0, "直接返回"),
+            (0.5, "Q0～Q1 插值"),
+            (1.5, "Q1～Q2 插值"),
+            (2.5, "右端外推"),
+        ] {
+            let text = spline.process_at_x(x).unwrap().join("\n");
+            assert!(text.contains(branch), "{text}");
+            assert!(
+                text.contains(&spline.y_at_x(x).unwrap().to_string()),
+                "{text}"
+            );
+        }
     }
 }

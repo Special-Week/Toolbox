@@ -137,6 +137,7 @@ impl ToolboxApp {
                 input_hint,
             );
 
+            let mut process = None;
             let result = (|| {
                 let low = self.number(tool, &low_key, low_default)?;
                 let high = self.number(tool, &high_key, high_default)?;
@@ -176,6 +177,88 @@ impl ToolboxApp {
                     (value, input, fraction)
                 };
 
+                let n = format_process_number;
+                let c = format_process_computed;
+                let process_span = high - low;
+                let signal_span = signal_high - signal_low;
+                let mut steps = vec![
+                    format!(
+                        "被测量范围 {}～{} {}，跨度 = {} − {} = {} {}。",
+                        n(low),
+                        n(high),
+                        unit_options[unit_index],
+                        n(high),
+                        n(low),
+                        c(process_span),
+                        unit_options[unit_index]
+                    ),
+                    format!(
+                        "信号范围 {}～{} {signal_symbol}，跨度 = {} − {} = {} {signal_symbol}。",
+                        n(signal_low),
+                        n(signal_high),
+                        n(signal_high),
+                        n(signal_low),
+                        c(signal_span)
+                    ),
+                    String::new(),
+                ];
+                if mode == 0 {
+                    steps.push(format!(
+                        "被测量比例 r = (输入 − 下限) / 跨度 = ({} − {}) / {} = {}。",
+                        n(input),
+                        n(low),
+                        c(process_span),
+                        c(fraction)
+                    ));
+                    let output_fraction = if function == 1 {
+                        fraction.sqrt()
+                    } else {
+                        fraction
+                    };
+                    steps.push(if function == 1 {
+                        format!(
+                            "开方特性：信号比例 q = √r = √{} = {}。",
+                            c(fraction),
+                            c(output_fraction)
+                        )
+                    } else {
+                        format!("线性特性：信号比例 q = r = {}。", c(output_fraction))
+                    });
+                    steps.push(format!("输出信号 = 下限 + q × 信号跨度 = {} + {} × {} = {} {signal_symbol}；程序使用融合乘加。", n(signal_low), c(output_fraction), c(signal_span), c(signal)));
+                } else {
+                    let signal_fraction = (signal - signal_low) / signal_span;
+                    steps.push(format!(
+                        "信号比例 q = (输入 − 下限) / 跨度 = ({} − {}) / {} = {}。",
+                        n(input),
+                        n(signal_low),
+                        c(signal_span),
+                        c(signal_fraction)
+                    ));
+                    steps.push(if function == 1 {
+                        format!(
+                            "开方特性的反算：被测量比例 r = q² = {}² = {}。",
+                            c(signal_fraction),
+                            c(fraction)
+                        )
+                    } else {
+                        format!("线性特性：被测量比例 r = q = {}。", c(fraction))
+                    });
+                    steps.push(format!(
+                        "被测量 = 下限 + r × 被测量跨度 = {} + {} × {} = {} {}；程序使用融合乘加。",
+                        n(low),
+                        c(fraction),
+                        c(process_span),
+                        c(process_value),
+                        unit_options[unit_index]
+                    ));
+                }
+                steps.push(format!(
+                    "量程比例 = r × 100 = {} × 100 = {}%。",
+                    c(fraction),
+                    c(fraction * 100.0)
+                ));
+                process = Some(steps);
+
                 Ok(vec![
                     (
                         "被测量值",
@@ -194,6 +277,9 @@ impl ToolboxApp {
                 ])
             })();
             show_result_or_error(ui, "换算结果", result);
+            if let Some(lines) = &process {
+                calculation_process(ui, "transmitter_process", lines);
+            }
         });
         info_note(ui, tool.kind);
     }

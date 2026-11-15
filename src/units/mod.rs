@@ -16,6 +16,12 @@ pub(crate) struct UnitDef {
     offset: f64,
 }
 
+impl UnitDef {
+    pub(crate) fn conversion_coefficients(&self) -> (f64, f64) {
+        (self.factor, self.offset)
+    }
+}
+
 /// source/target 是该物理量目录内的索引；禁止跨类别使用索引。
 /// 浓度按页面声明的等密度约定折算到 ppm，不是任意介质的通用质量/体积换算。
 pub(crate) fn convert_unit(
@@ -61,4 +67,73 @@ pub(crate) fn convert_unit(
         return Err("单位换算结果过小，超出双精度可表示范围".to_owned());
     }
     Ok(result)
+}
+
+#[cfg(all(test, feature = "desktop-ui"))]
+mod tests {
+    use super::*;
+    use crate::catalog::{TOOLS, ToolKind};
+
+    #[test]
+    fn displayed_conversion_formula_matches_every_unit_pair() {
+        let mut dimensions = 0;
+        for dimension in TOOLS.iter().filter_map(|tool| match tool.kind {
+            ToolKind::Unit(dimension) => Some(dimension),
+            _ => None,
+        }) {
+            dimensions += 1;
+            let units = units_for(dimension);
+            for (source, from) in units.iter().enumerate() {
+                for (target, to) in units.iter().enumerate() {
+                    for value in [0.0_f64, 1.0, 100.0] {
+                        let actual = convert_unit(dimension, value, source, target).unwrap();
+                        let expected = if source == target {
+                            value
+                        } else if matches!(dimension, Dimension::Temperature) {
+                            (value.mul_add(from.factor, from.offset).max(0.0) - to.offset)
+                                / to.factor
+                        } else {
+                            value * (from.factor / to.factor)
+                        };
+                        assert_eq!(actual, expected, "{} → {}, {value}", from.code, to.code);
+                    }
+                }
+            }
+        }
+        assert_eq!(dimensions, 22);
+        let celsius = units_for(Dimension::Temperature)
+            .iter()
+            .position(|unit| unit.code == "°C")
+            .unwrap();
+        assert!(convert_unit(Dimension::Temperature, -273.16, celsius, celsius).is_err());
+    }
+
+    #[test]
+    fn temperature_note_matches_absolute_zero_for_every_scale() {
+        let units = units_for(Dimension::Temperature);
+        let note =
+            crate::calculators::explanations::formula(ToolKind::Unit(Dimension::Temperature));
+        assert!(note.contains("绝对零度"));
+        for (source, unit) in units.iter().enumerate() {
+            let zero = match unit.reference_id {
+                1001 => -273.15,
+                1000 | 1003 => 0.0,
+                1002 => -459.67,
+                999 => -218.52,
+                _ => panic!("缺少绝对零度：{}", unit.code),
+            };
+            for target in 0..units.len() {
+                assert!(
+                    convert_unit(Dimension::Temperature, zero, source, target).is_ok(),
+                    "{}",
+                    unit.code
+                );
+                assert!(
+                    convert_unit(Dimension::Temperature, zero - 0.000001, source, target).is_err(),
+                    "{}",
+                    unit.code
+                );
+            }
+        }
+    }
 }

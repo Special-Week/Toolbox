@@ -31,6 +31,7 @@ export interface Catalog {
 }
 export type State = Record<string, unknown>;
 export interface Result {
+  process: string[];
   metrics: { label: string; value: unknown; unit: string }[];
   headings: string[];
   rows: unknown[][];

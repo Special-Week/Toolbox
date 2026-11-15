@@ -2,6 +2,8 @@
 
 **Toolbox** 是面向计量、仪表及分析检测工作的工具箱，包含 **7 个分类、50 个工具**。计算功能可离线使用，计量规范 PDF 下载需要联网。
 
+当前版本：**v2026.11.15**。
+
 - **Rust 桌面版**：本目录，使用 egui 构建界面。
 - **[C++ 桌面版](cpp_version/README.md)**：Windows 单文件程序，支持 x64、x86 构建。
 - **[网页版](web_version/README.md)**：使用 Vue 3 与 Rust/WebAssembly，适配电脑和手机；计算在浏览器本地完成，PDF 下载由配套服务器获取并缓存。
@@ -20,31 +22,34 @@
 
 单位换算包含 257 项单位；温标工具支持双向换算、校准拟合、适用型号的等级允差和分度表。不确定度支持 A/B 类分量、分量的分布与灵敏系数、分组预算；校准曲线支持一次、过原点一次、二次和三次拟合，并输出系数、相关性和残差。
 
+49 个计算工具可展开“计算过程”，查看本次输入、公式和代入步骤；“计算说明”介绍模型、适用条件和单位约定。较复杂且已接入的公式由数学排版引擎绘制，未识别的表达式保留为文本。
+
 ## 构建与运行
 
 需要支持 Rust 2024 Edition 的工具链。Windows 使用 MSVC 工具链时，还需安装 C++ 构建工具和 Windows SDK。在项目根目录执行：
 
 ```powershell
 # 开发运行
-cargo run --locked --bin Toolbox
+cargo run --locked --bin Toolbox_rust
 
-# 发布构建
-cargo build --locked --release --bin Toolbox
+# Windows 发布构建
+powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-Windows 程序生成在 `target/release/Toolbox.exe`。数据表与图标已内嵌，运行时无需附带 `data/`。
+发布程序生成在 `dist/Toolbox_rust_v2026.11.15.exe`；脚本从 Cargo 包版本自动生成文件名。Cargo 的中间产物仍保存在 `target/release/Toolbox_rust.exe`。数据表与图标已内嵌，运行时无需附带 `data/`。
 
 ## 生成 Windows 发布包
 
-完成发布构建后，在项目根目录执行：
+完成发布构建后，在项目根目录执行。压缩包也使用当前 Cargo 包版本命名：
 
 ```powershell
-New-Item -ItemType Directory -Force dist | Out-Null
-Copy-Item target/release/Toolbox.exe, README.md, LICENSE, licenses/PsychroLib-LICENSE.txt dist/
-Compress-Archive -Path dist/Toolbox.exe, dist/README.md, dist/LICENSE, dist/PsychroLib-LICENSE.txt -DestinationPath dist/Toolbox-windows.zip -Force
+$version = ((cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json).packages | Where-Object { $_.name -eq 'toolbox' }).version
+$program = "dist/Toolbox_rust_v$version.exe"
+Copy-Item README.md, LICENSE, licenses/PsychroLib-LICENSE.txt, licenses/RaTeX-LICENSE.txt, licenses/KaTeX-font-OFL.txt, licenses/KaTeX-font-NOTICE.txt dist/
+Compress-Archive -Path $program, dist/README.md, dist/LICENSE, dist/PsychroLib-LICENSE.txt, dist/RaTeX-LICENSE.txt, dist/KaTeX-font-OFL.txt, dist/KaTeX-font-NOTICE.txt -DestinationPath "dist/Toolbox_rust_v$version.zip" -Force
 ```
 
-发布 `dist/Toolbox-windows.zip` 即可。其他版本的构建与部署见 [C++ 版 README](cpp_version/README.md) 和 [网页版 README](web_version/README.md)。
+发布生成的带版本号压缩包即可。其他版本的构建与部署见 [C++ 版 README](cpp_version/README.md) 和 [网页版 README](web_version/README.md)。
 
 ## 项目结构
 
@@ -53,6 +58,7 @@ Toolbox/
 ├── Cargo.toml                # 包信息、依赖、功能开关和可执行目标
 ├── Cargo.lock                # 锁定依赖版本
 ├── build.rs                  # 构建时嵌入 Windows 图标和版本信息
+├── build.ps1                 # 生成带版本号的 Windows Rust 发布程序
 ├── LICENSE                   # MIT 许可证
 ├── .gitignore                # 构建产物与本地文件的忽略规则
 ├── src/
@@ -75,6 +81,9 @@ Toolbox/
 │       ├── mod.rs            # 计算模块声明
 │       ├── common.rs         # 共用输入控件、结果卡片和说明展示
 │       ├── explanations.rs   # 各工具的计算说明及详细公式
+│       ├── formula_layout.rs / formula_layout/ # 行内公式识别、数学排版与绘制
+│       ├── math_notation.rs  # 计算过程中的符号显示整理
+│       ├── error_process.rs  # 统计和不确定度计算过程
 │       ├── format.rs         # 数值解析与普通小数格式化
 │       ├── numerics.rs       # 稳定统计、平方和根及有限值检查
 │       ├── calibration.rs    # 多项式、区间反算和 QR 拟合
@@ -117,10 +126,10 @@ Toolbox/
 │       ├── tables.json       # 量规尺寸、公差、偏差和长度表
 │       ├── unified.json      # UN 系列及中径制造公差 U
 │       └── README.md         # 数据用途、取值约定及适用范围
-├── assets/                   # SVG 原图与 PNG、ICO 程序图标
+├── assets/                   # 程序图标及三端共享的公式目录和匹配规则
 ├── licenses/                 # 第三方许可证原文
 ├── cpp_version/
-│   ├── build.cmd / build.rsp # MinGW 构建入口、源码清单与链接参数
+│   ├── build.cmd / Makefile  # mingw32-make 构建入口和分架构规则
 │   ├── include/toolbox/      # 公共接口与数据结构
 │   ├── src/core/            # 基础数值工具、目录和内置数据
 │   ├── src/models/          # 各工具的计算模型
@@ -146,6 +155,7 @@ Rust 的编译缓存位于 `target/`，发布包位于根目录 `dist/`；C++ �
 ## 计算与使用说明
 
 - **精度**：采用双精度计算，显示位数不代表测量精度。量规计算值显示五位小数，mm 与 inch 均由未修约值分别换算。
+- **计算过程**：过程中的部分数值会为便于阅读而修约；实际计算仍使用双精度。对照结果时请同时注意所选模式和页面中的适用条件。
 - **单位约定**：温度换算针对温度值；压力单位换算不转换表压/绝压。水柱按 4 °C、汞柱按 0 °C，热量单位采用国际蒸汽表定义；`t/a` 按每年 8000 小时计算。浓度采用 1000 kg/m³ 等密度基准，滴体积为 20 滴/mL。
 - **温标与校准**：按各型号的有效温区和允差等级计算；证书系数、固定点数据应按实际证书填写。SPRT 的 Rtp 为水三相点电阻，热敏电阻多项式使用 K 和 Ω。
 - **压力与湿度**：高度差以被检表高于标准器为正；气压高度采用标准大气模型。混合比以干空气质量为分母，比湿以湿空气总质量为分母，标准状态含水量按 0 °C、101.325 kPa 表示。
@@ -162,4 +172,4 @@ Rust 的编译缓存位于 `target/`，发布包位于根目录 `dist/`；C++ �
 
 ## 许可证
 
-项目自有代码与图标采用 [MIT 许可证](LICENSE)。第三方组件声明见 [licenses/](licenses/) 和 [C++ 版第三方说明](cpp_version/THIRD-PARTY-NOTICES.md)。
+项目自有代码与图标采用 [MIT 许可证](LICENSE)。第三方组件声明见 [licenses/](licenses/) 和 [C++ 版第三方说明](cpp_version/THIRD-PARTY-NOTICES.md)。Rust、C++ 和网页端分别使用 RaTeX、MicroTeX 和 KaTeX 排版已接入的公式，相关字体及许可证随各版本发布。

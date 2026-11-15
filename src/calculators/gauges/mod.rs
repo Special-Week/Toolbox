@@ -11,6 +11,7 @@ mod report;
 mod smooth;
 mod specs;
 mod thread;
+mod trace;
 mod un_data;
 mod unified;
 

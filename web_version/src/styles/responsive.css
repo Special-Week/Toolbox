@@ -144,7 +144,7 @@
   .site-header {
     padding: 0 13px;
   }
-  .header-status > span:first-child {
+  .header-status > .header-tool-count {
     display: none;
   }
   .privacy-dot {

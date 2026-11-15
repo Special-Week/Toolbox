@@ -145,6 +145,80 @@ fn original_coefficients(
 }
 
 impl CurveFit {
+    pub(crate) fn process(&self, points: &[(f64, f64)]) -> Vec<String> {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        let mut lines = vec![
+            format!(
+                "等权最小二乘：共有 {} 个点，模型次数 {}，自由参数 {}；最小化 Σ(yᵢ−ŷᵢ)²。{}",
+                points.len(),
+                self.kind.degree(),
+                self.kind.parameter_count(),
+                if self.kind == FitKind::ThroughOrigin {
+                    "过原点模型的常数项固定为 0。"
+                } else {
+                    "模型包含常数项。"
+                }
+            ),
+            format!(
+                "数值归一化：X = (x − x₀)/sₓ，Y = (y − y₀)/sᵧ；x₀ = {}，sₓ = {}，y₀ = {}，sᵧ = {}。",
+                n(self.x.origin),
+                n(self.x.scale),
+                n(self.y.origin),
+                n(self.y.scale)
+            ),
+            "对归一化后的 X 构造幂次矩阵，采用列缩放和 QR 最小二乘求解；过原点时仅使用 X 列。"
+                .to_owned(),
+        ];
+        for (power, coefficient) in self.normalized_coefficients.iter().enumerate() {
+            lines.push(format!("归一化系数 a[{power}] = {}。", n(*coefficient)));
+        }
+        lines.push("预测时按秦九韶法计算 Ŷ = ΣaⱼXʲ，再恢复 ŷ = y₀ + sᵧŶ；显示的原坐标系数由归一化多项式展开。".to_owned());
+        for (power, coefficient) in self.coefficients.iter().enumerate() {
+            lines.push(format!("原坐标系数 K{power} = {}。", n(*coefficient)));
+        }
+        for (i, &(x, y)) in points.iter().enumerate() {
+            let nx = self.x.normalize(x);
+            let ny = self.y.normalize(y);
+            let predicted = evaluate(&self.normalized_coefficients, nx);
+            lines.push(String::new());
+            lines.push(format!(
+                "第 {} 点：x = {}，y = {}；X = {}，Y = {}，Ŷ = {}，恢复拟合值 ŷ = {}。",
+                i + 1,
+                n(x),
+                n(y),
+                c(nx),
+                c(ny),
+                c(predicted),
+                c(self.fitted[i])
+            ));
+            lines.push(format!(
+                "残差 e = (Y − Ŷ) × sᵧ = ({} − {}) × {} = {}；在归一化坐标中相减以减少抵消。",
+                c(ny),
+                c(predicted),
+                n(self.y.scale),
+                c(self.residuals[i])
+            ));
+        }
+        lines.push(String::new());
+        lines.push(format!("RMSE = √(Σeᵢ²/n) = {}；最大绝对残差 max|eᵢ| = {}。程序使用 hypot 累积避免中间平方溢出。", c(self.rmse), c(self.maximum_residual)));
+        let freedom = points.len() - self.kind.parameter_count();
+        lines.push(match self.residual_sd {
+            Some(sd) => format!(
+                "剩余自由度 n−p = {}；残差标准差 = √[Σeᵢ²/(n−p)] = {}。",
+                freedom,
+                c(sd)
+            ),
+            None => "剩余自由度 n−p = 0，残差标准差未定义。".to_owned(),
+        });
+        lines.push(match (self.correlation, self.r_squared) {
+            (Some(r), Some(r2)) => format!("Pearson r = Σ[(xᵢ−x̄)(yᵢ−ȳ)]/[√Σ(xᵢ−x̄)² · √Σ(yᵢ−ȳ)²] = {}；中心化 R² = 1 − Σeᵢ²/Σ(yᵢ−ȳ)² = {}。r 使用原始 x、y，与模型阶数无关；过原点时 R² 可为负。", c(r), c(r2)),
+            _ => "响应量无变化，Pearson r 和中心化 R² 未定义。".to_owned(),
+        });
+        lines
+    }
+
     pub(crate) fn calculate(points: &[(f64, f64)], kind: FitKind) -> Result<Self, String> {
         if !(2..=MAX_POINTS).contains(&points.len()) {
             return Err(format!("校准数据须为 2～{MAX_POINTS} 组"));

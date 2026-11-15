@@ -28,10 +28,11 @@ void Page::details(const std::string &field, const std::wstring &title,
             Run run;
             run.text = token.text;
             if (!token.latex.empty()) {
-                if (const auto bitmap = renderMath(token.latex)) {
+                const auto scale = app.mathRenderScale();
+                if (const auto bitmap = renderMath(token.latex, scale, app.mathPixelScale())) {
                     run.latex = token.latex;
-                    run.width = bitmap->width / 2.f;
-                    run.height = bitmap->height / 2.f;
+                    run.width = bitmap->width / bitmap->scale;
+                    run.height = bitmap->height / bitmap->scale;
                     if (run.width > inner) {
                         run.height *= inner / run.width;
                         run.width = inner;

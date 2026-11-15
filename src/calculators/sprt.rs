@@ -32,6 +32,7 @@ impl ToolboxApp {
         }
         let mut archive_required = None;
         let mut table = None;
+        let mut process = None;
         let result = panel(ui, |ui| {
             let mut required = [
                 "sprt.model",
@@ -92,6 +93,7 @@ impl ToolboxApp {
                 low_quadratic: full && lr == 1,
                 ..Sprt::default()
             };
+            let mut fit_points = None;
             self.input(
                 ui,
                 tool,
@@ -200,19 +202,19 @@ impl ToolboxApp {
                     hp.push((961.78, resistance));
                 }
                 let mut coefficients = vec![
-                    ("a", format_number(m.a)),
-                    ("b", format_number(m.b)),
-                    ("c", format_number(m.c)),
+                    ("a", format_process_number(m.a)),
+                    ("b", format_process_number(m.b)),
+                    ("c", format_process_number(m.c)),
                 ];
                 if let Some([a_label, b_label]) = low_range.coefficients {
                     coefficients.extend([
-                        (a_label, format_number(m.a4)),
-                        (b_label, format_number(m.b4)),
+                        (a_label, format_process_number(m.a4)),
+                        (b_label, format_process_number(m.b4)),
                     ]);
                 }
                 if full && hr == 0 {
                     coefficients
-                        .extend([("d6", format_number(m.d)), ("W660", format_number(m.w660))]);
+                        .extend([("d6", format_process_number(m.d)), ("W660", format_process_number(m.w660))]);
                 }
                 render_metrics(ui, "拟合系数", &coefficients);
                 ui.collapsing("固定点拟合残差", |ui| {
@@ -226,6 +228,7 @@ impl ToolboxApp {
                         }
                     }
                 });
+                fit_points = Some((hp, lp));
             }
             m.validate()?;
             archive_required = Some(required);
@@ -271,14 +274,10 @@ impl ToolboxApp {
             let v = self.number(tool, &key, &d)?;
             let (t, r) = if direction == 0 {
                 let t = u.celsius(v);
-                (t, m.resistance_branch(t, hr != 6 && t >= 0.0)?)
+                (t, m.resistance_branch(t, model::high_for_temperature(t, hr != 6, lr != 2))?)
             } else {
                 (
-                    if hr == 6 {
-                        m.temperature_branch(v, false)?
-                    } else {
-                        m.temperature(v)?
-                    },
+                    m.temperature_branch(v, model::high_for_resistance(v, m.rtp, hr != 6, lr != 2))?,
                     v,
                 )
             };
@@ -294,8 +293,65 @@ impl ToolboxApp {
             // 端点使用模型定义域内的单侧差分。
             let lo = (t - 1.0).max(min);
             let hi = (t + 1.0).min(max);
-            let curve = |t| m.resistance_branch(t, hr != 6 && t >= 0.0);
+            let curve = |t| m.resistance_branch(t, model::high_for_temperature(t, hr != 6, lr != 2));
             let slope = (curve(hi)? - curve(lo)?) / (hi - lo);
+            let w = r / m.rtp;
+            let high = if direction == 0 {
+                model::high_for_temperature(t, hr != 6, lr != 2)
+            } else {
+                model::high_for_resistance(r, m.rtp, hr != 6, lr != 2)
+            };
+            let wr = m.reference_ratio(w, high);
+            let mut steps = vec![format!("{}；选用温区 {}～{} °C；Rtp = {} Ω。", if source == 0 { "使用证书系数" } else { "使用固定点拟合系数" }, format_process_number(min), format_process_number(max), format_process_number(m.rtp)), format!("温度 = {} °C = {} {}；电阻 R = {} Ω。", if direction == 0 { format_process_number(t) } else { format_process_computed(t) }, if direction == 0 { format_process_number(u.display(t)) } else { format_process_computed(u.display(t)) }, u.symbol(), if direction == 0 { format_process_computed(r) } else { format_process_number(r) }), temperature_conversion_note(u.symbol()).to_owned(), format!("实际电阻比 W = R / Rtp = {} / {} = {}。", if direction == 0 { format_process_computed(r) } else { format_process_number(r) }, format_process_number(m.rtp), format_process_computed(w))];
+            if let Some((high_points, low_points)) = &fit_points {
+                steps.push("固定点拟合：每点计算 W=R/Rtp、参考电阻比 Wr(t)，令 ΔW=W−Wr。高温使用 (W−1)、(W−1)²、(W−1)³ 中所选项；低温使用 (W−1) 和选定的二次项或对数项，按各自固定点最小二乘求解。".to_owned());
+                let mut shown = [false; 2];
+                for (is_high, points) in [(true, high_points), (false, low_points)] {
+                    for &(point_t, point_r) in points {
+                        steps.push(String::new());
+                        let (coefficients, x, exponential) = curves::reference_form(point_t);
+                        let group = usize::from(exponential);
+                        if !shown[group] {
+                            steps.push(if exponential { "固定点低温参考函数：x=[ln((t+273.15)/273.16)+1.5]/1.5，Wr=exp(Σ A[i]·xⁱ)。" } else { "固定点高温参考函数：x=(t−481)/481，Wr=Σ C[i]·xⁱ。" }.to_owned());
+                            steps.extend(coefficients.iter().enumerate().map(|(i,c)| format!("参考 {}[{i}] = {}", if exponential { "A" } else { "C" }, format_process_number(*c))));
+                            shown[group] = true;
+                        }
+                        let point_w = point_r / m.rtp;
+                        let point_wr = curves::reference(point_t);
+                        let z = point_w - 1.0;
+                        steps.push(format!("{}固定点 t = {} °C，R = {} Ω；参考函数 x = {}，Wr = {}；W = R/Rtp = {}，ΔW = {}。", if is_high { "高温" } else { "低温" }, format_process_number(point_t), format_process_number(point_r), format_process_computed(x), format_process_computed(point_wr), format_process_computed(point_w), format_process_computed(point_w - point_wr)));
+                        if is_high && hr == 0 && point_t == 961.78 {
+                            steps.push(format!("银点单独求 d：d = [ΔW−a(W−1)−b(W−1)²−c(W−1)³]/(W−W660)²；W660 = {}，d = {}。", format_process_number(m.w660), format_process_number(m.d)));
+                        } else if is_high {
+                            let terms = if hr <= 1 { 3 } else if hr <= 3 { 2 } else { 1 };
+                            steps.push(format!("该高温点方程：ΔW ≈ {}·a{}{}。", format_process_computed(z), if terms >= 2 { format!(" + {}·b", format_process_computed(z * z)) } else { String::new() }, if terms >= 3 { format!(" + {}·c", format_process_computed(z.powi(3))) } else { String::new() }));
+                        } else {
+                            let second = if m.low_quadratic { z.powi(2) } else { z * point_w.ln() };
+                            steps.push(format!("该低温点方程：ΔW ≈ {}·a低 + {}·b低。", format_process_computed(z), format_process_computed(second)));
+                        }
+                    }
+                }
+                steps.push(format!("拟合结果：a = {}，b = {}，c = {}，a低 = {}，b低 = {}。", format_process_number(m.a), format_process_number(m.b), format_process_number(m.c), format_process_number(m.a4), format_process_number(m.b4)));
+            }
+            if high {
+                steps.push(format!("高温偏差：a = {}，b = {}，c = {}，d = {}，W660 = {}；Wr = W − a(W−1) − b(W−1)² − c(W−1)³ − d·max(W−W660, 0)²。", format_process_number(m.a), format_process_number(m.b), format_process_number(m.c), format_process_number(m.d), format_process_number(m.w660)));
+            } else {
+                let labels = low_range.coefficients.unwrap_or(["a4", "b4"]);
+                steps.push(format!("低温偏差：{} = {}，{} = {}；Wr = W − {}(W−1) − {}·{}。", labels[0], format_process_number(m.a4), labels[1], format_process_number(m.b4), labels[0], labels[1], if m.low_quadratic { "(W−1)²" } else { "(W−1)ln(W)" }));
+            }
+            steps.push(format!("偏差修正后的参考电阻比 Wr = {}；{}。", format_process_computed(wr), if direction == 0 { "由目标温度在选定分支反算电阻比，再乘以 Rtp" } else { "将 Wr 代入选定参考函数得到温度" }));
+            let (coefficients, x, low_reference) = m.reference_function(w, wr, high);
+            if low_reference {
+                steps.push(format!("低温参考函数：x = (Wr^(1/6) − 0.65) / 0.35 = {}；t = 273.16 × Σ B[i]·xⁱ − 273.15 °C。", format_process_computed(x)));
+            } else {
+                steps.push(format!("高温参考函数：x = (Wr − 2.64) / 1.64 = {}；t = Σ D[i]·xⁱ °C。", format_process_computed(x)));
+            }
+            steps.extend(coefficients.iter().enumerate().map(|(i, c)| format!("{}[{i}] = {}", if low_reference { "B" } else { "D" }, format_process_number(*c))));
+            let reference_value = crate::calculators::calibration::polynomial(coefficients, x);
+            let reference_temperature = if low_reference { 273.16 * reference_value - 273.15 } else { reference_value };
+            steps.push(format!("按秦九韶法计算多项式 = {}，参考函数得到温度 {} °C{}。", format_process_computed(reference_value), format_process_computed(reference_temperature), if direction == 0 { "（数值反算校验）" } else { "" }));
+            steps.push(format!("电阻变化率采用 {}～{} °C 的差分，结果 {} Ω/{}。", format_process_number(lo), format_process_number(hi), format_process_computed(slope / u.span()), u.symbol()));
+            process = Some(steps);
             table = Some((m, u, min, max, hr, lr));
             Ok(vec![
                 (
@@ -325,8 +381,11 @@ impl ToolboxApp {
                 (min, max),
                 u,
                 "Ω",
-                |t| m.resistance_branch(t, hr != 6 && t >= 0.0),
+                |t| m.resistance_branch(t, model::high_for_temperature(t, hr != 6, lr != 2)),
             );
+        }
+        if let Some(lines) = &process {
+            calculation_process(ui, "sprt_process", lines);
         }
         self.calculation_note(ui, tool);
     }

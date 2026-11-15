@@ -1,5 +1,6 @@
 //! 温标页面适配；正反算、允差与分度表共用桌面参考曲线。
 use crate::api::{Input, Output, celsius_in_bounds, division};
+use crate::calculators::common::{format_process_computed as c, format_process_number as n};
 use crate::calculators::{calibration::TemperatureUnit, rtd, sprt, thermistor, thermocouple as tc};
 use crate::catalog::ToolKind;
 use serde_json::{Value, json};
@@ -103,6 +104,31 @@ fn thermocouple(i: &Input) -> Result<Output, String> {
         "mV",
     );
     out.metric("参考端热电势", tc::thermocouple_emf(kind, cold)?, "mV");
+    out.process = vec![format!(
+        "{kind} 型参考函数；热端温度 {} °C，参考端温度 {} °C，修正量 {} mV。",
+        c(t),
+        c(cold),
+        n(correction)
+    )];
+    out.process
+        .extend(tc::reference_process(kind, t, "热端", direction != 0)?);
+    out.process.push(String::new());
+    out.process
+        .extend(tc::reference_process(kind, cold, "参考端", false)?);
+    let check = tc::measured_emf(kind, t, cold, correction)?;
+    out.process.push(format!(
+        "测量热电势 = E(热端) − E(参考端) − 修正量 = {} − {} − {} = {} mV。",
+        c(tc::thermocouple_emf(kind, t)?),
+        c(tc::thermocouple_emf(kind, cold)?),
+        n(correction),
+        c(check)
+    ));
+    if direction != 0 {
+        out.process.push(format!(
+            "先将输入电势加回参考端电势与修正量，在参考函数单调区间二分；代回残差 = {} mV。",
+            c(check - measured)
+        ));
+    }
     out.metric(
         "微分热电势 dE/dt",
         tc::slope(kind, t)? / unit.span(),
@@ -159,6 +185,50 @@ fn industrial(i: &Input) -> Result<Output, String> {
     out.metric("温度", unit.display(t), unit.symbol());
     out.metric("电阻", r, "Ω");
     out.metric("电阻比 R/R₀", r / m.r0, "");
+    out.process.push(format!(
+        "分度号 {}；R₀ = {} Ω；温度 = {} °C，电阻 = {} Ω。",
+        g.name,
+        n(m.r0),
+        c(t),
+        c(r)
+    ));
+    if let Some([a, b, cc]) = m.cvd_coefficients() {
+        out.process.push(format!(
+            "CVD 系数 A = {}，B = {}，C = {}；{}",
+            n(a),
+            n(b),
+            n(cc),
+            if t < 0. {
+                "R/R₀ = 1 + At + Bt² + C(t−100)t³。"
+            } else {
+                "R/R₀ = 1 + At + Bt²。"
+            }
+        ));
+    } else if let Some(form) = m.polynomial_form(t) {
+        out.process.push(format!(
+            "{}：z = t + {} = {}；R/R₀ = {} × Σcᵢzⁱ，系数按升幂：",
+            form.segment,
+            n(form.shift),
+            c(form.argument),
+            n(form.scale)
+        ));
+        out.process.extend(
+            form.coefficients()
+                .iter()
+                .enumerate()
+                .map(|(j, v)| format!("c[{j}] = {}。", n(*v))),
+        );
+    }
+    out.process.push(format!(
+        "代入温度正算 R = {} Ω；电阻比 R/R₀ = {}；变化率 dR/dt = {} Ω/°C。",
+        c(m.resistance(t)?),
+        c(r / m.r0),
+        c(m.slope(t)?)
+    ));
+    if dir != 0 {
+        out.process
+            .push("电阻反算采用同一参考曲线的有界二分。".into());
+    }
     out.metric(
         "电阻变化率 dR/dt",
         m.slope(t)? / unit.span(),
@@ -219,7 +289,20 @@ fn standard(i: &Input) -> Result<Output, String> {
         let mut zone = zones[i.index("zone", 0, zones.len())?].clone();
         if i.index("coefficientSource", 0, 2)? == 1 {
             let points = i.points(&[], 2, 30)?;
+            let base = zone.2.clone();
             StandardCouple::fit_zone_coefficients(&mut zone, &points)?;
+            out.process.push("校准点拟合：在基准多项式上仅调整一次和二次项，按 ΔE = 实测电势 − 基准电势建立最小二乘方程。".into());
+            out.process.extend(
+                base.iter()
+                    .enumerate()
+                    .map(|(j, v)| format!("基准系数 b[{j}] = {}。", n(*v))),
+            );
+            for (j, (temp, measured)) in points.iter().enumerate() {
+                let base_e = crate::calculators::calibration::polynomial(&base, *temp);
+                let fitted_e = crate::calculators::calibration::polynomial(&zone.2, *temp);
+                out.process.push(String::new());
+                out.process.push(format!("校准点 {}：t = {} °C，实测 = {} mV，基准电势 = {} mV；ΔE = 实测 − 基准 = {} mV；拟合残差 = 实测 − 拟合电势 = {} mV。",j+1,n(*temp),n(*measured),c(base_e),c(*measured-base_e),c(*measured-fitted_e)));
+            }
             out.details = json!({"calibrationResiduals":points.iter().map(|(t,e)|json!([t,e-crate::calculators::calibration::polynomial(&zone.2,*t)])).collect::<Vec<_>>()});
         } else {
             zone.2 = i.values("coefficients", &zone.2, zone.2.len(), zone.2.len())?;
@@ -246,6 +329,87 @@ fn standard(i: &Input) -> Result<Output, String> {
     out.metric("温度", unit.display(t), unit.symbol());
     out.metric("测得热电势", e, "mV");
     out.metric("补偿后热电势", m.emf(t)?, "mV");
+    for (label, temp) in [("热端", t), ("参考端", cold)] {
+        out.process.push(String::new());
+        if let Some((lo, hi, coefficients)) = &m.zone {
+            out.process.push(format!(
+                "{label}：系数温区 {}～{} °C，t = {} °C；E(t) = Σcᵢtⁱ，0 °C 特别规定为 0 mV。",
+                n(*lo),
+                n(*hi),
+                c(temp)
+            ));
+            out.process.extend(
+                coefficients
+                    .iter()
+                    .enumerate()
+                    .map(|(j, v)| format!("c[{j}] = {}。", n(*v))),
+            );
+        } else {
+            use tc::standard::FixedMethod;
+            let adjustment = m.fixed_adjustment(temp)?;
+            out.process.extend(tc::reference_process(
+                kind,
+                temp,
+                &format!("{label}参考曲线"),
+                true,
+            )?);
+            for (j, ((point, measured), offset)) in
+                m.points.iter().zip(&adjustment.offsets).enumerate()
+            {
+                out.process.push(format!(
+                    "固定点 {}：t = {} °C，实测 {} mV，参考 {} mV，偏差 δ = 实测 − 参考 = {} mV。",
+                    j + 1,
+                    n(*point),
+                    n(*measured),
+                    c(tc::thermocouple_emf(kind, *point)?),
+                    c(*offset)
+                ));
+            }
+            match adjustment.method {
+                FixedMethod::SLinear => out.process.push(format!("S 型低于 400 °C：δ = δ₁t/t₁ = {} × {} / {} = {} mV。", c(adjustment.offsets[0]), c(temp), n(m.points[0].0), c(adjustment.value))),
+                FixedMethod::SQuadratic(terms) => {
+                    out.process.push("S 型拉格朗日二次插值：δ = Σδᵢ∏ⱼ≠ᵢ[(t−tⱼ)/(tᵢ−tⱼ)]。".into());
+                    for (index, term) in terms.iter().enumerate() {
+                        let mut substitution = c(adjustment.offsets[index]);
+                        for (j, &(point, _)) in m.points.iter().enumerate() {
+                            if index != j {
+                                substitution.push_str(&format!(" × ({}−{})/({}−{})", c(temp), n(point), n(m.points[index].0), n(point)));
+                            }
+                        }
+                        out.process.push(String::new());
+                        out.process.push(format!("固定点 {} 的插值项 = {} = {} mV。", index + 1, substitution, c(*term)));
+                    }
+                }
+                FixedMethod::BZero => out.process.push("B 型低于 23 °C：修正量为 0。".into()),
+                FixedMethod::BLinearFrom23 => out.process.push(format!("B 型低温段：δ = δ₁(t−23)/(t₁−23) = {} × ({}−23)/({}−23) = {} mV。", c(adjustment.offsets[0]), c(temp), n(m.points[0].0), c(adjustment.value))),
+                FixedMethod::BConstant(index) => out.process.push(format!("B 型采用固定点 {} 的偏差 = {} mV。", index + 1, c(adjustment.value))),
+                FixedMethod::BTransition { index, fraction } => out.process.push(format!("B 型固定点 {} 与 {} 之间的过渡：δ = δᵢ + (δᵢ₊₁−δᵢ)(t−tᵢ−30)/40 = {} + ({}−{}) × ({}−{}−30)/40 = {} mV；过渡比例 = {}。", index + 1, index + 2, c(adjustment.offsets[index]), c(adjustment.offsets[index + 1]), c(adjustment.offsets[index]), c(temp), n(m.points[index].0), c(adjustment.value), c(fraction))),
+            }
+            out.process.push(format!(
+                "固定点修正量 = {} mV；校准电势 = 参考电势 + 修正量 = {} + {} = {} mV。",
+                c(adjustment.value),
+                c(tc::thermocouple_emf(kind, temp)?),
+                c(adjustment.value),
+                c(m.emf(temp)?)
+            ));
+        }
+        out.process
+            .push(format!("{label}电势 = {} mV。", c(m.emf(temp)?)));
+    }
+    let reconstructed = m.emf(t)? - m.emf(cold)? - corr;
+    out.process.push(format!(
+        "测量电势 = E(热端) − E(参考端) − 修正量 = {} − {} − {} = {} mV。",
+        c(m.emf(t)?),
+        c(m.emf(cold)?),
+        n(corr),
+        c(reconstructed)
+    ));
+    if dir != 0 {
+        out.process.push(format!(
+            "反算对补偿后电势执行有界二分；代回残差 = {} mV。",
+            c(reconstructed - e)
+        ));
+    }
     let bounds = m
         .zone
         .as_ref()
@@ -263,6 +427,18 @@ fn standard(i: &Input) -> Result<Output, String> {
         (m.emf(hi)? - m.emf(lo)?) / (hi - lo) / unit.span(),
         &format!("mV/{}", unit.symbol()),
     );
+    out.process.push(format!(
+        "微分热电势使用有限差分：[E({}) − E({})]/({} − {}) = ({} − {})/({} − {}) = {} mV/°C。",
+        c(hi),
+        c(lo),
+        c(hi),
+        c(lo),
+        c(m.emf(hi)?),
+        c(m.emf(lo)?),
+        c(hi),
+        c(lo),
+        c((m.emf(hi)? - m.emf(lo)?) / (hi - lo))
+    ));
     division(&mut out, i, bounds, "mV", |t| {
         Ok(m.emf(t)? - m.emf(cold)? - corr)
     })?;
@@ -289,16 +465,26 @@ fn cvd_fit(i: &Input) -> Result<Output, String> {
     {
         return Err("校准点须在 −200～850 °C 内，电阻大于 0".into());
     }
-    let c = solve_3x3(
+    let coefficients = solve_3x3(
         pts.iter().map(|p| cvd_basis(p.0)).collect(),
         pts.iter().map(|p| p.1 / r0 - 1.).collect(),
     )
     .ok_or("校准点无法独立确定系数")?;
     let mut o = Output::default();
-    for (name, v) in ["A", "B", "C"].into_iter().zip(c) {
+    for (name, v) in ["A", "B", "C"].into_iter().zip(coefficients) {
         o.metric(name, v, "")
     }
-    o.coefficients = c.to_vec();
+    o.coefficients = coefficients.to_vec();
+    o.process.push(format!(
+        "CVD 三点拟合：R/R₀ − 1 = At + Bt² + C(t−100)t³（t ≥ 0 时 C 项为零），R₀ = {} Ω。",
+        n(r0)
+    ));
+    o.process.push(format!(
+        "缩放线性方程求得 A = {}，B = {}，C = {}。",
+        n(coefficients[0]),
+        n(coefficients[1]),
+        n(coefficients[2])
+    ));
     o.headings = vec![
         "温度 (°C)".into(),
         "实测电阻 (Ω)".into(),
@@ -306,7 +492,16 @@ fn cvd_fit(i: &Input) -> Result<Output, String> {
         "电阻残差 (Ω)".into(),
     ];
     for (t, r) in pts {
-        let fitted = cvd_resistance(t, r0, c[0], c[1], c[2]);
+        let fitted = cvd_resistance(t, r0, coefficients[0], coefficients[1], coefficients[2]);
+        o.process.push(String::new());
+        o.process.push(format!(
+            "校准点 t = {} °C，实测 R = {} Ω；R/R₀ − 1 = {}，拟合电阻 = {} Ω，残差 = {} Ω。",
+            n(t),
+            n(r),
+            c(r / r0 - 1.),
+            c(fitted),
+            c(r - fitted)
+        ));
         o.rows
             .push(vec![json!(t), json!(r), json!(fitted), json!(r - fitted)])
     }
@@ -377,6 +572,20 @@ fn platinum(i: &Input) -> Result<Output, String> {
                 1
             },
         )?;
+        out.process.push("固定点拟合使用 W = R/Rtp 与参考电阻比 Wr；高、低温偏差分别建立线性方程并采用最小二乘求系数。".into());
+        for (j, (temp, resistance)) in hp.iter().chain(&lp).enumerate() {
+            let w = *resistance / m.rtp;
+            out.process.push(String::new());
+            out.process.push(format!(
+                "固定点 {}：t = {} °C，R = {} Ω；W = R/Rtp = {}，Wr(t) = {}，偏差 W−Wr = {}。",
+                j + 1,
+                n(*temp),
+                n(*resistance),
+                c(w),
+                c(sprt::curves::reference(*temp)),
+                c(w - sprt::curves::reference(*temp))
+            ));
+        }
         if full && hr == 0 {
             m.w660 = hp.iter().find(|p| p.0 == 660.323).ok_or("缺少铝点")?.1 / m.rtp;
             m.fit_silver(961.78, i.number("silver", m.resistance(961.78)?)?)?;
@@ -408,17 +617,16 @@ fn platinum(i: &Input) -> Result<Output, String> {
             25.
         },
     )?;
-    let curve = |t| m.resistance_branch(t, hr != 6 && t >= 0.);
+    let curve = |t| m.resistance_branch(t, sprt::model::high_for_temperature(t, hr != 6, lr != 2));
     let (t, r) = if dir == 0 {
         let t = celsius_in_bounds(u, v, bounds);
         (t, curve(t)?)
     } else {
         (
-            if hr == 6 {
-                m.temperature_branch(v, false)?
-            } else {
-                m.temperature(v)?
-            },
+            m.temperature_branch(
+                v,
+                sprt::model::high_for_resistance(v, m.rtp, hr != 6, lr != 2),
+            )?,
             v,
         )
     };
@@ -431,6 +639,45 @@ fn platinum(i: &Input) -> Result<Output, String> {
     out.metric("温度", u.display(t), u.symbol());
     out.metric("电阻", r, "Ω");
     out.metric("电阻比 W", r / m.rtp, "");
+    let high = if dir == 0 {
+        sprt::model::high_for_temperature(t, hr != 6, lr != 2)
+    } else {
+        sprt::model::high_for_resistance(r, m.rtp, hr != 6, lr != 2)
+    };
+    let w = r / m.rtp;
+    let wr = m.reference_ratio(w, high);
+    let (coefficients, x, low_reference) = m.reference_function(w, wr, high);
+    out.process.push(format!(
+        "Rtp = {} Ω，R = {} Ω；W = R/Rtp = {}。",
+        n(m.rtp),
+        c(r),
+        c(w)
+    ));
+    out.process.push(if high {format!("高温：Wr = W − a(W−1) − b(W−1)² − c(W−1)³ − d·max(W−W660,0)²；a、b、c、d、W660 = {}、{}、{}、{}、{}；Wr = {}。",n(m.a),n(m.b),n(m.c),n(m.d),n(m.w660),c(wr))} else {format!("{}；a = {}，b = {}，Wr = {}。",if m.low_quadratic {"低温：Wr = W − a₅(W−1) − b₅(W−1)²"}else{"低温：Wr = W − a₄(W−1) − b₄(W−1)ln(W)"},n(m.a4),n(m.b4),c(wr))});
+    out.process.push(format!(
+        "{}，归一化自变量 = {}；参考函数系数按升幂：",
+        if low_reference {
+            "低温：x = (Wr^(1/6)−0.65)/0.35"
+        } else {
+            "高温：x = (Wr−2.64)/1.64"
+        },
+        c(x)
+    ));
+    out.process.extend(
+        coefficients
+            .iter()
+            .enumerate()
+            .map(|(j, v)| format!("c[{j}] = {}。", n(*v))),
+    );
+    out.process.push(format!(
+        "{} = {} °C；正算电阻通过该分支的有界二分求解。",
+        if low_reference {
+            "温度 t = 273.16Σcᵢxⁱ − 273.15"
+        } else {
+            "温度 t = Σcᵢxⁱ"
+        },
+        c(m.temperature_branch(r, high)?)
+    ));
     out.metric("电阻变化率", slope / u.span(), &format!("Ω/{}", u.symbol()));
     out.details =
         json!({"coefficients":{"a":m.a,"b":m.b,"c":m.c,"a4":m.a4,"b4":m.b4,"d":m.d,"w660":m.w660}});
@@ -474,8 +721,59 @@ fn ntc(i: &Input) -> Result<Output, String> {
         }
         out.metric("温度", u.display(t), u.symbol());
         out.metric("电阻", r, "Ω");
+        let r0 = i.number("r0", 10000.)?;
+        let t0 = u.celsius(i.number("t0", u.display(25.))?);
+        let beta = i.number("beta", 3950.)?;
+        out.process = vec![
+            format!(
+                "β 模型：R₀ = {} Ω，T₀ = {} K，β = {} K。",
+                n(r0),
+                c(t0 + 273.15),
+                n(beta)
+            ),
+            format!(
+                "ln(R) = ln(R₀) + β(1/T−1/T₀)；1/T = 1/T₀ + [ln(R)−ln(R₀)]/β。T 用 K、R 用 Ω。"
+            ),
+            format!(
+                "当前温度 = {} °C = {} K，电阻 = {} Ω。",
+                c(t),
+                c(t + 273.15),
+                c(r)
+            ),
+        ];
+        if direction == 0 {
+            out.process.push(format!(
+                "ln(R) = ln({}) + {} × (1/{} − 1/{}) = {}；R = exp(ln R) = {} Ω。",
+                n(r0),
+                n(beta),
+                c(t + 273.15),
+                c(t0 + 273.15),
+                c(m.log_resistance(t + 273.15)),
+                c(r)
+            ));
+        } else {
+            let inv = m.inverse_temperature(r);
+            out.process.push(format!(
+                "1/T = 1/{} + [ln({}) − ln({})]/{} = {} K⁻¹；t = 1/(1/T) − 273.15 = {} °C。",
+                c(t0 + 273.15),
+                n(r),
+                n(r0),
+                n(beta),
+                c(inv),
+                c(t)
+            ));
+        }
         let slope = -r * i.number("beta", 3950.)? / (t + 273.15).powi(2);
         crate::calculators::numerics::finite(&[slope])?;
+        out.process.push(format!(
+            "电阻变化率 dR/dt = −Rβ/T² = −{} × {} / {}² = {} Ω/°C；按显示温标换算后为 {} Ω/{}。",
+            c(r),
+            n(beta),
+            c(t + 273.15),
+            c(slope),
+            c(slope / u.span()),
+            u.symbol()
+        ));
         out.metric("电阻变化率", slope / u.span(), &format!("Ω/{}", u.symbol()));
         division(&mut out, i, (min, max), "Ω", |t| m.resistance(t))?;
         return Ok(out);
@@ -500,6 +798,19 @@ fn ntc(i: &Input) -> Result<Output, String> {
             .collect::<Result<Vec<_>, String>>()?;
         let pts = i.points(&defaults, if sh { order } else { order + 1 }, 30)?;
         let model = PolynomialThermistor::fit(&pts, order, sh)?;
+        out.process.push("校准点拟合分别使用 x = ln(R)、y = 1/T 拟合 A 系数，以及 x = 1/T、y = ln(R) 拟合 B 系数；使用列缩放 QR。".into());
+        for (j, (temp, resistance)) in pts.iter().enumerate() {
+            out.process.push(String::new());
+            out.process.push(format!(
+                "校准点 {}：t = {} °C，R = {} Ω；ln(R) = {}，1/T = {} K⁻¹，温度残差 = {} °C。",
+                j + 1,
+                n(*temp),
+                n(*resistance),
+                c(resistance.ln()),
+                c(1. / (*temp + 273.15)),
+                c(*temp - model.temperature(*resistance)?)
+            ));
+        }
         out.details = json!({"calibrationResiduals":pts.iter().map(|(t,r)|Ok(json!([t,t-model.temperature(*r)?]))).collect::<Result<Vec<_>,String>>()?});
         model
     } else {
@@ -524,9 +835,53 @@ fn ntc(i: &Input) -> Result<Output, String> {
     }
     out.metric("温度", u.display(t), u.symbol());
     out.metric("电阻", r, "Ω");
+    out.process.push(format!(
+        "{} 阶{}热敏电阻模型；t = {} °C，R = {} Ω。",
+        order,
+        if sh {
+            " Steinhart–Hart "
+        } else {
+            "多项式"
+        },
+        c(t),
+        c(r)
+    ));
+    out.process.push("电阻 → 温度：1/T = ΣAᵢ[ln(R)]ⁱ；温度 → 电阻：ln(R) = ΣBᵢ(1/T)ⁱ。两组系数分别拟合或输入，不保证精确互逆。".into());
+    let (coeffs, x) = if dir == 0 {
+        (&m.b, 1. / (t + 273.15))
+    } else {
+        (&m.a, r.ln())
+    };
+    out.process
+        .push(format!("本次自变量 = {}；系数按升幂：", c(x)));
+    out.process.extend(
+        coeffs
+            .iter()
+            .enumerate()
+            .map(|(j, v)| format!("{}[{j}] = {}。", if dir == 0 { "B" } else { "A" }, n(*v))),
+    );
+    out.process.push(format!(
+        "多项式值 = {}；{}。",
+        c(crate::calculators::calibration::polynomial(coeffs, x)),
+        if dir == 0 {
+            format!("电阻 = exp(多项式值) = {} Ω", c(r))
+        } else {
+            format!("温度 = 1/(多项式值) − 273.15 = {} °C", c(t))
+        }
+    ));
     let lo = (t - 1.).max(min);
     let hi = (t + 1.).min(max);
     let slope = (m.resistance(hi)? - m.resistance(lo)?) / (hi - lo);
+    out.process.push(format!("差分点限制在校准温区 {}～{} °C：t低 = max(t−1, 下限) = {} °C，t高 = min(t+1, 上限) = {} °C。", n(min), n(max), c(lo), c(hi)));
+    if dir != 0 {
+        out.process.push("变化率使用温度 → 电阻的 B 系数：".into());
+        out.process.extend(
+            m.b.iter()
+                .enumerate()
+                .map(|(j, v)| format!("B[{j}] = {}。", n(*v))),
+        );
+    }
+    out.process.push(format!("变化率采用有限差分：[R({}) − R({})]/({} − {}) = ({} − {})/({} − {}) = {} Ω/°C；按显示温标换算后 = {} Ω/{}。",c(hi),c(lo),c(hi),c(lo),c(m.resistance(hi)?),c(m.resistance(lo)?),c(hi),c(lo),c(slope),c(slope/u.span()),u.symbol()));
     out.metric("电阻变化率", slope / u.span(), &format!("Ω/{}", u.symbol()));
     out.details
         .as_object_mut()
@@ -536,4 +891,45 @@ fn ntc(i: &Input) -> Result<Output, String> {
     }
     division(&mut out, i, (min, max), "Ω", |t| m.resistance(t))?;
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn platinum_round_trips_near_triple_point_for_enabled_ranges() {
+        for (high, low, temperatures) in [
+            (1, 0, &[-0.005, 0.0, 0.005, 0.01, 0.011][..]),
+            (1, 1, &[-0.005, 0.0, 0.005, 0.01, 0.011][..]),
+            (1, 2, &[0.0, 0.005, 0.01][..]),
+            (6, 0, &[-0.005, 0.0][..]),
+            (6, 1, &[-0.005, 0.0][..]),
+        ] {
+            for &temperature in temperatures {
+                let forward = platinum(&Input(json!({"highRange":high,"lowRange":low,"direction":0,"value":temperature,"a4":0.003,"b4":0.001}))).unwrap();
+                let resistance = forward
+                    .metrics
+                    .iter()
+                    .find(|m| m.label == "电阻")
+                    .unwrap()
+                    .value
+                    .as_f64()
+                    .unwrap();
+                let reverse = platinum(&Input(json!({"highRange":high,"lowRange":low,"direction":1,"value":resistance,"a4":0.003,"b4":0.001}))).unwrap();
+                let restored = reverse
+                    .metrics
+                    .iter()
+                    .find(|m| m.label == "温度")
+                    .unwrap()
+                    .value
+                    .as_f64()
+                    .unwrap();
+                assert!(
+                    (restored - temperature).abs() < 1e-8,
+                    "分区 {high}/{low}：{temperature} → {restored}"
+                );
+            }
+        }
+    }
 }

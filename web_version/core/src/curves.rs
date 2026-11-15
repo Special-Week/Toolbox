@@ -33,6 +33,7 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
         let pts = i.points(FIT_POINTS, 2, 200)?;
         let kind = FitKind::from_index(i.index("model", 0, 4)?);
         let fit = CurveFit::calculate(&pts, kind)?;
+        o.process = fit.process(&pts);
         o.coefficients = fit.coefficients.clone();
         o.equation = fit
             .coefficients
@@ -85,6 +86,15 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
         return Ok(o);
     }
     let (pts, m, start, end, step, total) = spline_model(i)?;
+    o.process = vec![format!(
+        "输入 {} 个 Q 型值点，横坐标严格递增；端点二阶导数为零，内部控制点满足 Pᵢ₋₁ + 4Pᵢ + Pᵢ₊₁ = 6Qᵢ。",
+        pts.len()
+    )];
+    o.process.extend(m.normalization_steps());
+    o.process.push(format!("采样范围 {}～{}，步进 {}；共 {} 个采样点，最后一点固定为最大值。以下以一个预览点说明，其余点采用同样的方法。", start, end, step, total));
+    o.process.push(String::new());
+    let sample = sample_x(start, end, step, total, (total.min(100) - 1) / 2);
+    o.process.extend(m.process_at_x(sample)?);
     o.total = total;
     o.metric("Q 型值点", pts.len(), "个");
     o.metric("完整采样结果", total, "行");

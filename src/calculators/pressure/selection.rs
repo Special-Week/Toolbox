@@ -9,6 +9,11 @@ use crate::{
     catalog::{Dimension, ToolDef, convert_unit, units_for},
 };
 use eframe::egui;
+
+enum Candidate {
+    Pressure(super::model::Selection),
+    Electrical(model::ElectricalSelection),
+}
 impl ToolboxApp {
     pub(crate) fn render_pressure_reference(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
         self.render_selection(ui, tool, false);
@@ -31,7 +36,7 @@ impl ToolboxApp {
             self.render_transmitter_reference_legacy(ui, tool);
             return;
         }
-        let result = (|| {
+        let result: Result<(Vec<(&str, String)>, Vec<String>), String> = (|| {
             let mode = self.select_index(
                 ui,
                 tool,
@@ -179,43 +184,79 @@ impl ToolboxApp {
                     let s = model::transmitter(
                         dut, reference, signal, da, ra, reading, fixed, required,
                     )?;
-                    return Ok(vec![
-                        ("被检压力允差", format_number(s.pressure.dut_tolerance)),
-                        (
-                            "标准压力允差",
-                            format_number(s.pressure.reference_tolerance),
-                        ),
-                        (
-                            "合成扩展不确定度 (k=2)",
-                            format!("{} {signal_symbol}", format_number(s.expanded)),
-                        ),
-                        (
-                            "电信号允许限值",
-                            format!("{} {signal_symbol}", format_number(s.allowance)),
-                        ),
-                        ("综合判断", if s.meets { "符合" } else { "不符合" }.into()),
-                        (
-                            "压力量程覆盖",
-                            if s.pressure.coverage {
-                                "符合"
-                            } else {
-                                "不符合"
-                            }
-                            .into(),
-                        ),
-                    ]);
+                    let mut steps = super::process::selection(
+                        dut,
+                        reference,
+                        da,
+                        ra,
+                        required,
+                        false,
+                        &s.pressure,
+                        units[index].code,
+                    );
+                    steps.extend(super::process::electrical(
+                        dut,
+                        signal,
+                        da,
+                        reading,
+                        fixed,
+                        required,
+                        &s,
+                        signal_symbol,
+                    ));
+                    return Ok((
+                        vec![
+                            ("被检压力允差", format_number(s.pressure.dut_tolerance)),
+                            (
+                                "标准压力允差",
+                                format_number(s.pressure.reference_tolerance),
+                            ),
+                            (
+                                "合成扩展不确定度 (k=2)",
+                                format!("{} {signal_symbol}", format_number(s.expanded)),
+                            ),
+                            (
+                                "电信号允许限值",
+                                format!("{} {signal_symbol}", format_number(s.allowance)),
+                            ),
+                            ("综合判断", if s.meets { "符合" } else { "不符合" }.into()),
+                            (
+                                "压力量程覆盖",
+                                if s.pressure.coverage {
+                                    "符合"
+                                } else {
+                                    "不符合"
+                                }
+                                .into(),
+                            ),
+                        ],
+                        steps,
+                    ));
                 }
                 let s = model::verify(dut, reference, da, ra, required, piston)?;
-                return Ok(vec![
-                    ("被检允差", format_number(s.dut_tolerance)),
-                    ("标准器允差", format_number(s.reference_tolerance)),
-                    ("量传比", format_number(s.ratio)),
-                    (
-                        "量程覆盖",
-                        if s.coverage { "符合" } else { "不符合" }.into(),
-                    ),
-                    ("综合判断", if s.meets { "符合" } else { "不符合" }.into()),
-                ]);
+                let steps = super::process::selection(
+                    dut,
+                    reference,
+                    da,
+                    ra,
+                    required,
+                    piston,
+                    &s,
+                    units[index].code,
+                );
+                return Ok((
+                    vec![
+                        ("被检允差", format_number(s.dut_tolerance)),
+                        ("标准器允差", format_number(s.reference_tolerance)),
+                        ("量传比", format_number(s.ratio)),
+                        (
+                            "量程覆盖",
+                            if s.coverage { "符合" } else { "不符合" }.into(),
+                        ),
+                        ("综合判断", if s.meets { "符合" } else { "不符合" }.into()),
+                    ],
+                    steps,
+                ));
             }
             // 目录量程以 MPa 保存，再转换为所选单位。
             let series = if transmitter {
@@ -268,7 +309,12 @@ impl ToolboxApp {
                     .collect()
             };
             let mut count = 0;
+            let mut steps = vec![format!("{}；量传比要求 ≥ {}。", if mode == 1 { "按被检量程推荐" } else { "按检定范围推荐：先选择完整落在输入范围内的目录量程" }, format_process_number(required)), "逐一核验目录量程和准确度；符合条件的组合先按准确度百分数从大到小，再按跨度从小到大排序。以下展示每个被检量程的首选组合。".to_owned()];
+            if duties.is_empty() {
+                steps.push("输入的检定范围未完整覆盖任何目录量程。".to_owned());
+            }
             for duty in duties {
+                steps.push(String::new());
                 let accuracies = if let Some(a) = fixed_accuracy {
                     vec![a]
                 } else if piston {
@@ -279,14 +325,19 @@ impl ToolboxApp {
                 let mut matches = Vec::new();
                 for r in &catalogue {
                     for a in &accuracies {
-                        let good = if transmitter {
-                            model::transmitter(duty, *r, signal, da, *a, reading, fixed, required)?
-                                .meets
+                        let candidate = if transmitter {
+                            Candidate::Electrical(model::transmitter(
+                                duty, *r, signal, da, *a, reading, fixed, required,
+                            )?)
                         } else {
-                            model::verify(duty, *r, da, *a, required, piston)?.meets
+                            Candidate::Pressure(model::verify(duty, *r, da, *a, required, piston)?)
+                        };
+                        let good = match &candidate {
+                            Candidate::Pressure(s) => s.meets,
+                            Candidate::Electrical(s) => s.meets,
                         };
                         if good {
-                            matches.push((*r, *a));
+                            matches.push((*r, *a, candidate));
                         }
                     }
                 }
@@ -303,8 +354,60 @@ impl ToolboxApp {
                 ));
                 if matches.is_empty() {
                     ui.label("没有满足当前条件的标准器组合");
+                    steps.push(format!(
+                        "被检量程 {}～{} {}：没有满足条件的组合。",
+                        format_process_number(duty.low),
+                        format_process_number(duty.high),
+                        units[index].code
+                    ));
                 }
-                for (i, (r, a)) in matches.iter().enumerate() {
+                if let Some((reference, accuracy, candidate)) = matches.first() {
+                    steps.push(format!(
+                        "被检量程 {}～{} {}：首选标准器 {}～{} {}，准确度 {}%。",
+                        format_process_number(duty.low),
+                        format_process_number(duty.high),
+                        units[index].code,
+                        format_process_number(reference.low),
+                        format_process_number(reference.high),
+                        units[index].code,
+                        format_process_number(*accuracy)
+                    ));
+                    match candidate {
+                        Candidate::Pressure(s) => steps.extend(super::process::selection(
+                            duty,
+                            *reference,
+                            da,
+                            *accuracy,
+                            required,
+                            piston,
+                            s,
+                            units[index].code,
+                        )),
+                        Candidate::Electrical(s) => {
+                            steps.extend(super::process::selection(
+                                duty,
+                                *reference,
+                                da,
+                                *accuracy,
+                                required,
+                                false,
+                                &s.pressure,
+                                units[index].code,
+                            ));
+                            steps.extend(super::process::electrical(
+                                duty,
+                                signal,
+                                da,
+                                reading,
+                                fixed,
+                                required,
+                                s,
+                                signal_symbol,
+                            ));
+                        }
+                    }
+                }
+                for (i, (r, a, _)) in matches.iter().enumerate() {
                     ui.label(format!(
                         "{}{}～{} {}，{}%",
                         if i == 0 { "推荐：" } else { "可选：" },
@@ -316,9 +419,18 @@ impl ToolboxApp {
                     count += 1;
                 }
             }
-            Ok(vec![("满足条件的量程 / 准确度组合", count.to_string())])
+            Ok((
+                vec![("满足条件的量程 / 准确度组合", count.to_string())],
+                steps,
+            ))
         })();
-        show_result_or_error(ui, "选型结果", result);
+        match result {
+            Ok((metrics, steps)) => {
+                render_metrics(ui, "选型结果", &metrics);
+                super::process::show(ui, "selection_process", &steps);
+            }
+            Err(message) => render_error_message(ui, &message),
+        }
         self.calculation_note(ui, tool);
     }
 }

@@ -12,6 +12,9 @@ import { schema, initialize, adjust } from "./schema";
 import { decimal, display, download } from "./format";
 import { resultCsv } from "./export";
 import { calculationNote } from "./notes";
+import CalculationProcess from "./components/CalculationProcess.vue";
+import FormulaText from "./components/FormulaText.vue";
+import { version } from "../package.json";
 import { INPUT_STORAGE_KEY, rememberedInputs } from "./input-history";
 import FieldEditor from "./components/FieldEditor.vue";
 import QuickUncertainty from "./components/QuickUncertainty.vue";
@@ -532,7 +535,7 @@ onUnmounted(() => {
       >
     </div>
     <div class="header-status">
-      <span v-if="catalog">{{ catalog.tools.length }} 项工具</span
+      <span>v{{ version }}</span><span v-if="catalog" class="header-tool-count">{{ catalog.tools.length }} 项工具</span
       ><span class="privacy-dot">浏览器内计算</span>
     </div>
   </header>
@@ -987,14 +990,15 @@ onUnmounted(() => {
             :rows="calibrationRows"
           />
         </template>
+        <CalculationProcess v-if="selected.kind !== 'gauge' && result?.process.length" :key="selected.id + '-process'" :lines="result.process" />
         <details v-if="activeNote.note || activeNote.formula" :key="selected.id" class="collapsible-note explanation">
           <summary>计算说明</summary>
           <p v-for="(paragraph, index) in explanationParagraphs" :key="index">
-            {{ paragraph }}
+            <FormulaText :line="paragraph" />
           </p>
           <template v-if="activeNote.formula">
             <strong>详细公式与取值</strong>
-            <p v-for="(line, index) in activeNote.formula.split(/\r?\n/u)" :key="index">{{ line }}</p>
+            <p v-for="(line, index) in activeNote.formula.split(/\r?\n/u)" :key="index"><FormulaText :line="line" /></p>
           </template>
         </details>
       </template>

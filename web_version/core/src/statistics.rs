@@ -1,6 +1,10 @@
 //! 误差及不确定度适配；动态数据来自数组，不依赖分隔符解析。
 use crate::api::{Input, Output};
 use crate::calculators::{
+    common::{format_process_computed as c, format_process_number as n},
+    error_process,
+};
+use crate::calculators::{
     numerics::{finite, rss, statistics},
     range_method,
     uncertainty::model as u,
@@ -44,6 +48,28 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
         ToolKind::Repeatability => {
             let values = i.values("values", SAMPLES, 2, 50)?;
             let s = statistics(&values)?;
+            o.process = error_process::samples(&values, &s, true);
+            o.process.push(format!(
+                "极差 = 最大值 − 最小值 = {} − {} = {}。",
+                n(s.max),
+                n(s.min),
+                c(s.max - s.min)
+            ));
+            o.process.push(format!(
+                "平均值标准差 = s/√n = {} / √{} = {}。",
+                c(s.sd),
+                values.len(),
+                c(s.standard_error)
+            ));
+            o.process.push(match percent(s.sd, s.mean.abs())? {
+                Some(value) => format!(
+                    "相对标准偏差 = s/|平均值| × 100 = {} / |{}| × 100 = {}%。",
+                    c(s.sd),
+                    c(s.mean),
+                    c(value)
+                ),
+                None => "平均值为零，相对标准偏差无定义。".into(),
+            });
             o.metric("测量次数", values.len(), "次");
             o.metric("平均值", s.mean, "");
             o.metric("样本标准差 s", s.sd, "");
@@ -52,7 +78,7 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
             o.optional("相对标准偏差 RSD", percent(s.sd, s.mean.abs())?, "%");
         }
         ToolKind::RangeMethod => {
-            let (min, max, n) = if i.index("mode", 0, 2)? == 1 {
+            let (min, max, count) = if i.index("mode", 0, 2)? == 1 {
                 let min = i.number("min", 10.01)?;
                 let max = i.number("max", 10.03)?;
                 let n = i.index("count", 5, 10)?;
@@ -65,15 +91,38 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
                 let s = statistics(&v)?;
                 (s.min, s.max, v.len())
             };
-            let d = range_method::coefficient(n)?;
+            let d = range_method::coefficient(count)?;
             let range = max - min;
             finite(&[range])?;
             let s = range / d;
-            o.metric("测量次数", n, "次");
+            o.process = vec![
+                format!(
+                    "测量次数 n = {count}；最大值 = {}，最小值 = {}。",
+                    n(max),
+                    n(min)
+                ),
+                format!(
+                    "极差 R = 最大值 − 最小值 = {} − {} = {}；查表系数 d₂ = {}。",
+                    n(max),
+                    n(min),
+                    c(range),
+                    n(d)
+                ),
+                format!(
+                    "重复性标准差 s ≈ R/d₂ = {} / {} = {}；平均值标准差 = s/√n = {} / √{} = {}。",
+                    c(range),
+                    n(d),
+                    c(s),
+                    c(s),
+                    count,
+                    c(s / (count as f64).sqrt())
+                ),
+            ];
+            o.metric("测量次数", count, "次");
             o.metric("极差 R", range, "");
             o.metric("极差系数 d₂", d, "");
             o.metric("重复性标准差 R/d₂", s, "");
-            o.metric("平均值标准差", s / (n as f64).sqrt(), "");
+            o.metric("平均值标准差", s / (count as f64).sqrt(), "");
         }
         ToolKind::ResultantError => {
             let mut errors = vec![];
@@ -81,7 +130,21 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
             if i.index("mode", 0, 2)? == 0 {
                 let v = i.values("values", &[0.02, 0.03, 0.01], 1, 50)?;
                 let c = i.values("sensitivities", &vec![1.; v.len()], v.len(), v.len())?;
-                errors = v.iter().zip(c).map(|(v, c)| v * c).collect();
+                errors = v.iter().zip(c.iter()).map(|(v, c)| v * c).collect();
+                for (j, ((value, sensitivity), contribution)) in
+                    v.iter().zip(&c).zip(&errors).enumerate()
+                {
+                    if j > 0 {
+                        o.process.push(String::new());
+                    }
+                    o.process.push(format!(
+                        "分量 {}：贡献 = 误差 × 灵敏系数 = {} × {} = {}。",
+                        j + 1,
+                        n(*value),
+                        n(*sensitivity),
+                        crate::calculators::common::format_process_computed(*contribution)
+                    ));
+                }
             } else {
                 let units = units_for(Dimension::Pressure);
                 let target = i.index("pressureUnit", 0, units.len())?;
@@ -93,25 +156,57 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
                 if rows.is_empty() || rows.len() > 50 {
                     return Err("压力误差分量须为 1～50 项".into());
                 }
-                for row in rows {
-                    let c = Input(row.clone());
-                    let source = c.index("unit", 0, units.len())?;
-                    let v = c.number("value", 0.1)?;
-                    let e = if c.index("type", 0, 2)? == 0 {
-                        crate::calculators::numerics::span(
-                            c.number("low", 0.)?,
-                            c.number("high", 100.)?,
-                        )? * v
-                            / 100.
+                for (index, row) in rows.iter().enumerate() {
+                    let component = Input(row.clone());
+                    let source = component.index("unit", 0, units.len())?;
+                    let value = component.number("value", 0.1)?;
+                    if !o.process.is_empty() {
+                        o.process.push(String::new());
+                    }
+                    let error = if component.index("type", 0, 2)? == 0 {
+                        let low = component.number("low", 0.)?;
+                        let high = component.number("high", 100.)?;
+                        let span = crate::calculators::numerics::span(low, high)?;
+                        let error = span * value / 100.;
+                        o.process.push(format!("分量 {}：量程跨度 = 上限 − 下限 = {} − {} = {} {}；绝对误差 = 跨度 × 相对误差 / 100 = {} × {} / 100 = {} {}。", index + 1, n(high), n(low), c(span), units[source].code, c(span), n(value), c(error), units[source].code));
+                        error
                     } else {
-                        v
+                        o.process.push(format!(
+                            "分量 {}：输入绝对误差 = {} {}。",
+                            index + 1,
+                            n(value),
+                            units[source].code
+                        ));
+                        value
                     };
-                    errors.push(convert_unit(Dimension::Pressure, e, source, target)?);
+                    let converted = convert_unit(Dimension::Pressure, error, source, target)?;
+                    errors.push(converted);
+                    let (from, _) = units[source].conversion_coefficients();
+                    let (to, _) = units[target].conversion_coefficients();
+                    o.process.push(if source == target {
+                        format!(
+                            "统一单位：分量单位与目标单位相同，直接使用 {} {}。",
+                            c(converted),
+                            result_unit
+                        )
+                    } else {
+                        format!(
+                            "统一单位：{} {} × ({} / {}) = {} {}。",
+                            c(error),
+                            units[source].code,
+                            n(from),
+                            n(to),
+                            c(converted),
+                            result_unit
+                        )
+                    });
                 }
             }
             finite(&errors)?;
             let combined = rss(errors.iter().copied())?;
             let sum = errors.iter().map(|e| e.abs()).sum::<f64>();
+            o.process.push(String::new());
+            o.process.push(format!("合成误差 = √Σ贡献² = {} {result_unit}；最坏情况界限 = Σ|贡献| = {} {result_unit}。",c(combined),c(sum)));
             finite(&[sum])?;
             o.metric("分量个数", errors.len(), "项");
             o.metric("合成误差（平方和根）", combined, result_unit);
@@ -125,12 +220,57 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
         ToolKind::ErrorAnalysis => {
             let value = i.number("value", 10.02)?;
             let reference = i.number("reference", 10.)?;
-            let base = if matches!(i.0.get("base"),Some(Value::String(s)) if s.trim().is_empty()) {
+            let base_uses_reference = match i.0.get("base") {
+                None => true,
+                Some(Value::String(s)) => s.trim().is_empty(),
+                _ => false,
+            };
+            let base = if base_uses_reference {
                 reference
             } else {
                 i.number("base", reference)?
             };
             let d = value - reference;
+            let relative = percent(d, reference)?;
+            let quoted = percent(d, base)?;
+            o.process = vec![
+                format!(
+                    "绝对误差 Δ = 测量值 − 真值 = {} − {} = {}。",
+                    n(value),
+                    n(reference),
+                    c(d)
+                ),
+                format!("误差绝对值 |Δ| = {}。", c(d.abs())),
+                String::new(),
+                relative
+                    .map(|v| {
+                        format!(
+                            "相对误差 = Δ/真值 × 100 = {} / {} × 100 = {}%。",
+                            c(d),
+                            n(reference),
+                            c(v)
+                        )
+                    })
+                    .unwrap_or("真值为零，相对误差未定义。".into()),
+                format!(
+                    "{}{}",
+                    if base_uses_reference {
+                        "引用值留空，使用真值；"
+                    } else {
+                        ""
+                    },
+                    quoted
+                        .map(|v| {
+                            format!(
+                                "引用误差 = Δ/引用值 × 100 = {} / {} × 100 = {}%。",
+                                c(d),
+                                n(base),
+                                c(v)
+                            )
+                        })
+                        .unwrap_or("引用值为零，引用误差未定义。".into())
+                ),
+            ];
             finite(&[d])?;
             o.metric("绝对误差 Δ（保留正负号）", d, "");
             o.metric("绝对值 |Δ|", d.abs(), "");
@@ -221,6 +361,22 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
             None => 0.0,
         };
         let sensitivity = i.number("aSensitivity", 1.)?;
+        if !a.is_empty() {
+            let item = u::Component {
+                name: "A 类重复测量".into(),
+                sensitivity,
+                kind: u::Kind::TypeA {
+                    values: a.clone(),
+                    range_method: false,
+                    average_count: average_count(i, "aAverageCount")?,
+                },
+                rounding: a_rounding,
+            };
+            let detail = item.calculate()?;
+            crate::calculators::uncertainty::process::component(&item, &detail, "", &mut o.process);
+        } else {
+            o.process.push("未使用 A 类重复测量，uA = 0。".into());
+        }
         let a_contribution = ua * sensitivity;
         finite(&[a_contribution])?;
         contributions.push(a_contribution);
@@ -239,7 +395,9 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
                 if Input(node.clone()).index("kind", 1, 3)? != 1 {
                     return Err("快速评定中的 B 类列表只能包含 B 类分量".into());
                 }
-                let d = component(node, 0)?.calculate()?;
+                let item = component(node, 0)?;
+                let d = item.calculate()?;
+                crate::calculators::uncertainty::process::component(&item, &d, "", &mut o.process);
                 contributions.push(d.contribution);
                 details.push(detail(&d));
             }
@@ -248,7 +406,7 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
             let b = i.values("bValues", &[0.01, 0.02], 1, 50)?;
             let distribution = i.index("distribution", 0, 6)?;
             for (j, v) in b.into_iter().enumerate() {
-                let d = u::Component {
+                let item = u::Component {
                     name: format!("B 类分量 {}", j + 1),
                     sensitivity: 1.,
                     kind: u::Kind::TypeB {
@@ -259,8 +417,9 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
                         digits: None,
                         carry: true,
                     }),
-                }
-                .calculate()?;
+                };
+                let d = item.calculate()?;
+                crate::calculators::uncertainty::process::component(&item, &d, "", &mut o.process);
                 contributions.push(d.contribution);
                 details.push(detail(&d));
             }
@@ -276,7 +435,9 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
             return Err("预算表顶层需要 1～20 个分量".into());
         }
         for node in nodes {
-            let d = component(node, 0)?.calculate()?;
+            let item = component(node, 0)?;
+            let d = item.calculate()?;
+            crate::calculators::uncertainty::process::component(&item, &d, "", &mut o.process);
             contributions.push(d.contribution);
             details.push(detail(&d));
         }
@@ -290,6 +451,25 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
     finite(&[expanded])?;
     let digits = i.index("digits", 1, 4)? + 1;
     let (rounded, ru) = u::rounded_combined(uc, k, digits, i.index("roundingV2", 1, 2)? == 1)?;
+    o.process.push(String::new());
+    o.process.push(format!(
+        "总合成方法：{}；u_c = {}。",
+        if i.index("combine", 0, 2)? == 1 {
+            "取最大绝对贡献"
+        } else {
+            "各项贡献平方和根"
+        },
+        c(uc)
+    ));
+    error_process::combined(
+        &mut o.process,
+        uc,
+        k,
+        digits,
+        i.index("roundingV2", 1, 2)? == 1,
+        rounded,
+        ru,
+    );
     o.metric("合成标准不确定度 uc", uc, "");
     o.metric("扩展不确定度 U", expanded, "");
     o.metric("包含因子 k", k, "");
@@ -302,6 +482,34 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pressure_components_explain_actual_substitutions_and_unit_conversion() {
+        let input = Input(json!({"mode":1, "pressureUnit":1, "pressureComponents":[
+            {"unit":0,"type":0,"low":-20,"high":80,"value":-0.5},
+            {"unit":1,"type":1,"value":0.25}
+        ]}));
+        let output = calculate(ToolKind::ResultantError, &input).unwrap();
+        let text = output.process.join("\n").replace('\u{2063}', "");
+        assert!(text.contains("上限 − 下限 = 80 − -20 = 100"), "{text}");
+        assert!(text.contains("100 × -0.5 / 100 = -0.5"), "{text}");
+        assert!(text.contains("分量 2：输入绝对误差 = 0.25"), "{text}");
+        assert!(
+            text.contains("分量单位与目标单位相同，直接使用 0.25"),
+            "{text}"
+        );
+        let converted = convert_unit(Dimension::Pressure, -0.5, 0, 1).unwrap();
+        assert!(text.contains(&n(converted)), "{text}");
+        let total = output
+            .metrics
+            .iter()
+            .find(|metric| metric.label == "合成误差（平方和根）")
+            .unwrap()
+            .value
+            .as_f64()
+            .unwrap();
+        assert!((total - converted.hypot(0.25)).abs() <= 1e-12 * total);
+    }
 
     fn result(input: Value) -> Result<Output, String> {
         uncertainty(&Input(input))

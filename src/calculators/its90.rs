@@ -21,6 +21,7 @@ impl ToolboxApp {
             self.render_standard_thermocouple(ui, tool);
             return;
         }
+        let mut process = None;
         panel(ui, |ui| {
             ui.set_max_width(ui.available_width().min(820.0));
             ui.label(RichText::new("热电偶参数").size(14.0).strong().color(INK));
@@ -110,7 +111,48 @@ impl ToolboxApp {
                 if mode == 0 {
                     let cold_emf = thermocouple_emf(type_code, cold)?;
                     let emf = measured_emf(type_code, input, cold, 0.0)?;
+                    let hot_emf = thermocouple_emf(type_code, input)?;
                     calculated_temperature = Some(input);
+                    let mut steps = vec![
+                        format!(
+                            "{} 型参考函数；热端温度 {} °C，参考端温度 {} °C。",
+                            type_code,
+                            format_process_number(input),
+                            format_process_number(cold)
+                        ),
+                        format!(
+                            "参考函数 E(热端) = {} mV，E(参考端) = {} mV。",
+                            format_process_computed(hot_emf),
+                            format_process_computed(cold_emf)
+                        ),
+                        format!(
+                            "测得热电势 = E(热端) − E(参考端) = {} − {} = {} mV。",
+                            format_process_computed(hot_emf),
+                            format_process_computed(cold_emf),
+                            format_process_computed(emf)
+                        ),
+                        format!(
+                            "热端温度显示为 {} {}。",
+                            format_process_number(unit.display(input)),
+                            unit.symbol()
+                        ),
+                    ];
+                    steps.push(temperature_conversion_note(unit.symbol()).to_owned());
+                    steps.push(String::new());
+                    steps.extend(crate::calculators::thermocouple::reference_process(
+                        type_code,
+                        input,
+                        "热端参考函数",
+                        false,
+                    )?);
+                    steps.push(String::new());
+                    steps.extend(crate::calculators::thermocouple::reference_process(
+                        type_code,
+                        cold,
+                        "参考端参考函数",
+                        false,
+                    )?);
+                    process = Some(steps);
                     Ok(vec![
                         ("测得热电势", format!("{} mV", format_number(emf))),
                         (
@@ -122,7 +164,48 @@ impl ToolboxApp {
                 } else {
                     let (temperature, hot_emf) =
                         corrected_temperature(type_code, input, cold, 0.0)?;
+                    let cold_emf = thermocouple_emf(type_code, cold)?;
                     calculated_temperature = Some(temperature);
+                    let mut steps = vec![
+                        format!(
+                            "{} 型参考函数；测得热电势 {} mV，参考端温度 {} °C。",
+                            type_code,
+                            format_process_number(input),
+                            format_process_number(cold)
+                        ),
+                        format!(
+                            "参考端电势 E(参考端) = {} mV。",
+                            format_process_computed(cold_emf)
+                        ),
+                        format!(
+                            "补偿后热电势 = 测得热电势 + E(参考端) = {} + {} = {} mV。",
+                            format_process_number(input),
+                            format_process_computed(cold_emf),
+                            format_process_computed(hot_emf)
+                        ),
+                        format!(
+                            "在所选分度号的有效范围内反算热端温度 = {} °C = {} {}。",
+                            format_process_computed(temperature),
+                            format_process_computed(unit.display(temperature)),
+                            unit.symbol()
+                        ),
+                    ];
+                    steps.push(temperature_conversion_note(unit.symbol()).to_owned());
+                    steps.push(String::new());
+                    steps.extend(crate::calculators::thermocouple::reference_process(
+                        type_code,
+                        cold,
+                        "参考端参考函数",
+                        false,
+                    )?);
+                    steps.push(String::new());
+                    steps.extend(crate::calculators::thermocouple::reference_process(
+                        type_code,
+                        temperature,
+                        "反算热端的参考函数校验",
+                        true,
+                    )?);
+                    process = Some(steps);
                     Ok(vec![
                         (
                             "热端温度",
@@ -207,6 +290,9 @@ impl ToolboxApp {
                 });
             }
         });
+        if let Some(lines) = &process {
+            calculation_process(ui, "industrial_thermocouple_process", lines);
+        }
         self.calculation_note(ui, tool);
     }
 
@@ -234,6 +320,7 @@ impl ToolboxApp {
             self.input(ui, tool, "r2", "实测电阻 R₂ (Ω)", "138.5055", "与 T₂ 对应");
             self.input(ui, tool, "t3", "温度点 T₃ (°C)", "200", "与 R₃ 对应");
             self.input(ui, tool, "r3", "实测电阻 R₃ (Ω)", "175.8560", "与 T₃ 对应");
+            let mut process = None;
             let result = (|| {
                 let r0 = self.number(tool, "r0", "100")?;
                 if r0 <= 0.0 {
@@ -264,6 +351,7 @@ impl ToolboxApp {
                 }
                 let rows: Vec<[f64; 3]> = points.iter().map(|(t, _)| cvd_basis(*t)).collect();
                 let rhs: Vec<f64> = points.iter().map(|(_, r)| r / r0 - 1.0).collect();
+                let equations: Vec<_> = points.iter().zip(&rows).zip(&rhs).map(|(((t, r), row), y)| format!("校准点：t = {} °C，R = {} Ω；{}·A + {}·B + {}·C = R/R₀ − 1 = {}。", format_process_number(*t), format_process_number(*r), format_process_computed(row[0]), format_process_computed(row[1]), format_process_computed(row[2]), format_process_computed(*y))).collect();
                 let [a, b, c] =
                     solve_3x3(rows, rhs).ok_or_else(|| "温度点组合无法确定三个系数".to_owned())?;
                 let check = points
@@ -271,15 +359,26 @@ impl ToolboxApp {
                     .map(|(t, r)| (cvd_resistance(*t, r0, a, b, c) - r).abs())
                     .fold(0.0_f64, f64::max);
                 crate::calculators::numerics::finite(&[a, b, c, check])?;
+                let mut steps = vec![format!("0 °C 电阻 R₀ = {} Ω。", format_process_number(r0)), "对每个校准点建立 R/R₀ − 1 = A·t + B·t² + C·(t−100)·t³；非负温度点的 C 项为 0。".to_owned()];
+                for equation in equations {
+                    steps.push(String::new());
+                    steps.push(equation);
+                }
+                steps.push("对以上三元方程逐列缩放，并使用选主元消元求解系数。".to_owned());
+                steps.push(format!("求解得到 A = {}，B = {}，C = {}；校准点最大电阻残差绝对值 = {} Ω。", format_process_number(a), format_process_number(b), format_process_number(c), format_process_computed(check)));
+                process = Some(steps);
                 Ok(vec![
-                    ("系数 A", format_number(a)),
-                    ("系数 B", format_number(b)),
-                    ("系数 C", format_number(c)),
+                    ("系数 A", format_process_number(a)),
+                    ("系数 B", format_process_number(b)),
+                    ("系数 C", format_process_number(c)),
                     ("最大残差", format!("{} Ω", format_number(check))),
                 ])
             })();
             let valid = result.is_ok();
             show_result_or_error(ui, "拟合结果", result);
+            if let Some(lines) = &process {
+                calculation_process(ui, "cvd_fit_process", lines);
+            }
             valid
         })
         .inner;
@@ -335,24 +434,72 @@ impl ToolboxApp {
                     "绝对温度须大于 0 K",
                 );
             }
+            let mut process = None;
             let result = (|| {
-                let model = BetaThermistor::new(
-                    self.number(tool, "r0", "10000")?,
-                    self.number(tool, "t0", "25")?,
-                    self.number(tool, "beta", "3950")?,
-                )?;
+                let r0 = self.number(tool, "r0", "10000")?;
+                let t0 = self.number(tool, "t0", "25")?;
+                let beta = self.number(tool, "beta", "3950")?;
+                let model = BetaThermistor::new(r0, t0, beta)?;
                 let input = self.number(tool, input_key, input_default)?;
                 let (temperature, resistance) = if mode == 0 {
                     (model.temperature(input)?, input)
                 } else {
                     (input, model.resistance(input)?)
                 };
+                let mut lines = vec![format!(
+                    "R₀ = {} Ω；参考温度 T₀ = {} °C = {} K；β = {} K。",
+                    format_process_number(r0),
+                    format_process_number(t0),
+                    format_process_computed(t0 + 273.15),
+                    format_process_number(beta)
+                )];
+                if mode == 0 {
+                    lines.push(format!(
+                        "输入电阻 R = {} Ω；1/T = 1/T₀ + [ln(R) − ln(R₀)]/β。",
+                        format_process_number(resistance)
+                    ));
+                    lines.push(format!(
+                        "1/T = 1/{} + [ln({}) − ln({})]/{} = {} K⁻¹。",
+                        format_process_computed(t0 + 273.15),
+                        format_process_number(resistance),
+                        format_process_number(r0),
+                        format_process_number(beta),
+                        format_process_computed(model.inverse_temperature(resistance))
+                    ));
+                    lines.push(format!(
+                        "换算得到 T = {} K，温度 = {} °C。",
+                        format_process_computed(temperature + 273.15),
+                        format_process_computed(temperature)
+                    ));
+                } else {
+                    lines.push(format!(
+                        "输入温度 = {} °C，T = {} K；ln(R) = ln(R₀) + β(1/T − 1/T₀)。",
+                        format_process_number(temperature),
+                        format_process_computed(temperature + 273.15)
+                    ));
+                    lines.push(format!(
+                        "ln(R) = ln({}) + {} × (1/{} − 1/{}) = {}；R = exp[ln(R)]。",
+                        format_process_number(r0),
+                        format_process_number(beta),
+                        format_process_computed(temperature + 273.15),
+                        format_process_computed(t0 + 273.15),
+                        format_process_computed(model.log_resistance(temperature + 273.15))
+                    ));
+                    lines.push(format!(
+                        "按 β 模型计算电阻 R = {} Ω。",
+                        format_process_computed(resistance)
+                    ));
+                }
+                process = Some(lines);
                 Ok(vec![
                     ("温度", format!("{} °C", format_number(temperature))),
                     ("电阻", format!("{} Ω", format_number(resistance))),
                 ])
             })();
             show_result_or_error(ui, "计算结果", result);
+            if let Some(lines) = &process {
+                calculation_process(ui, "thermistor_beta_process", lines);
+            }
         });
         self.calculation_note(ui, tool);
     }

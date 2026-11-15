@@ -107,6 +107,7 @@ pub(super) struct Report {
     pub metrics: Vec<(String, Cell)>,
     pub tables: Vec<Table>,
     pub notes: Vec<String>,
+    pub process: Vec<String>,
 }
 impl Report {
     pub fn new(title: impl Into<String>) -> Self {
@@ -123,6 +124,10 @@ impl Report {
     }
     pub fn note(&mut self, text: impl Into<String>) {
         self.notes.push(text.into());
+    }
+
+    pub fn trace(&mut self, text: impl Into<String>) {
+        self.process.push(text.into());
     }
 
     /// 校验实际尺寸，不把公差偏差的正负号当作尺寸；缺失值“—”仍保留。
@@ -228,6 +233,35 @@ pub(super) fn geometry(
     angle: f64,
     lines: usize,
 ) {
+    {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        let lead = lines as f64 * p;
+        let angle_value = (lead / (std::f64::consts::PI * d2)).atan().to_degrees();
+        let wire = p / (2.0 * (angle / 2.0).to_radians().cos());
+        report.trace(format!("基本几何：大径 D = {} mm，螺距 P = {} mm，中径 D₂ = {} mm，小径 D₁ = {} mm，牙型角 α = {}°，线数 = {}。", n(d), n(p), c(d2), c(d1), n(angle), lines));
+        report.trace(format!(
+            "导程 L = 线数 × P = {} × {} = {} mm。",
+            lines,
+            n(p),
+            c(lead)
+        ));
+        report.trace(format!(
+            "螺旋升角 ψ = atan[L/(πD₂)] × 180/π = atan[{} / (π × {})] × 180/π = {}°。",
+            c(lead),
+            c(d2),
+            c(angle_value)
+        ));
+        report.trace("最佳三针直径 d₀ = P/[2cos(α/2)]。".to_owned());
+        report.trace(format!(
+            "数值代入：{} / [2cos({}°/2)] = {} mm。",
+            n(p),
+            n(angle),
+            c(wire)
+        ));
+        report.trace(String::new());
+    }
     report.parameter("基本大径 D (mm)", d);
     report.metric("基本中径 D₂ (mm)", d2);
     report.metric("基本小径 D₁ (mm)", d1);

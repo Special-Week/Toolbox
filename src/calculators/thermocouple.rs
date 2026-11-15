@@ -28,13 +28,18 @@ struct Segment {
 }
 
 impl Segment {
-    fn value_and_slope(&self, t: f64) -> (f64, f64) {
+    fn polynomial_and_slope(&self, t: f64) -> (f64, f64) {
         let mut value = 0.0;
         let mut slope = 0.0;
         for &c in self.coefficients.iter().rev() {
             slope = slope * t + value;
             value = value * t + c;
         }
+        (value, slope)
+    }
+
+    fn value_and_slope(&self, t: f64) -> (f64, f64) {
+        let (mut value, mut slope) = self.polynomial_and_slope(t);
         // K 型非负温区包含额外高斯项，导数必须同时包含该项。
         if let Some([a0, a1, a2]) = self.gaussian {
             let exponential = a0 * (a1 * (t - a2).powi(2)).exp();
@@ -153,6 +158,86 @@ impl Reference {
 pub(crate) fn thermocouple_emf(kind: &str, t: f64) -> Result<f64, String> {
     reference(kind)?.emf(t)
 }
+
+/// 过程展示直接读取正算使用的分段和系数，连接点沿用正算的先匹配规则。
+pub(crate) fn reference_process(
+    kind: &str,
+    t: f64,
+    label: &str,
+    calculated_temperature: bool,
+) -> Result<Vec<String>, String> {
+    use crate::calculators::common::{format_process_computed as c, format_process_number as n};
+    let shown_t = if calculated_temperature { c(t) } else { n(t) };
+    let reference = reference(kind)?;
+    let value = reference.emf(t)?;
+    let segment = reference
+        .segments
+        .iter()
+        .find(|s| (s.min..=s.max).contains(&t))
+        .unwrap();
+    let polynomial = segment.polynomial_and_slope(t).0;
+    let mut lines = vec![
+        format!(
+            "{label}：{} 型，t = {} °C；实际使用分段 {}～{} °C。",
+            kind,
+            shown_t.clone(),
+            n(segment.min),
+            n(segment.max)
+        ),
+        "参考函数：E(t) = c₀ + c₁t + c₂t² + … + cₙtⁿ；t 以 °C 数值代入，E 的单位为 mV。".to_owned(),
+    ];
+    lines.push(
+        if matches!(kind, "B" | "E" | "J" | "K" | "N" | "R" | "S" | "T") {
+            "系数来源：项目内置的 NIST ITS-90 参考函数表。"
+        } else {
+            "使用项目内置的扩展分度曲线；系数已统一为 mV。"
+        }
+        .to_owned(),
+    );
+    lines.extend(
+        segment
+            .coefficients
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("c[{i}] = {}", n(*c))),
+    );
+    lines.push(format!(
+        "将 t = {} 代入多项式（按秦九韶法求值），得到多项式部分 {} mV。",
+        shown_t.clone(),
+        c(polynomial)
+    ));
+    if let Some([a0, a1, a2]) = segment.gaussian {
+        let extra = a0 * (a1 * (t - a2).powi(2)).exp();
+        lines.push(format!(
+            "本段还需加指数项 a₀·exp[a₁(t−a₂)²]；a₀ = {}，a₁ = {}，a₂ = {}。",
+            n(a0),
+            n(a1),
+            n(a2)
+        ));
+        lines.push(format!(
+            "指数项 = {} × exp[{} × ({} − {})²] = {} mV。",
+            n(a0),
+            n(a1),
+            shown_t.clone(),
+            n(a2),
+            c(extra)
+        ));
+        lines.push(format!(
+            "E({}) = 多项式部分 + 指数项 = {} + {} = {} mV。",
+            shown_t.clone(),
+            c(polynomial),
+            c(extra),
+            c(value)
+        ));
+    } else {
+        lines.push(format!(
+            "本段无附加指数项，E({}) = {} mV。",
+            shown_t.clone(),
+            c(value)
+        ));
+    }
+    Ok(lines)
+}
 pub(crate) fn bounds(kind: &str) -> Result<(f64, f64), String> {
     let r = reference(kind)?;
     Ok((r.segments[0].min, r.segments.last().unwrap().max))
@@ -245,6 +330,70 @@ pub(crate) fn corrected_temperature(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[cfg(feature = "desktop-ui")]
+    fn displayed_reference_segments_and_gaussian_match_the_calculation() {
+        let lines = reference_process("K", 100.0, "热端", false).unwrap();
+        assert!(lines.iter().any(|s| s.contains("实际使用分段 0～1372 °C")));
+        assert!(lines.iter().any(|s| s == "c[0] = -0.017600413686"));
+        assert!(
+            lines
+                .iter()
+                .any(|s| s.contains("指数项 =") && s.contains("exp"))
+        );
+        let value = thermocouple_emf("K", 100.0).unwrap();
+        assert!((value - 4.096230218723254).abs() < 1e-12);
+        assert!(
+            lines
+                .iter()
+                .any(|s| s.contains(&crate::calculators::common::format_process_number(value)))
+        );
+        let zero = reference_process("K", 0.0, "参考端", false).unwrap();
+        assert!(zero.iter().any(|s| s.contains("实际使用分段 -270～0 °C")));
+        assert!(zero.iter().any(|s| s.contains("无附加指数项")));
+
+        for kind in [
+            "B", "E", "J", "K", "N", "R", "S", "T", "C", "D", "G", "L", "LR", "U", "A",
+        ] {
+            let reference = reference(kind).unwrap();
+            for segment in &reference.segments {
+                for t in [
+                    segment.min,
+                    segment.min + (segment.max - segment.min) / 2.0,
+                    segment.max,
+                ] {
+                    let selected = reference
+                        .segments
+                        .iter()
+                        .find(|item| (item.min..=item.max).contains(&t))
+                        .unwrap();
+                    let lines = reference_process(kind, t, "校验", false).unwrap();
+                    let count = lines.iter().filter(|s| s.starts_with("c[")).count();
+                    assert_eq!(count, selected.coefficients.len(), "{kind} {t}");
+                    for (index, coefficient) in selected.coefficients.iter().enumerate() {
+                        assert!(
+                            lines.contains(&format!(
+                                "c[{index}] = {}",
+                                crate::calculators::common::format_process_number(*coefficient)
+                            )),
+                            "{kind} {t} {index}"
+                        );
+                    }
+                    assert_eq!(
+                        lines.iter().any(|s| s.contains("指数项 =")),
+                        selected.gaussian.is_some(),
+                        "{kind} {t}"
+                    );
+                    assert!(lines.iter().any(|s| s.contains(
+                        &crate::calculators::common::format_process_number(
+                            reference.emf(t).unwrap()
+                        )
+                    )));
+                }
+            }
+        }
+    }
 
     #[test]
     fn type_k_zero_and_near_zero_round_trip() {

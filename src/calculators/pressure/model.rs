@@ -75,8 +75,23 @@ pub(crate) fn hydrostatic_difference(
     Ok(difference)
 }
 
+pub(crate) struct GasDifference {
+    pub absolute_pressure: f64,
+    pub density: f64,
+    pub gas_column: f64,
+    pub atmosphere: Option<AtmosphereColumn>,
+    pub difference: f64,
+}
+
+pub(crate) struct AtmosphereColumn {
+    pub altitude: f64,
+    pub upper_pressure: f64,
+    pub difference: f64,
+}
+
 /// 按 0 °C、101325 Pa 的密度折算当地气体密度，温度用 °C、压力用 Pa。
 /// 表压读数还须扣除两高度间环境气柱；这是局部密度近似，不积分气体自重。
+#[allow(dead_code)] // 网页计算接口只需要最终压力差。
 pub(crate) fn gas_difference(
     height: f64,
     normal_density: f64,
@@ -86,6 +101,27 @@ pub(crate) fn gas_difference(
     ambient: f64,
     gauge: bool,
 ) -> Result<f64, String> {
+    Ok(gas_difference_details(
+        height,
+        normal_density,
+        gravity,
+        temperature,
+        pressure,
+        ambient,
+        gauge,
+    )?
+    .difference)
+}
+
+pub(crate) fn gas_difference_details(
+    height: f64,
+    normal_density: f64,
+    gravity: f64,
+    temperature: f64,
+    pressure: f64,
+    ambient: f64,
+    gauge: bool,
+) -> Result<GasDifference, String> {
     finite(&[
         height,
         normal_density,
@@ -101,11 +137,78 @@ pub(crate) fn gas_difference(
     let density = normal_density * (absolute / 101325.0) * 273.15 / (temperature + 273.15);
     let gas = hydrostatic_difference(height, density, gravity)?;
     if !gauge {
-        return Ok(gas);
+        return Ok(GasDifference {
+            absolute_pressure: absolute,
+            density,
+            gas_column: gas,
+            atmosphere: None,
+            difference: gas,
+        });
     }
     let h =
         crate::calculators::math::isa_altitude(ambient).ok_or("环境压力超出标准大气模型范围")?;
     let upper =
         crate::calculators::math::isa_pressure(h + height).ok_or("高度超出标准大气模型范围")?;
-    Ok(gas - (ambient - upper))
+    let atmosphere = ambient - upper;
+    Ok(GasDifference {
+        absolute_pressure: absolute,
+        density,
+        gas_column: gas,
+        atmosphere: Some(AtmosphereColumn {
+            altitude: h,
+            upper_pressure: upper,
+            difference: atmosphere,
+        }),
+        difference: gas - atmosphere,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn gas_process_matches_the_result_for_absolute_and_gauge_pressure() {
+        for height in [-0.2, 0.0, 0.2] {
+            for gauge in [false, true] {
+                let (rho, gravity, temperature, pressure, ambient) =
+                    (1.293, 9.80665, 20.0, 100_000.0, 101_325.0);
+                let result = gas_difference_details(
+                    height,
+                    rho,
+                    gravity,
+                    temperature,
+                    pressure,
+                    ambient,
+                    gauge,
+                )
+                .unwrap();
+                let absolute = pressure + if gauge { ambient } else { 0.0 };
+                let density = rho * (absolute / 101_325.0) * 273.15 / (temperature + 273.15);
+                assert_eq!(result.absolute_pressure, absolute);
+                assert_eq!(result.density, density);
+                assert_eq!(result.gas_column, density * gravity * height);
+                if let Some(atmosphere) = result.atmosphere {
+                    assert!(gauge);
+                    assert_eq!(atmosphere.difference, ambient - atmosphere.upper_pressure);
+                    assert_eq!(result.difference, result.gas_column - atmosphere.difference);
+                } else {
+                    assert!(!gauge);
+                    assert_eq!(result.difference, result.gas_column);
+                }
+                assert_eq!(
+                    result.difference,
+                    gas_difference(height, rho, gravity, temperature, pressure, ambient, gauge)
+                        .unwrap()
+                );
+            }
+        }
+        assert!(
+            gas_difference_details(0.1, 0.0, 9.80665, 20.0, 100_000.0, 101_325.0, false).is_err()
+        );
+        assert!(
+            gas_difference_details(0.1, 1.293, 9.80665, -273.15, 100_000.0, 101_325.0, true)
+                .is_err()
+        );
+    }
 }

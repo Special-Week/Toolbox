@@ -15,6 +15,41 @@ pub(crate) enum Curve {
 
 pub(crate) const PT385: [f64; 3] = [3.9083e-3, -5.775e-7, -4.183e-12];
 
+pub(crate) struct PolynomialForm {
+    coefficients: [f64; 8],
+    length: usize,
+    pub argument: f64,
+    pub shift: f64,
+    pub scale: f64,
+    pub segment: &'static str,
+    pub bounds: Option<(f64, f64)>,
+}
+
+impl PolynomialForm {
+    fn new(coefficients: &[f64], t: f64, shift: f64, scale: f64, segment: &'static str) -> Self {
+        let mut data = [0.0; 8];
+        data[..coefficients.len()].copy_from_slice(coefficients);
+        Self {
+            coefficients: data,
+            length: coefficients.len(),
+            argument: if shift == 0.0 { t } else { t + shift },
+            shift,
+            scale,
+            segment,
+            bounds: None,
+        }
+    }
+
+    pub(crate) fn coefficients(&self) -> &[f64] {
+        &self.coefficients[..self.length]
+    }
+
+    pub(crate) fn value_and_slope(&self) -> (f64, f64) {
+        let (value, slope) = polynomial(self.coefficients(), self.argument);
+        (self.scale * value, self.scale * slope)
+    }
+}
+
 /// 返回 R(t)/R0 及其对摄氏温度的解析导数。
 /// 两者使用相同的多项式系数，通过秦九韶法求值。
 fn polynomial(coefficients: &[f64], t: f64) -> (f64, f64) {
@@ -29,15 +64,25 @@ fn polynomial(coefficients: &[f64], t: f64) -> (f64, f64) {
 
 impl Curve {
     pub(crate) fn evaluate(self, t: f64) -> (f64, f64) {
-        match self {
-            Self::Cvd([a, b, c]) => {
-                if t < 0.0 {
-                    polynomial(&[1.0, a, b, -100.0 * c, c], t)
-                } else {
-                    polynomial(&[1.0, a, b], t)
-                }
+        if let Self::Cvd([a, b, c]) = self {
+            if t < 0.0 {
+                polynomial(&[1.0, a, b, -100.0 * c, c], t)
+            } else {
+                polynomial(&[1.0, a, b], t)
             }
-            Self::Pt3916 if t < 0.0 => polynomial(
+        } else {
+            self.polynomial_form(t).unwrap().value_and_slope()
+        }
+    }
+
+    /// 非 CVD 分段的多项式形式同时用于计算与过程展示。
+    pub(crate) fn polynomial_form(self, t: f64) -> Option<PolynomialForm> {
+        let form = |coefficients: &[f64], shift, scale, segment| {
+            PolynomialForm::new(coefficients, t, shift, scale, segment)
+        };
+        Some(match self {
+            Self::Cvd(_) => return None,
+            Self::Pt3916 if t < 0.0 => form(
                 &[
                     1.0,
                     3.971686e-3,
@@ -48,38 +93,79 @@ impl Curve {
                     -1.369914e-14,
                     -2.303654e-17,
                 ],
-                t,
+                0.0,
+                1.0,
+                "Pt3916：t < 0 °C",
             ),
-            Self::Pt3916 => Self::Cvd([3.974973e-3, -5.8973e-7, -4.146e-12]).evaluate(t),
+            Self::Pt3916 => form(
+                &[1.0, 3.974973e-3, -5.8973e-7],
+                0.0,
+                1.0,
+                "Pt3916：t ≥ 0 °C",
+            ),
             Self::Cu428 => {
-                // R/R0 = 1 + a*t + b*t*(t-100) + c*t²*(t-100).
                 let (a, b, c) = (0.00428, -9.31e-8, 1.23e-9);
-                polynomial(&[1.0, a - 100.0 * b, b - 100.0 * c, c], t)
+                form(
+                    &[1.0, a - 100.0 * b, b - 100.0 * c, c],
+                    0.0,
+                    1.0,
+                    "Cu428 全温区",
+                )
             }
-            Self::Cu427 if t < -50.0 => {
-                let (value, slope) = polynomial(&[1.0, 0.0392313, -7.45044e-6], t + 200.0);
-                (0.117058 * value, 0.117058 * slope)
-            }
-            Self::Cu427 if t <= 150.0 => polynomial(&[1.0, 0.0042743], t),
-            Self::Cu427 => {
-                let (value, slope) = polynomial(&[1.0, 0.00262628, 2.43732e-8], t - 150.0);
-                (1.641145 * value, 1.641145 * slope)
-            }
-            Self::Ni617 if t < 100.0 => polynomial(&[1.0, 0.0054963, 6.7556e-6], t),
-            Self::Ni617 => polynomial(
-                &[1.0, 0.0054963, 6.7556e-6 - 100.0 * 9.2004e-9, 9.2004e-9],
-                t,
+            Self::Cu427 if t < -50.0 => form(
+                &[1.0, 0.0392313, -7.45044e-6],
+                200.0,
+                0.117058,
+                "Cu427：t < −50 °C",
             ),
-            Self::Ni618 => polynomial(&[1.0, 0.005485, 6.65e-6, 0.0, 2.805e-11, 0.0, -2.0e-17], t),
-            Self::Ni672 => {
-                let segment = NI672
-                    .iter()
-                    .find(|segment| t <= segment.1)
-                    .unwrap_or(&NI672[NI672.len() - 1]);
-                polynomial(&segment.0, t)
+            Self::Cu427 if t <= 150.0 => {
+                form(&[1.0, 0.0042743], 0.0, 1.0, "Cu427：−50 °C ≤ t ≤ 150 °C")
             }
-            Self::Ni1000 => polynomial(&[1.0, 0.004427, 5.172e-6, 5.585e-9], t),
-        }
+            Self::Cu427 => form(
+                &[1.0, 0.00262628, 2.43732e-8],
+                -150.0,
+                1.641145,
+                "Cu427：t > 150 °C",
+            ),
+            Self::Ni617 if t < 100.0 => {
+                form(&[1.0, 0.0054963, 6.7556e-6], 0.0, 1.0, "Ni617：t < 100 °C")
+            }
+            Self::Ni617 => form(
+                &[1.0, 0.0054963, 6.7556e-6 - 100.0 * 9.2004e-9, 9.2004e-9],
+                0.0,
+                1.0,
+                "Ni617：t ≥ 100 °C",
+            ),
+            Self::Ni618 => form(
+                &[1.0, 0.005485, 6.65e-6, 0.0, 2.805e-11, 0.0, -2.0e-17],
+                0.0,
+                1.0,
+                "Ni618 全温区",
+            ),
+            Self::Ni672 => {
+                let index = NI672
+                    .iter()
+                    .position(|segment| t <= segment.1)
+                    .unwrap_or(NI672.len() - 1);
+                let segment = &NI672[index];
+                let mut result = form(&segment.0, 0.0, 1.0, "Ni672：按当前温度选取的分段");
+                result.bounds = Some((
+                    if index == 0 {
+                        -80.0
+                    } else {
+                        NI672[index - 1].1
+                    },
+                    segment.1,
+                ));
+                result
+            }
+            Self::Ni1000 => form(
+                &[1.0, 0.004427, 5.172e-6, 5.585e-9],
+                0.0,
+                1.0,
+                "Ni1000 全温区",
+            ),
+        })
     }
 
     /// CVD 反算要求特性曲线在整个支持范围内为正且严格递增。
@@ -171,3 +257,62 @@ const NI672: [([f64; 4], f64); 12] = [
         260.0,
     ),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn displayed_polynomial_uses_the_actual_piecewise_curve() {
+        let low = Curve::Cu427.polynomial_form(-100.0).unwrap();
+        assert_eq!(low.argument, 100.0);
+        assert_eq!(low.scale, 0.117058);
+        assert_eq!(low.coefficients(), &[1.0, 0.0392313, -7.45044e-6]);
+        assert!(
+            (low.value_and_slope().0 - 0.117058 * (1.0 + 0.0392313 * 100.0 - 7.45044e-6 * 10000.0))
+                .abs()
+                < 1e-14
+        );
+        assert_eq!(
+            Curve::Cu427.polynomial_form(-50.0).unwrap().coefficients(),
+            &[1.0, 0.0042743]
+        );
+        assert_eq!(
+            Curve::Ni672.polynomial_form(-60.0).unwrap().bounds,
+            Some((-80.0, -60.0))
+        );
+        assert_eq!(
+            Curve::Ni672.polynomial_form(-59.0).unwrap().bounds,
+            Some((-60.0, -30.0))
+        );
+        assert!(Curve::Cvd(PT385).polynomial_form(100.0).is_none());
+    }
+
+    #[test]
+    fn displayed_polynomial_matches_every_curve_and_boundary() {
+        for curve in [
+            Curve::Pt3916,
+            Curve::Cu428,
+            Curve::Cu427,
+            Curve::Ni617,
+            Curve::Ni618,
+            Curve::Ni672,
+            Curve::Ni1000,
+        ] {
+            for t in [
+                -200.0, -80.0, -60.000001, -60.0, -59.999999, -50.000001, -50.0, -49.999999, -30.0,
+                -0.000001, 0.0, 0.000001, 30.0, 60.0, 90.0, 99.999999, 100.0, 100.000001, 120.0,
+                150.0, 150.000001, 180.0, 210.0, 240.0, 260.0, 500.0,
+            ] {
+                let form = curve.polynomial_form(t).unwrap();
+                let (ratio, slope) = form.value_and_slope();
+                assert_eq!((ratio, slope), curve.evaluate(t));
+                let mut polynomial = 0.0;
+                for coefficient in form.coefficients().iter().rev() {
+                    polynomial = polynomial * form.argument + coefficient;
+                }
+                assert_eq!(ratio, form.scale * polynomial, "{curve:?}, {t}");
+            }
+        }
+    }
+}

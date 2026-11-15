@@ -1,5 +1,6 @@
 //! 可嵌套不确定度预算表；递归深度和分量数量设有上限，控制页面与计算规模。
 pub(crate) mod model;
+mod process;
 use crate::calculators::common::*;
 use crate::{app::ToolboxApp, catalog::ToolDef};
 use eframe::egui;
@@ -242,9 +243,9 @@ impl ToolboxApp {
         ui: &mut egui::Ui,
         tool: &ToolDef,
         index: usize,
-    ) -> Result<Detail, String> {
+    ) -> Result<(Component, Detail), String> {
         let key = format!("budget.component.{index}");
-        panel(ui, |ui| {
+        let component = panel(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(
                 egui::RichText::new(format!("分量 {}", index + 1))
@@ -254,8 +255,9 @@ impl ToolboxApp {
             ui.add_space(4.0);
             self.uncertainty_component(ui, tool, &key, 0)
         })
-        .inner?
-        .calculate()
+        .inner?;
+        let detail = component.calculate()?;
+        Ok((component, detail))
     }
 
     pub(crate) fn render_uncertainty(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
@@ -272,13 +274,18 @@ impl ToolboxApp {
             self.render_simple_uncertainty(ui, tool);
             return;
         }
+        let mut process_lines = None;
         let result = (|| {
             let count = self.dynamic_count(ui, tool, "budget.components", "不确定度分量", 2, 1, 20);
             let mut results = Vec::with_capacity(count);
             balanced_columns(ui, "uncertainty_component_columns", count, |ui, i| {
                 results.push(self.uncertainty_component_card(ui, tool, i));
             });
-            let details = results.into_iter().collect::<Result<Vec<_>, _>>()?;
+            let (components, details): (Vec<_>, Vec<_>) = results
+                .into_iter()
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .unzip();
             let maximum = self.select_index(
                 ui,
                 tool,
@@ -315,6 +322,30 @@ impl ToolboxApp {
             let expanded = uc * k;
             super::numerics::finite(&[expanded])?;
             let (rounded, rounded_expanded) = model::rounded_combined(uc, k, digits, carry)?;
+            let mut steps = Vec::new();
+            for (component, detail) in components.iter().zip(&details) {
+                process::component(component, detail, "", &mut steps);
+            }
+            steps.push(String::new());
+            steps.push(format!(
+                "总合成方法：{}；u_c = {}。",
+                if maximum {
+                    "取各分量绝对贡献的最大值"
+                } else {
+                    "各分量贡献平方和根（使用 hypot 累加）"
+                },
+                format_process_computed(uc)
+            ));
+            super::error_process::combined(
+                &mut steps,
+                uc,
+                k,
+                digits,
+                carry,
+                rounded,
+                rounded_expanded,
+            );
+            process_lines = Some(steps);
             fn show(ui: &mut egui::Ui, items: &[Detail]) {
                 for d in items {
                     ui.label(format!(
@@ -340,6 +371,9 @@ impl ToolboxApp {
             ])
         })();
         show_result_or_error(ui, "不确定度结果", result);
+        if let Some(lines) = &process_lines {
+            calculation_process(ui, "uncertainty_budget_process", lines);
+        }
         self.calculation_note(ui, tool);
     }
 }

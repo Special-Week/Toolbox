@@ -45,6 +45,8 @@ pub(crate) struct Statistics {
     pub min: f64,
     pub max: f64,
     pub standard_error: f64,
+    pub residuals: Vec<f64>,
+    pub center: Option<(f64, f64)>,
 }
 
 /// sd 为以 n−1 作分母的样本标准差；standard_error 为均值的标准差 s/√n。
@@ -60,7 +62,7 @@ pub(crate) fn statistics(values: &[f64]) -> Result<Statistics, String> {
     // 符号相反的极端值需要缩放，避免 x - origin 溢出。
     let origin = values[0];
     let differences: Vec<_> = values.iter().map(|x| x - origin).collect();
-    let (mean, residuals) = if differences.iter().all(|x| x.is_finite()) {
+    let (mean, residuals, center) = if differences.iter().all(|x| x.is_finite()) {
         let delta_mean = compensated_sum(differences.iter().map(|x| x / count));
         (
             origin + delta_mean,
@@ -68,14 +70,19 @@ pub(crate) fn statistics(values: &[f64]) -> Result<Statistics, String> {
                 .iter()
                 .map(|x| x - delta_mean)
                 .collect::<Vec<_>>(),
+            Some((origin, delta_mean)),
         )
     } else {
         let scale = min.abs().max(max.abs());
         let normalized_mean = compensated_sum(values.iter().map(|x| (x / scale) / count));
         let mean = normalized_mean * scale;
-        (mean, values.iter().map(|x| x - mean).collect::<Vec<_>>())
+        (
+            mean,
+            values.iter().map(|x| x - mean).collect::<Vec<_>>(),
+            None,
+        )
     };
-    let sd = rss(residuals.into_iter().map(|x| x / (count - 1.0).sqrt()))?;
+    let sd = rss(residuals.iter().map(|x| x / (count - 1.0).sqrt()))?;
     finite(&[mean, sd, min, max])?;
     Ok(Statistics {
         mean,
@@ -83,5 +90,7 @@ pub(crate) fn statistics(values: &[f64]) -> Result<Statistics, String> {
         min,
         max,
         standard_error: sd / count.sqrt(),
+        residuals,
+        center,
     })
 }

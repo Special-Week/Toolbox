@@ -46,6 +46,7 @@ pub(super) fn calculate(npt_mode: bool, code: &str) -> Result<Report, String> {
     let tol = find(&db["tol"], "尺寸代号", &code)?;
     let wear = find(&db["wear"], "尺寸代号", &code)?;
     let mut out = Report::new(format!("R {code}"));
+    out.trace(format!("R {code}：按尺寸代号分别查询内置尺寸、公差、偏差、磨损及光滑量规表；各尺寸直接采用表值，牙型角 55°，锥度 1:16。"));
     geometry(
         &mut out,
         n(dim, "D"),
@@ -140,6 +141,7 @@ fn npt(code: &str) -> Result<Report, String> {
         ring["D2"] = Value::Null;
     }
     let mut out = Report::new(format!("NPT {code}"));
+    out.trace(format!("NPT {code}：按尺寸代号分别查询内置塞规、环规表；基面尺寸及螺距直接采用表值，牙型角 60°，锥度 1:16，不从 TPI 反推已列尺寸。"));
     geometry(
         &mut out,
         n(pg, "d"),

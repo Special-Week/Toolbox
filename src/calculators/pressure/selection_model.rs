@@ -21,6 +21,8 @@ pub(crate) fn verify(
 }
 pub(crate) struct ElectricalSelection {
     pub pressure: Selection,
+    pub pressure_contribution: f64,
+    pub electric_contribution: f64,
     pub expanded: f64,
     pub allowance: f64,
     pub meets: bool,
@@ -43,13 +45,15 @@ pub(crate) fn transmitter(
     }
     let pressure = verify(dut, reference, da, ra, required, false)?;
     let pressure_contribution = (pressure.reference_tolerance / dut.span) * output.span;
-    let electric = reading / 100.0 * output.high.abs() + fixed;
+    let electric = reading / 100.0 * output.low.abs().max(output.high.abs()) + fixed;
     let expanded = 2.0 * pressure_contribution.hypot(electric) / 3.0_f64.sqrt();
     let allowance = output.span * da / 100.0 / required;
     finite(&[expanded, allowance])?;
     let meets = pressure.meets && expanded < allowance;
     Ok(ElectricalSelection {
         pressure,
+        pressure_contribution,
+        electric_contribution: electric,
         expanded,
         allowance,
         meets,
@@ -75,3 +79,39 @@ pub(crate) const METRIC_RANGES: &[(f64, f64)] = &[
     (0., 0.06),
     (-0.1, 0.),
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn electrical_reading_error_uses_largest_absolute_endpoint() {
+        let pressure = Range::new(0.0, 1.0).unwrap();
+        for (low, high, expected) in [
+            (-20.0, 4.0, 0.2),
+            (-20.0, -4.0, 0.2),
+            (-4.0, 20.0, 0.2),
+            (4.0, 20.0, 0.2),
+        ] {
+            let result = transmitter(
+                pressure,
+                pressure,
+                Range::new(low, high).unwrap(),
+                1.0,
+                0.01,
+                1.0,
+                0.0,
+                3.0,
+            )
+            .unwrap();
+            assert!((result.electric_contribution - expected).abs() < 1e-14);
+            assert!(!result.meets);
+            assert!(
+                (result.expanded
+                    - 2.0 * result.pressure_contribution.hypot(expected) / 3.0_f64.sqrt())
+                .abs()
+                    < 1e-14
+            );
+        }
+    }
+}

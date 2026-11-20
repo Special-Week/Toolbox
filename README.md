@@ -2,7 +2,7 @@
 
 **Toolbox** 是面向计量、仪表及分析检测工作的工具箱，包含 **7 个分类、50 个工具**。计算功能可离线使用，计量规范 PDF 下载需要联网。
 
-当前版本：**v2026.11.15**。
+当前版本：**v2026.11.20**。
 
 - **Rust 桌面版**：本目录，使用 egui 构建界面。
 - **[C++ 桌面版](cpp_version/README.md)**：Windows 单文件程序，支持 x64、x86 构建。
@@ -24,6 +24,8 @@
 
 49 个计算工具可展开“计算过程”，查看本次输入、公式和代入步骤；“计算说明”介绍模型、适用条件和单位约定。较复杂且已接入的公式由数学排版引擎绘制，未识别的表达式保留为文本。
 
+三个平台的工具首页均可按名称、分类和简介搜索，并可叠加分类筛选。
+
 ## 构建与运行
 
 需要支持 Rust 2024 Edition 的工具链。Windows 使用 MSVC 工具链时，还需安装 C++ 构建工具和 Windows SDK。在项目根目录执行：
@@ -36,7 +38,7 @@ cargo run --locked --bin Toolbox_rust
 powershell -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-发布程序生成在 `dist/Toolbox_rust_v2026.11.15.exe`；脚本从 Cargo 包版本自动生成文件名。Cargo 的中间产物仍保存在 `target/release/Toolbox_rust.exe`。数据表与图标已内嵌，运行时无需附带 `data/`。
+发布程序生成在 `dist/Toolbox_rust_v2026.11.20.exe`；脚本从 Cargo 包版本自动生成文件名。Cargo 的中间产物仍保存在 `target/release/Toolbox_rust.exe`。数据表与图标已内嵌，运行时无需附带 `data/`。
 
 ## 生成 Windows 发布包
 

@@ -193,7 +193,7 @@ public:
   inline float getSkew(const CharFont& cf, TexStyle style) override {
     FontInfo* info = getInfo(cf.fontId);
     wchar_t skew = info->getSkewChar();
-    if (skew == -1) return 0;
+    if (skew == static_cast<wchar_t>(-1)) return 0;
     return getKern(cf, CharFont(skew, cf.fontId), style);
   }
 

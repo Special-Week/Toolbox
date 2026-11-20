@@ -261,116 +261,157 @@ impl ToolboxApp {
     }
 
     pub(crate) fn render_uncertainty(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.set_max_width(ui.available_width().min(960.0));
-        if self.select_index(
-            ui,
-            tool,
-            "budget.mode",
-            "评定方式",
-            &["分量预算表", "A/B 类快速评定"],
-            0,
-        ) == 1
-        {
+        let p = crate::theme::palette(ui.ctx());
+        let mode = panel(ui, |ui| {
+            ui.set_width(ui.available_width());
+            self.select_index(
+                ui,
+                tool,
+                "budget.mode",
+                "评定方式",
+                &["分量预算表", "A/B 类快速评定"],
+                0,
+            )
+        })
+        .inner;
+        ui.add_space(10.0);
+        if mode == 1 {
             self.render_simple_uncertainty(ui, tool);
             return;
         }
+        let count = panel(ui, |ui| {
+            ui.set_width(ui.available_width());
+            self.dynamic_count(ui, tool, "budget.components", "不确定度分量", 2, 1, 20)
+        })
+        .inner;
+        ui.add_space(10.0);
+        let mut results = Vec::with_capacity(count);
+        balanced_columns(ui, "uncertainty_component_columns", count, |ui, i| {
+            results.push(self.uncertainty_component_card(ui, tool, i));
+        });
+
         let mut process_lines = None;
-        let result = (|| {
-            let count = self.dynamic_count(ui, tool, "budget.components", "不确定度分量", 2, 1, 20);
-            let mut results = Vec::with_capacity(count);
-            balanced_columns(ui, "uncertainty_component_columns", count, |ui, i| {
-                results.push(self.uncertainty_component_card(ui, tool, i));
-            });
-            let (components, details): (Vec<_>, Vec<_>) = results
-                .into_iter()
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .unzip();
-            let maximum = self.select_index(
-                ui,
-                tool,
-                "budget.combine",
-                "总合成方法",
-                &["平方和根", "最大绝对贡献"],
-                0,
-            ) == 1;
-            self.input(ui, tool, "budget.k", "包含因子 k", "2", "须大于 0");
-            let k = self.number(tool, "budget.k", "2")?;
-            if k <= 0.0 {
-                return Err("包含因子须大于 0".into());
-            }
-            let digits = self.select_index(
-                ui,
-                tool,
-                "budget.digits",
-                "合成结果有效数字",
-                &["1 位", "2 位", "3 位", "4 位"],
-                1,
-            ) + 1;
-            let carry = self.select_index(
-                ui,
-                tool,
-                "budget.rounding_v2",
-                "合成结果修约方式",
-                &["四舍六入", "进位"],
-                1,
-            ) == 1;
-            let uc = model::combine(
-                &details.iter().map(|d| d.contribution).collect::<Vec<_>>(),
-                maximum,
-            )?;
-            let expanded = uc * k;
-            super::numerics::finite(&[expanded])?;
-            let (rounded, rounded_expanded) = model::rounded_combined(uc, k, digits, carry)?;
-            let mut steps = Vec::new();
-            for (component, detail) in components.iter().zip(&details) {
-                process::component(component, detail, "", &mut steps);
-            }
-            steps.push(String::new());
-            steps.push(format!(
-                "总合成方法：{}；u_c = {}。",
-                if maximum {
-                    "取各分量绝对贡献的最大值"
-                } else {
-                    "各分量贡献平方和根（使用 hypot 累加）"
-                },
-                format_process_computed(uc)
-            ));
-            super::error_process::combined(
-                &mut steps,
-                uc,
-                k,
-                digits,
-                carry,
-                rounded,
-                rounded_expanded,
-            );
-            process_lines = Some(steps);
-            fn show(ui: &mut egui::Ui, items: &[Detail]) {
-                for d in items {
-                    ui.label(format!(
-                        "{}：u={}，修约后 u={}，c={}，贡献={}",
-                        d.name,
-                        format_number(d.raw_standard),
-                        model::format_rounded(d.standard, d.rounding),
-                        format_number(d.sensitivity),
-                        format_number(d.contribution)
-                    ));
-                    if !d.children.is_empty() {
-                        ui.indent(&d.name, |ui| show(ui, &d.children));
+        split_workspace(
+            ui,
+            0.38,
+            self,
+            |ui, app| {
+                panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        egui::RichText::new("总合成设置")
+                            .size(14.5)
+                            .strong()
+                            .color(p.ink),
+                    );
+                    ui.add_space(8.0);
+                    let maximum = app.select_index(
+                        ui,
+                        tool,
+                        "budget.combine",
+                        "总合成方法",
+                        &["平方和根", "最大绝对贡献"],
+                        0,
+                    ) == 1;
+                    app.input(ui, tool, "budget.k", "包含因子 k", "2", "须大于 0");
+                    let digits = app.select_index(
+                        ui,
+                        tool,
+                        "budget.digits",
+                        "合成结果有效数字",
+                        &["1 位", "2 位", "3 位", "4 位"],
+                        1,
+                    ) + 1;
+                    let carry = app.select_index(
+                        ui,
+                        tool,
+                        "budget.rounding_v2",
+                        "合成结果修约方式",
+                        &["四舍六入", "进位"],
+                        1,
+                    ) == 1;
+                    (maximum, digits, carry)
+                })
+                .inner
+            },
+            |ui, app, (maximum, digits, carry)| {
+                panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    let mut details_out = None;
+                    let result = (|| {
+                        let (components, details): (Vec<_>, Vec<_>) = results
+                            .into_iter()
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .unzip();
+                        let k = app.number(tool, "budget.k", "2")?;
+                        if k <= 0.0 {
+                            return Err("包含因子须大于 0".into());
+                        }
+                        let uc = model::combine(
+                            &details.iter().map(|d| d.contribution).collect::<Vec<_>>(),
+                            maximum,
+                        )?;
+                        let expanded = uc * k;
+                        super::numerics::finite(&[expanded])?;
+                        let (rounded, rounded_expanded) =
+                            model::rounded_combined(uc, k, digits, carry)?;
+                        let mut steps = Vec::new();
+                        for (component, detail) in components.iter().zip(&details) {
+                            process::component(component, detail, "", &mut steps);
+                        }
+                        steps.push(String::new());
+                        steps.push(format!(
+                            "总合成方法：{}；u_c = {}。",
+                            if maximum {
+                                "取各分量绝对贡献的最大值"
+                            } else {
+                                "各分量贡献平方和根（使用 hypot 累加）"
+                            },
+                            format_process_computed(uc)
+                        ));
+                        super::error_process::combined(
+                            &mut steps,
+                            uc,
+                            k,
+                            digits,
+                            carry,
+                            rounded,
+                            rounded_expanded,
+                        );
+                        process_lines = Some(steps);
+                        details_out = Some(details);
+                        Ok(vec![
+                            ("合成标准不确定度 u_c", format_number(uc)),
+                            ("扩展不确定度 U", format_number(expanded)),
+                            ("修约后标准不确定度", format_number(rounded)),
+                            ("修约后扩展不确定度", format_number(rounded_expanded)),
+                            ("包含因子 k", format_number(k)),
+                        ])
+                    })();
+                    show_result_or_error(ui, "不确定度结果", result);
+                    if let Some(details) = details_out {
+                        fn show(ui: &mut egui::Ui, items: &[Detail]) {
+                            for d in items {
+                                ui.label(format!(
+                                    "{}：u={}，修约后 u={}，c={}，贡献={}",
+                                    d.name,
+                                    format_number(d.raw_standard),
+                                    model::format_rounded(d.standard, d.rounding),
+                                    format_number(d.sensitivity),
+                                    format_number(d.contribution)
+                                ));
+                                if !d.children.is_empty() {
+                                    ui.indent(&d.name, |ui| show(ui, &d.children));
+                                }
+                            }
+                        }
+                        ui.add_space(6.0);
+                        ui.collapsing("分量计算明细", |ui| show(ui, &details));
                     }
-                }
-            }
-            ui.collapsing("分量计算明细", |ui| show(ui, &details));
-            Ok(vec![
-                ("合成标准不确定度 u_c", format_number(uc)),
-                ("扩展不确定度 U", format_number(expanded)),
-                ("修约后标准不确定度", format_number(rounded)),
-                ("修约后扩展不确定度", format_number(rounded_expanded)),
-                ("包含因子 k", format_number(k)),
-            ])
-        })();
-        show_result_or_error(ui, "不确定度结果", result);
+                });
+            },
+        );
         if let Some(lines) = &process_lines {
             calculation_process(ui, "uncertainty_budget_process", lines);
         }

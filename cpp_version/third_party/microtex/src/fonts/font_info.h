@@ -117,9 +117,9 @@ public:
 
   /**********************************************************************************************/
 
-  const float* const getMetrics(wchar_t ch) const;
+  const float* getMetrics(wchar_t ch) const;
 
-  const int* const getExtension(wchar_t ch) const;
+  const int* getExtension(wchar_t ch) const;
 
   // FIXME
   // workaround for the MSVC's LNK2019 error

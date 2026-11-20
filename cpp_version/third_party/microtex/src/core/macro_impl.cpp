@@ -320,7 +320,7 @@ macro(raisebox) {
 }
 
 macro(definecolor) {
-  color c = TRANSPARENT;
+  color c = TEX_TRANSPARENT;
   string cs = wide2utf8(args[3]);
   if (args[2] == L"gray") {
     float f = 0;

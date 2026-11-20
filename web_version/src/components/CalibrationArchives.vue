@@ -267,7 +267,7 @@ function cancel() {
   gap: 10px;
 }
 .archive-label {
-  color: #718099;
+  color: var(--muted);
   font-size: 12px;
 }
 .archive-row select {
@@ -281,16 +281,16 @@ function cancel() {
 }
 .archive-hint,
 .archive-modified {
-  color: #6f7e92;
+  color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
 }
 .archive-error {
-  color: #b74846;
+  color: var(--danger);
   font-size: 13px;
 }
 .archive-message {
-  color: #2769dc;
+  color: var(--blue);
   font-size: 13px;
 }
 .archive-dialog {
@@ -299,18 +299,18 @@ function cancel() {
   overflow: auto;
   margin: auto;
   padding: 24px;
-  border: 1px solid #dce3ed;
-  border-radius: 10px;
-  background: white;
-  color: #233043;
-  box-shadow: 0 12px 35px #142d4b2e;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-md);
 }
 .archive-dialog::backdrop {
-  background: #0006;
+  background: var(--backdrop);
 }
 .archive-dialog h2 {
-  font-size: 19px;
-  margin: 0 0 20px;
+  font-size: 18px;
+  margin: 0 0 18px;
 }
 .archive-dialog p {
   font-size: 14px;
@@ -319,7 +319,7 @@ function cancel() {
 }
 .archive-dialog label {
   display: block;
-  color: #6f7e92;
+  color: var(--muted);
   font-size: 13px;
   margin-bottom: 8px;
 }

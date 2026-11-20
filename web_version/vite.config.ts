@@ -21,5 +21,19 @@ export default defineConfig({
   base: "./",
   worker: { format: "es" },
   // clean-dist.mjs 只清理构建产物，保留 serve.py 同级的 PDF 缓存。
-  build: { target: "es2022", assetsInlineLimit: 0, emptyOutDir: false },
+  build: {
+    target: "es2022",
+    assetsInlineLimit: 0,
+    emptyOutDir: false,
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes("node_modules/katex")) return "katex";
+          if (id.includes("node_modules/vue")) return "vue";
+          if (id.includes("standard-catalog")) return "standard-catalog";
+        },
+      },
+    },
+  },
 });

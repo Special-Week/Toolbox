@@ -1,4 +1,5 @@
 //! 不确定度分量树：先求各分量标准不确定度，再应用灵敏系数并逐级合成。
+#![allow(clippy::items_after_test_module)]
 use crate::calculators::{
     numerics::{finite, rss, statistics},
     range_method::coefficient,

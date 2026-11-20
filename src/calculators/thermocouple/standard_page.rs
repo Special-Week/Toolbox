@@ -1,4 +1,5 @@
 //! 标准热电偶参数、校准拟合和参考端补偿界面；热电势一律使用 mV。
+#![allow(clippy::items_after_test_module)]
 use super::standard::{FixedMethod, StandardCouple, zones};
 use crate::calculators::{calibration::TemperatureUnit, common::*};
 use crate::{app::ToolboxApp, catalog::ToolDef};
@@ -138,289 +139,395 @@ mod tests {
 
 impl ToolboxApp {
     pub(crate) fn render_standard_thermocouple(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.set_max_width(ui.available_width().min(820.0));
-        let archive_save = self.calibration_archive_controls(ui, tool);
-        let mut archive_required = None;
+        let p = crate::theme::palette(ui.ctx());
         let mut table = None;
         let mut process = None;
-        let mut fit_details = None;
-        let result = panel(ui, |ui| {
-            let k = self.select_index(ui, tool, "stc.type", "分度号", &["S 型", "B 型"], 0);
-            let kind = ["S", "B"][k];
-            let mut zone_id = 0;
-            let mut fitted = false;
-            let mode = self.select_index(
-                ui,
-                tool,
-                "stc.calibration",
-                "校准方式",
-                &["固定点实测热电势", "温区多项式系数"],
-                0,
-            );
-            let mut required = vec!["stc.type".to_owned(), "stc.calibration".to_owned()];
-            let mut model = StandardCouple {
-                kind,
-                points: Vec::new(),
-                zone: None,
-            };
-            if mode == 0 {
-                let defaults: &[(f64, f64)] = if k == 0 {
-                    &[(419.527, 3.4472), (660.323, 5.8605), (1084.62, 10.5822)]
-                } else {
-                    &[
-                        (1100., 5.8029),
-                        (1200., 6.8050),
-                        (1300., 7.8809),
-                        (1400., 8.9926),
-                        (1500., 10.1205),
-                    ]
-                };
-                for (i, &(t, e)) in defaults.iter().enumerate() {
-                    let key = format!("stc.{kind}.cal.{i}");
-                    required.push(key.clone());
-                    let d = e.to_string();
-                    self.input(
+
+        let (archive_save, archive_required) = split_workspace(
+            ui,
+            0.46,
+            self,
+            |ui, app| {
+                let archive_save = app.calibration_archive_controls(ui, tool);
+                let mut archive_required = None;
+                type CoupleFitSummary = (Vec<f64>, Vec<(f64, f64)>);
+                let mut fit_summary: Option<CoupleFitSummary> = None;
+                let result = panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(
+                        egui::RichText::new("标准热电偶参数")
+                            .size(14.5)
+                            .strong()
+                            .color(p.ink),
+                    );
+                    ui.add_space(8.0);
+                    let k = app.select_index(ui, tool, "stc.type", "分度号", &["S 型", "B 型"], 0);
+                    let kind = ["S", "B"][k];
+                    let mut zone_id = 0;
+                    let mut fitted = false;
+                    let mode = app.select_index(
+                        ui,
+                        tool,
+                        "stc.calibration",
+                        "校准方式",
+                        &["固定点实测热电势", "温区多项式系数"],
+                        0,
+                    );
+                    let mut required = vec!["stc.type".to_owned(), "stc.calibration".to_owned()];
+                    let mut model = StandardCouple {
+                        kind,
+                        points: Vec::new(),
+                        zone: None,
+                    };
+                    let mut fit_details = None;
+                    if mode == 0 {
+                        let defaults: &[(f64, f64)] = if k == 0 {
+                            &[(419.527, 3.4472), (660.323, 5.8605), (1084.62, 10.5822)]
+                        } else {
+                            &[
+                                (1100., 5.8029),
+                                (1200., 6.8050),
+                                (1300., 7.8809),
+                                (1400., 8.9926),
+                                (1500., 10.1205),
+                            ]
+                        };
+                        for (i, &(t, e)) in defaults.iter().enumerate() {
+                            let key = format!("stc.{kind}.cal.{i}");
+                            required.push(key.clone());
+                            let d = e.to_string();
+                            app.input(
+                                ui,
+                                tool,
+                                &key,
+                                &format!("{} °C · 实测电势 (mV)", format_number(t)),
+                                &d,
+                                "证书中的实际电势，不是修正量",
+                            );
+                            model.points.push((t, app.number(tool, &key, &d)?));
+                        }
+                    } else {
+                        let ranges = zones(kind);
+                        let labels: Vec<_> = ranges
+                            .iter()
+                            .map(|(a, b, _)| {
+                                format!("{} ～ {} °C", format_number(*a), format_number(*b))
+                            })
+                            .collect();
+                        let z = app.select_index(
+                            ui,
+                            tool,
+                            &format!("stc.{kind}.zone"),
+                            "系数温区",
+                            &labels.iter().map(String::as_str).collect::<Vec<_>>(),
+                            0,
+                        );
+                        zone_id = z;
+                        required.push(format!("stc.{kind}.zone"));
+                        let mut zone = ranges[z].clone();
+                        let fit = app.select_index(
+                            ui,
+                            tool,
+                            "stc.coefficient_source",
+                            "系数设置",
+                            &["手动输入系数", "校准点拟合"],
+                            0,
+                        ) == 1;
+                        fitted = fit;
+                        required.push("stc.coefficient_source".to_owned());
+                        if fit {
+                            let count =
+                                app.dynamic_count(ui, tool, "stc.fit.points", "校准点", 3, 2, 30);
+                            required.push("stc.fit.points.count".to_owned());
+                            let mut points = Vec::new();
+                            for i in 0..count {
+                                let t = zone.0
+                                    + (zone.1 - zone.0) * (i + 1) as f64 / (count + 1) as f64;
+                                let e = crate::calculators::calibration::polynomial(&zone.2, t);
+                                let key = format!("stc.fit.{kind}.{z}.{i}");
+                                required.push(format!("{key}.t"));
+                                required.push(format!("{key}.e"));
+                                app.input(
+                                    ui,
+                                    tool,
+                                    &format!("{key}.t"),
+                                    &format!("点 {} 温度 (°C)", i + 1),
+                                    &t.to_string(),
+                                    "校准温度",
+                                );
+                                app.input(
+                                    ui,
+                                    tool,
+                                    &format!("{key}.e"),
+                                    &format!("点 {} 电势 (mV)", i + 1),
+                                    &e.to_string(),
+                                    "实际热电势",
+                                );
+                                points.push((
+                                    app.number(tool, &format!("{key}.t"), &t.to_string())?,
+                                    app.number(tool, &format!("{key}.e"), &e.to_string())?,
+                                ));
+                            }
+                            let base_coefficients = zone.2.clone();
+                            let fitted_delta =
+                                StandardCouple::fit_zone_coefficients(&mut zone, &points)?;
+                            fit_summary = Some((zone.2.clone(), points.clone()));
+                            fit_details = Some((points, base_coefficients, fitted_delta));
+                        } else {
+                            for (i, c) in zone.2.iter_mut().enumerate() {
+                                let key = format!("stc.{kind}.{z}.c.{i}");
+                                required.push(key.clone());
+                                let d = c.to_string();
+                                app.input(
+                                    ui,
+                                    tool,
+                                    &key,
+                                    &format!("系数 c[{i}]"),
+                                    &d,
+                                    "E(t) = Σ c[i]·t^i；t 为 °C，E 为 mV",
+                                );
+                                *c = app.number(tool, &key, &d)?;
+                            }
+                        }
+                        model.zone = Some(zone);
+                    }
+                    archive_required = Some(required);
+                    let u = TemperatureUnit(app.select_segmented(
+                        ui,
+                        tool,
+                        "stc.unit",
+                        "温度单位",
+                        &["°C", "K", "°F"],
+                        0,
+                    ));
+                    let direction = app.select_segmented(
+                        ui,
+                        tool,
+                        "stc.direction",
+                        "计算方式",
+                        &["温度 → 热电势", "热电势 → 温度"],
+                        0,
+                    );
+                    let def_t = model
+                        .zone
+                        .as_ref()
+                        .map(|(a, b, _)| (a + b) / 2.0)
+                        .unwrap_or(if k == 0 { 1000.0 } else { 1200.0 });
+                    let key = if direction == 0 {
+                        format!("stc.{kind}.{mode}.{zone_id}.t.{}", u.0)
+                    } else {
+                        format!("stc.{kind}.{mode}.{zone_id}.emf")
+                    };
+                    let default = if direction == 0 {
+                        u.display(def_t).to_string()
+                    } else {
+                        model.emf(def_t)?.to_string()
+                    };
+                    app.input(
                         ui,
                         tool,
                         &key,
-                        &format!("{} °C · 实测电势 (mV)", format_number(t)),
-                        &d,
-                        "证书中的实际电势，不是修正量",
+                        if direction == 0 {
+                            u.symbol()
+                        } else {
+                            "测得热电势 (mV)"
+                        },
+                        &default,
+                        "输入待换算值",
                     );
-                    model.points.push((t, self.number(tool, &key, &d)?));
-                }
-            } else {
-                let ranges = zones(kind);
-                let labels: Vec<_> = ranges
-                    .iter()
-                    .map(|(a, b, _)| format!("{} ～ {} °C", format_number(*a), format_number(*b)))
-                    .collect();
-                let z = self.select_index(
-                    ui,
-                    tool,
-                    &format!("stc.{kind}.zone"),
-                    "系数温区",
-                    &labels.iter().map(String::as_str).collect::<Vec<_>>(),
-                    0,
-                );
-                zone_id = z;
-                required.push(format!("stc.{kind}.zone"));
-                let mut zone = ranges[z].clone();
-                let fit = self.select_index(
-                    ui,
-                    tool,
-                    "stc.coefficient_source",
-                    "系数设置",
-                    &["手动输入系数", "校准点拟合"],
-                    0,
-                ) == 1;
-                fitted = fit;
-                required.push("stc.coefficient_source".to_owned());
-                if fit {
-                    let count = self.dynamic_count(ui, tool, "stc.fit.points", "校准点", 3, 2, 30);
-                    required.push("stc.fit.points.count".to_owned());
-                    let mut points = Vec::new();
-                    for i in 0..count {
-                        let t = zone.0 + (zone.1 - zone.0) * (i + 1) as f64 / (count + 1) as f64;
-                        let e = crate::calculators::calibration::polynomial(&zone.2, t);
-                        let key = format!("stc.fit.{kind}.{z}.{i}");
-                        required.push(format!("{key}.t"));
-                        required.push(format!("{key}.e"));
-                        self.input(
-                            ui,
-                            tool,
-                            &format!("{key}.t"),
-                            &format!("点 {} 温度 (°C)", i + 1),
-                            &t.to_string(),
-                            "校准温度",
+                    let ck = format!("stc.cold.{}", u.0);
+                    let cd = u.display(0.0).to_string();
+                    app.input(
+                        ui,
+                        tool,
+                        &ck,
+                        &format!("参考端温度 ({})", u.symbol()),
+                        &cd,
+                        "多项式温区以外的参考端请使用 0 °C",
+                    );
+                    let cold = u.celsius(app.number(tool, &ck, &cd)?);
+                    let cold_e = model.emf(cold)?;
+                    let v = app.number(tool, &key, &default)?;
+                    let (t, e, hot_e) = if direction == 0 {
+                        let t = u.celsius(v);
+                        let hot_e = model.emf(t)?;
+                        (t, hot_e - cold_e, hot_e)
+                    } else {
+                        let hot_e = v + cold_e;
+                        (model.temperature(hot_e)?, v, hot_e)
+                    };
+                    let h = 0.01;
+                    let (lo, hi) = model
+                        .zone
+                        .as_ref()
+                        .map(|(a, b, _)| (*a, *b))
+                        .unwrap_or(if k == 0 {
+                            (-50.0, 1768.1)
+                        } else {
+                            (0.0, 1820.0)
+                        });
+                    let a = (t - h).max(lo);
+                    let b = (t + h).min(hi);
+                    let slope = (model.emf(b)? - model.emf(a)?) / (b - a);
+                    let mut steps = vec![format!(
+                        "{} 型标准热电偶；{}。",
+                        kind,
+                        if mode == 0 {
+                            "固定点实测热电势"
+                        } else if fitted {
+                            "温区系数由校准点拟合"
+                        } else {
+                            "使用输入的温区系数"
+                        }
+                    )];
+                    if let Some((min, max, coefficients)) = &model.zone {
+                        steps.push(format!("系数温区 {}～{} °C；E(t) = Σ c[i]·tⁱ，t 用 °C、E 用 mV；t = 0 °C 时模型按 0 mV 处理。", format_process_number(*min), format_process_number(*max)));
+                        if let Some((points, base, delta)) = &fit_details {
+                            steps.push("拟合使用基准多项式 E₀(t)=Σ b[i]·tⁱ。对各校准点，以 ΔE=实测电势−E₀(t) 建立 ΔE≈Δc₁·t+Δc₂·t²，并用最小二乘法求解。".to_owned());
+                            steps.extend(base.iter().enumerate().map(|(i, c)| {
+                                format!("基准 b[{i}] = {}", format_process_number(*c))
+                            }));
+                            for (i, (point_t, measured)) in points.iter().enumerate() {
+                                steps.push(String::new());
+                                let baseline =
+                                    crate::calculators::calibration::polynomial(base, *point_t);
+                                steps.push(format!("点 {}：t = {} °C，实测 = {} mV，E₀ = {} mV，ΔE = {} mV；方程系数 t = {}，t² = {}。", i + 1, format_process_number(*point_t), format_process_number(*measured), format_process_computed(baseline), format_process_computed(*measured - baseline), format_process_number(*point_t), format_process_computed(*point_t * *point_t)));
+                            }
+                            steps.push(format!("拟合得到 Δc₁ = {}、Δc₂ = {}；分别加到基准 c[1]、c[2]，其余系数保持基准值。", format_process_number(delta[0]), format_process_number(delta[1])));
+                        }
+                        steps.extend(coefficients.iter().enumerate().map(|(i, c)| {
+                            format!("c[{i}] = {}", format_process_number(*c))
+                        }));
+                    } else {
+                        steps.push("在参考曲线上叠加各固定点实测电势与参考电势的偏差。".to_owned());
+                        steps.push(
+                            if kind == "S" {
+                                "固定点修正于 400 °C 从锌点线性延伸切换为三点二次插值；两段取决于校准值，不保证在切换点连续。"
+                            } else {
+                                "固定点修正：低于 23 °C 取零，23 °C 至低于 800 °C 按首点线性计算，800 °C 起使用首点偏差；两段在 800 °C 不保证连续。"
+                            }
+                            .to_owned(),
                         );
-                        self.input(
-                            ui,
-                            tool,
-                            &format!("{key}.e"),
-                            &format!("点 {} 电势 (mV)", i + 1),
-                            &e.to_string(),
-                            "实际热电势",
-                        );
-                        points.push((
-                            self.number(tool, &format!("{key}.t"), &t.to_string())?,
-                            self.number(tool, &format!("{key}.e"), &e.to_string())?,
+                        let adjustment = model.fixed_adjustment(t)?;
+                        for ((point_t, measured), offset) in
+                            model.points.iter().zip(&adjustment.offsets)
+                        {
+                            steps.push(String::new());
+                            let reference = super::thermocouple_emf(kind, *point_t)?;
+                            steps.push(format!(
+                                "固定点 {} °C：实测 {} mV − 参考 {} mV = 偏差 {} mV。",
+                                format_process_number(*point_t),
+                                format_process_number(*measured),
+                                format_process_computed(reference),
+                                format_process_computed(*offset)
+                            ));
+                            steps.extend(super::reference_process(
+                                kind,
+                                *point_t,
+                                "固定点参考函数",
+                                false,
+                            )?);
+                        }
+                        steps.push(String::new());
+                        steps.extend(fixed_endpoint_process(&model, t, "热端", direction == 1)?);
+                        steps.push(String::new());
+                        steps.extend(fixed_endpoint_process(&model, cold, "参考端", false)?);
+                    }
+                    steps.push(temperature_conversion_note(u.symbol()).to_owned());
+                    steps.push(format!(
+                        "参考端温度 {} °C，参考端电势 E(参考端) = {} mV。",
+                        format_process_number(cold),
+                        format_process_computed(cold_e)
+                    ));
+                    if direction == 0 {
+                        steps.push(format!(
+                            "热端温度 {} °C；模型 E(热端) = {} mV。",
+                            format_process_number(t),
+                            format_process_computed(hot_e)
+                        ));
+                        steps.push(format!(
+                            "测得热电势 = E(热端) − E(参考端) = {} − {} = {} mV。",
+                            format_process_computed(hot_e),
+                            format_process_computed(cold_e),
+                            format_process_computed(e)
+                        ));
+                    } else {
+                        steps.push(format!(
+                            "补偿后电势 = 测得电势 + 参考端电势 = {} + {} = {} mV；在所选分支上反算温度。",
+                            format_process_number(e),
+                            format_process_computed(cold_e),
+                            format_process_computed(hot_e)
+                        ));
+                        steps.push(format!(
+                            "热端温度 = {} °C = {} {}。",
+                            format_process_computed(t),
+                            format_process_computed(u.display(t)),
+                            u.symbol()
                         ));
                     }
-                    let base_coefficients = zone.2.clone();
-                    let fitted_delta = StandardCouple::fit_zone_coefficients(&mut zone, &points)?;
-                    ui.collapsing("拟合系数与残差", |ui| {
-                        for (i, c) in zone.2.iter().enumerate() {
-                            ui.label(format!("c[{i}] = {}", format_process_number(*c)));
+                    steps.push(format!(
+                        "在 {}～{} °C 内作差分，得到微分热电势 {} mV/{}。",
+                        format_process_number(a),
+                        format_process_number(b),
+                        format_process_computed(slope / u.span()),
+                        u.symbol()
+                    ));
+                    Ok::<_, String>((
+                        vec![
+                            (
+                                "热端温度",
+                                format!("{} {}", format_number(u.display(t)), u.symbol()),
+                            ),
+                            ("测得热电势", format!("{} mV", format_number(e))),
+                            (
+                                "微分热电势 dE/dt",
+                                format!("{} mV/{}", format_number(slope / u.span()), u.symbol()),
+                            ),
+                            ("参考端电势", format!("{} mV", format_number(cold_e))),
+                        ],
+                        steps,
+                        (model, u, lo, hi, cold_e, zone_id),
+                    ))
+                })
+                .inner;
+                (archive_save, archive_required, fit_summary, result)
+            },
+            |ui, _app, (archive_save, archive_required, fit_summary, result)| {
+                panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    match result {
+                        Ok((metrics, steps, tbl)) => {
+                            render_metrics(ui, "换算结果", &metrics);
+                            if let Some((coeffs, points)) = fit_summary {
+                                ui.add_space(10.0);
+                                ui.collapsing("拟合系数与残差", |ui| {
+                                    for (i, c) in coeffs.iter().enumerate() {
+                                        ui.label(format!("c[{i}] = {}", format_process_number(*c)));
+                                    }
+                                    for (i, &(t, e)) in points.iter().enumerate() {
+                                        ui.label(format!(
+                                            "点 {} 电势残差：{} mV",
+                                            i + 1,
+                                            format_number(
+                                                e - crate::calculators::calibration::polynomial(
+                                                    &coeffs, t
+                                                )
+                                            )
+                                        ));
+                                    }
+                                });
+                            }
+                            process = Some(steps);
+                            table = Some(tbl);
                         }
-                        for (i, &(t, e)) in points.iter().enumerate() {
-                            ui.label(format!(
-                                "点 {} 电势残差：{} mV",
-                                i + 1,
-                                format_number(
-                                    e - crate::calculators::calibration::polynomial(&zone.2, t)
-                                )
-                            ));
-                        }
-                    });
-                    fit_details = Some((points, base_coefficients, fitted_delta));
-                } else {
-                    for (i, c) in zone.2.iter_mut().enumerate() {
-                        let key = format!("stc.{kind}.{z}.c.{i}");
-                        required.push(key.clone());
-                        let d = c.to_string();
-                        self.input(
-                            ui,
-                            tool,
-                            &key,
-                            &format!("系数 c[{i}]"),
-                            &d,
-                            "E(t) = Σ c[i]·t^i；t 为 °C，E 为 mV",
-                        );
-                        *c = self.number(tool, &key, &d)?;
+                        Err(err) => render_error_message(ui, &err),
                     }
-                }
-                model.zone = Some(zone);
-            }
-            archive_required = Some(required);
-            let u = TemperatureUnit(self.select_index(
-                ui,
-                tool,
-                "stc.unit",
-                "温度单位",
-                &["°C", "K", "°F"],
-                0,
-            ));
-            let direction = self.select_index(
-                ui,
-                tool,
-                "stc.direction",
-                "计算方式",
-                &["温度 → 热电势", "热电势 → 温度"],
-                0,
-            );
-            let def_t = model
-                .zone
-                .as_ref()
-                .map(|(a, b, _)| (a + b) / 2.0)
-                .unwrap_or(if k == 0 { 1000.0 } else { 1200.0 });
-            let key = if direction == 0 {
-                format!("stc.{kind}.{mode}.{zone_id}.t.{}", u.0)
-            } else {
-                format!("stc.{kind}.{mode}.{zone_id}.emf")
-            };
-            let default = if direction == 0 {
-                u.display(def_t).to_string()
-            } else {
-                model.emf(def_t)?.to_string()
-            };
-            self.input(
-                ui,
-                tool,
-                &key,
-                if direction == 0 {
-                    u.symbol()
-                } else {
-                    "测得热电势 (mV)"
-                },
-                &default,
-                "输入待换算值",
-            );
-            let ck = format!("stc.cold.{}", u.0);
-            let cd = u.display(0.0).to_string();
-            self.input(
-                ui,
-                tool,
-                &ck,
-                &format!("参考端温度 ({})", u.symbol()),
-                &cd,
-                "多项式温区以外的参考端请使用 0 °C",
-            );
-            let cold = u.celsius(self.number(tool, &ck, &cd)?);
-            let cold_e = model.emf(cold)?;
-            let v = self.number(tool, &key, &default)?;
-            let (t, e, hot_e) = if direction == 0 {
-                let t = u.celsius(v);
-                let hot_e = model.emf(t)?;
-                (t, hot_e - cold_e, hot_e)
-            } else {
-                let hot_e = v + cold_e;
-                (model.temperature(hot_e)?, v, hot_e)
-            };
-            let h = 0.01;
-            let (lo, hi) = model
-                .zone
-                .as_ref()
-                .map(|(a, b, _)| (*a, *b))
-                .unwrap_or(if k == 0 {
-                    (-50.0, 1768.1)
-                } else {
-                    (0.0, 1820.0)
                 });
-            let a = (t - h).max(lo);
-            let b = (t + h).min(hi);
-            let slope = (model.emf(b)? - model.emf(a)?) / (b - a);
-            let mut steps = vec![format!("{} 型标准热电偶；{}。", kind, if mode == 0 { "固定点实测热电势" } else if fitted { "温区系数由校准点拟合" } else { "使用输入的温区系数" })];
-            if let Some((min, max, coefficients)) = &model.zone {
-                steps.push(format!("系数温区 {}～{} °C；E(t) = Σ c[i]·tⁱ，t 用 °C、E 用 mV；t = 0 °C 时模型按 0 mV 处理。", format_process_number(*min), format_process_number(*max)));
-                if let Some((points, base, delta)) = &fit_details {
-                    steps.push("拟合使用基准多项式 E₀(t)=Σ b[i]·tⁱ。对各校准点，以 ΔE=实测电势−E₀(t) 建立 ΔE≈Δc₁·t+Δc₂·t²，并用最小二乘法求解。".to_owned());
-                    steps.extend(base.iter().enumerate().map(|(i,c)| format!("基准 b[{i}] = {}", format_process_number(*c))));
-                    for (i, (point_t, measured)) in points.iter().enumerate() {
-                        steps.push(String::new());
-                        let baseline = crate::calculators::calibration::polynomial(base, *point_t);
-                        steps.push(format!("点 {}：t = {} °C，实测 = {} mV，E₀ = {} mV，ΔE = {} mV；方程系数 t = {}，t² = {}。", i + 1, format_process_number(*point_t), format_process_number(*measured), format_process_computed(baseline), format_process_computed(*measured - baseline), format_process_number(*point_t), format_process_computed(*point_t * *point_t)));
-                    }
-                    steps.push(format!("拟合得到 Δc₁ = {}、Δc₂ = {}；分别加到基准 c[1]、c[2]，其余系数保持基准值。", format_process_number(delta[0]), format_process_number(delta[1])));
-                }
-                steps.extend(coefficients.iter().enumerate().map(|(i, c)| format!("c[{i}] = {}", format_process_number(*c))));
-            } else {
-                steps.push("在参考曲线上叠加各固定点实测电势与参考电势的偏差。".to_owned());
-                steps.push(if kind == "S" {
-                    "固定点修正于 400 °C 从锌点线性延伸切换为三点二次插值；两段取决于校准值，不保证在切换点连续。"
-                } else {
-                    "固定点修正：低于 23 °C 取零，23 °C 至低于 800 °C 按首点线性计算，800 °C 起使用首点偏差；两段在 800 °C 不保证连续。"
-                }.to_owned());
-                let adjustment = model.fixed_adjustment(t)?;
-                for ((point_t, measured), offset) in model.points.iter().zip(&adjustment.offsets) {
-                    steps.push(String::new());
-                    let reference = super::thermocouple_emf(kind, *point_t)?;
-                    steps.push(format!("固定点 {} °C：实测 {} mV − 参考 {} mV = 偏差 {} mV。", format_process_number(*point_t), format_process_number(*measured), format_process_computed(reference), format_process_computed(*offset)));
-                    steps.extend(super::reference_process(kind, *point_t, "固定点参考函数", false)?);
-                }
-                steps.push(String::new());
-                steps.extend(fixed_endpoint_process(&model, t, "热端", direction == 1)?);
-                steps.push(String::new());
-                steps.extend(fixed_endpoint_process(&model, cold, "参考端", false)?);
-            }
-            steps.push(temperature_conversion_note(u.symbol()).to_owned());
-            steps.push(format!("参考端温度 {} °C，参考端电势 E(参考端) = {} mV。", format_process_number(cold), format_process_computed(cold_e)));
-            if direction == 0 {
-                steps.push(format!("热端温度 {} °C；模型 E(热端) = {} mV。", if direction == 0 { format_process_number(t) } else { format_process_computed(t) }, format_process_computed(hot_e)));
-                steps.push(format!("测得热电势 = E(热端) − E(参考端) = {} − {} = {} mV。", format_process_computed(hot_e), format_process_computed(cold_e), if direction == 0 { format_process_computed(e) } else { format_process_number(e) }));
-            } else {
-                steps.push(format!("补偿后电势 = 测得电势 + 参考端电势 = {} + {} = {} mV；在所选分支上反算温度。", if direction == 0 { format_process_computed(e) } else { format_process_number(e) }, format_process_computed(cold_e), format_process_computed(hot_e)));
-                steps.push(format!("热端温度 = {} °C = {} {}。", if direction == 0 { format_process_number(t) } else { format_process_computed(t) }, format_process_computed(u.display(t)), u.symbol()));
-            }
-            steps.push(format!("在 {}～{} °C 内作差分，得到微分热电势 {} mV/{}。", format_process_number(a), format_process_number(b), format_process_computed(slope / u.span()), u.symbol()));
-            process = Some(steps);
-            table = Some((model.clone(), u, lo, hi, cold_e, zone_id));
-            Ok(vec![
-                (
-                    "热端温度",
-                    format!("{} {}", format_number(u.display(t)), u.symbol()),
-                ),
-                ("测得热电势", format!("{} mV", format_number(e))),
-                (
-                    "微分热电势 dE/dt",
-                    format!("{} mV/{}", format_number(slope / u.span()), u.symbol()),
-                ),
-                ("参考端电势", format!("{} mV", format_number(cold_e))),
-            ])
-        })
-        .inner;
+                (archive_save, archive_required)
+            },
+        );
+
         self.finish_calibration_save(tool, archive_save, archive_required);
-        show_result_or_error(ui, "换算结果", result);
         if let Some((model, u, lo, hi, cold, z)) = table {
             self.render_division_table(
                 ui,

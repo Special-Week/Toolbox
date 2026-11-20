@@ -1,5 +1,7 @@
 #include "utf.h"
 
+#include <cstdint>
+
 using namespace std;
 using namespace tex;
 
@@ -39,31 +41,68 @@ string tex::wide2utf8(const std::wstring& src) {
 }
 
 wstring tex::utf82wide(const std::string& src) {
-  const char* in = src.c_str();
   wstring out;
-  if (in == nullptr) return out;
-  unsigned int codepoint;
-  while (*in != 0) {
-    auto ch = static_cast<unsigned char>(*in);
-    if (ch <= 0x7f) {
-      codepoint = ch;
-    } else if (ch <= 0xbf) {
-      codepoint = (codepoint << 6) | (ch & 0x3f);
-    } else if (ch <= 0xdf) {
-      codepoint = ch & 0x1f;
-    } else if (ch <= 0xef) {
-      codepoint = ch & 0x0f;
-    } else {
-      codepoint = ch & 0x07;
-    }
-    ++in;
-    if (((*in & 0xc0) != 0x80) && (codepoint <= 0x10ffff)) {
+  auto appendCodePoint = [&out](std::uint32_t codepoint) {
+    if constexpr (sizeof(wchar_t) == 2) {
       if (codepoint > 0xffff) {
-        out.append(1, static_cast<wchar_t>(0xd800 + (codepoint >> 10)));
-        out.append(1, static_cast<wchar_t>(0xdc00 + (codepoint & 0x03ff)));
-      } else if (codepoint < 0xd800 || codepoint >= 0xe000)
-        out.append(1, static_cast<wchar_t>(codepoint));
+        codepoint -= 0x10000;
+        out.push_back(static_cast<wchar_t>(0xd800 + (codepoint >> 10)));
+        out.push_back(static_cast<wchar_t>(0xdc00 + (codepoint & 0x03ff)));
+      } else {
+        out.push_back(static_cast<wchar_t>(codepoint));
+      }
+    } else {
+      out.push_back(static_cast<wchar_t>(codepoint));
     }
+  };
+
+  for (size_t i = 0; i < src.size();) {
+    const auto first = static_cast<unsigned char>(src[i]);
+    std::uint32_t codepoint;
+    std::uint32_t minimum;
+    size_t length;
+
+    if (first <= 0x7f) {
+      codepoint = first;
+      minimum = 0;
+      length = 1;
+    } else if (first >= 0xc2 && first <= 0xdf) {
+      codepoint = first & 0x1f;
+      minimum = 0x80;
+      length = 2;
+    } else if (first >= 0xe0 && first <= 0xef) {
+      codepoint = first & 0x0f;
+      minimum = 0x800;
+      length = 3;
+    } else if (first >= 0xf0 && first <= 0xf4) {
+      codepoint = first & 0x07;
+      minimum = 0x10000;
+      length = 4;
+    } else {
+      appendCodePoint(0xfffd);
+      ++i;
+      continue;
+    }
+
+    bool valid = i + length <= src.size();
+    for (size_t j = 1; valid && j < length; ++j) {
+      const auto continuation = static_cast<unsigned char>(src[i + j]);
+      if ((continuation & 0xc0) != 0x80) {
+        valid = false;
+      } else {
+        codepoint = (codepoint << 6) | (continuation & 0x3f);
+      }
+    }
+
+    if (!valid || codepoint < minimum || codepoint > 0x10ffff ||
+        (codepoint >= 0xd800 && codepoint <= 0xdfff)) {
+      appendCodePoint(0xfffd);
+      ++i;
+      continue;
+    }
+
+    appendCodePoint(codepoint);
+    i += length;
   }
   return out;
 }

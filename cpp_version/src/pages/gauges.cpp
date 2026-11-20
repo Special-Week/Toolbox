@@ -32,31 +32,6 @@ int indexOf(const std::vector<gauges::Option> &options, const std::string &value
     }
     return 0;
 }
-void copy(HWND owner, const std::wstring &text) {
-    // 只有 SetClipboardData 成功后才转移内存所有权，失败路径均释放内存。
-    struct Allocation {
-        HGLOBAL handle = nullptr;
-        ~Allocation() {
-            if (handle) {
-                GlobalFree(handle);
-            }
-        }
-    } allocation;
-    const auto bytes = (text.size() + 1) * sizeof(wchar_t);
-    allocation.handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    require(allocation.handle != nullptr, "无法分配剪贴板内存");
-    auto buffer = GlobalLock(allocation.handle);
-    require(buffer != nullptr, "无法写入剪贴板内存");
-    std::memcpy(buffer, text.c_str(), bytes);
-    GlobalUnlock(allocation.handle);
-    require(OpenClipboard(owner) != FALSE, "剪贴板正忙，请稍后重试");
-    struct Guard {
-        ~Guard() { CloseClipboard(); }
-    } guard;
-    require(EmptyClipboard() != FALSE, "无法清空剪贴板");
-    require(SetClipboardData(CF_UNICODETEXT, allocation.handle) != nullptr, "无法复制量规结果");
-    allocation.handle = nullptr;
-}
 float textWidth(Page &p, const std::string &text) {
     std::istringstream lines(text);
     std::string line;
@@ -124,6 +99,7 @@ void drawTable(Page &p, const gauges::Report &report, const gauges::Table &table
     }
     p.ui.clip = original;
     if (scrolling) {
+        p.note(L"提示：此表较宽，可使用下方滑块或左右按钮查看全部列。", Muted);
         p.ui.button({p.x, p.y, 28, 24}, L"‹", [owner = &p.app, key] {
             owner->state.choices[key] = std::max(0, owner->state.choices[key] - 160);
             owner->refresh();
@@ -135,7 +111,7 @@ void drawTable(Page &p, const gauges::Report &report, const gauges::Table &table
         const Rect track{p.x + 36, p.y + 6, p.w - 72, 12};
         float thumb = std::max(30.f, track.w * p.w / total), travel = track.w - thumb;
         p.ui.fill(track, Soft, 5);
-        p.ui.fill({track.x + travel * float(offset) / float(maximum), track.y, thumb, track.h}, Border, 5);
+        p.ui.fill({track.x + travel * float(offset) / float(maximum), track.y, thumb, track.h}, BorderStrong, 5);
         p.ui.hits.push_back(
             {track, original, [owner = &p.app, key, track, thumb, travel, maximum] {
                  if (travel > 0) {
@@ -188,6 +164,7 @@ void renderGauges(Page &p) {
     // 保存规范字段值，避免恢复时把旧下拉索引解释成另一种规格。
     for (const auto &entry : data.state)
         p.state.values[p.key("gauge.input." + entry.first)] = wide(entry.second);
+    p.beginSplit(0.40f);
     p.heading(L"计算参数");
     for (const auto &field : data.fields) {
         const auto key = p.key("gauge." + field.key);
@@ -205,35 +182,34 @@ void renderGauges(Page &p) {
             p.select("gauge." + field.key + ".select", wide(field.label), labels);
         } else {
             p.state.values[key] = wide(current);
-            p.ui.text({p.x, p.y, p.w, 24}, wide(field.label), 13, Muted);
-            p.y += 26;
-            float suggestionWidth = field.options.empty() ? 0 : std::min(180.f, p.w * .32f);
-            p.ui.input(key, {p.x, p.y, p.w - (suggestionWidth ? suggestionWidth + 8 : 0), 36}, wide(current));
+            p.ui.text({p.x, p.y, p.w, 22}, wide(field.label), 12.5f, Muted);
+            p.y += 24;
+            float suggestionWidth = field.options.empty() ? 0 : std::min(156.f, p.w * .36f);
+            p.ui.input(key, {p.x, p.y, p.w - (suggestionWidth ? suggestionWidth + 8 : 0), 34}, wide(current));
             if (suggestionWidth) {
                 std::vector<std::wstring> labels{L"常用规格"};
                 for (const auto &option : field.options) {
                     labels.push_back(wide(option.label));
                 }
                 p.state.choices[key + ".suggestion"] = 0;
-                p.ui.combo(key + ".suggestion", {p.x + p.w - suggestionWidth, p.y, suggestionWidth, 36},
+                p.ui.combo(key + ".suggestion", {p.x + p.w - suggestionWidth, p.y, suggestionWidth, 34},
                            labels, 0);
             }
-            p.y += 46;
+            p.y += 42;
         }
     }
+
+    p.rightColumn();
     if (!data.error.empty()) {
-        p.note(wide(data.error), Red);
+        p.error(wide(data.error));
+        p.endSplit();
     } else if (data.report) {
         const auto &report = *data.report;
         p.processSteps = report.process;
         p.heading(wide(report.title));
         auto text = wide(report.text(type));
-        p.button(L"复制完整结果", [owner = p.app.handle(), text] {
-            try {
-                copy(owner, text);
-            } catch (const std::exception &e) {
-                MessageBoxW(owner, wide(e.what()).c_str(), L"复制结果", MB_OK | MB_ICONINFORMATION);
-            }
+        p.button(L"复制完整结果", [owner = &p.app, text] {
+            owner->copyToClipboard(text, L"已复制量规完整结果");
         });
         if (!report.notes.empty()) {
             std::vector<std::wstring> notes;
@@ -252,13 +228,35 @@ void renderGauges(Page &p) {
                 const auto &m = report.metrics[i];
                 float left = p.w * .55f, h = m.second.display.find('\n') == std::string::npos ? 30.f : 46.f;
                 p.ui.text({p.x, p.y, left - 12, h}, wide(m.first), 12, Muted);
-                p.ui.text({p.x + left, p.y, p.w - left, h}, wide(m.second.display), 12.5f, Ink);
+                p.ui.text({p.x + left, p.y, p.w - left, h}, wide(m.second.display), 12.5f, Ink, false, false, false,
+                          true);
                 p.y += h + 4;
             }
         }
-        for (std::size_t i = 0; i < report.tables.size(); ++i) {
-            drawTable(p, report, report.tables[i], i);
+        p.endSplit();
+
+        // 宽结果表格统一 100% 全宽面板展示，自带横向滚动条，杜绝任何列裁切
+        if (!report.tables.empty()) {
+            auto panelFill = p.ui.draws.size();
+            const float panelTop = p.y;
+            const float outerX = p.x, outerW = p.w;
+            p.ui.fill({outerX, panelTop, outerW, 0}, White, 10);
+            p.ui.border({outerX, panelTop, outerW, 0}, Border, 10);
+            p.x = outerX + 18.f;
+            p.w = outerW - 36.f;
+            p.y = panelTop + 12.f;
+            for (std::size_t i = 0; i < report.tables.size(); ++i) {
+                drawTable(p, report, report.tables[i], i);
+            }
+            const float panelH = (p.y + 12.f) - panelTop;
+            p.ui.draws[panelFill].rect.h = panelH;
+            p.ui.draws[panelFill + 1].rect.h = panelH;
+            p.x = outerX;
+            p.w = outerW;
+            p.y = panelTop + panelH + 14.f;
         }
+    } else {
+        p.endSplit();
     }
 }
 void clearGaugeCache(const std::string &id) { gaugeCache.erase(id); }

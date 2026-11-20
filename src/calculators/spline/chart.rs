@@ -1,6 +1,6 @@
 //! 样条绘图与悬停取值；依据标签实际宽度调整留白和刻度数量，曲线裁剪到绘图区。
 use super::{Point, UniformCubicSpline};
-use crate::{BLUE, INK, MUTED, RED};
+use crate::{BLUE, RED, theme};
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Stroke, Vec2};
 
 use crate::calculators::axis::{Axis, draw_curve_cursor};
@@ -13,8 +13,9 @@ pub(super) fn draw_chart(
     minimum: f64,
     maximum: f64,
 ) -> Rect {
+    let p = theme::palette(ui.ctx());
     let width = ui.available_width().max(180.0);
-    let height = (width * 0.36).clamp(300.0, 400.0);
+    let height = (width * 0.36).clamp(280.0, 380.0);
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     let font = FontId::proportional(12.0);
@@ -30,7 +31,7 @@ pub(super) fn draw_chart(
     let y_axis = Axis::new("y", y_min, y_max, 6, true);
     let measure = |label: &str| {
         painter
-            .layout_no_wrap(label.to_owned(), font.clone(), MUTED)
+            .layout_no_wrap(label.to_owned(), font.clone(), p.muted)
             .size()
             .x
     };
@@ -69,11 +70,11 @@ pub(super) fn draw_chart(
             rect.bottom() - 54.0,
         ),
     );
-    painter.rect_filled(rect, 8, Color32::WHITE);
+    painter.rect_filled(rect, 10, p.surface);
     painter.rect_stroke(
         rect,
-        8,
-        Stroke::new(1.0_f32, Color32::from_rgb(223, 230, 239)),
+        10,
+        Stroke::new(1.0_f32, p.border),
         egui::StrokeKind::Inside,
     );
 
@@ -81,62 +82,62 @@ pub(super) fn draw_chart(
         let y = plot.bottom() - y_axis.tick_fraction(tick.value) as f32 * plot.height();
         painter.line_segment(
             [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            Stroke::new(1.0_f32, Color32::from_rgb(232, 237, 244)),
+            Stroke::new(1.0_f32, p.border.gamma_multiply(0.7)),
         );
         painter.line_segment(
             [egui::pos2(plot.left() - 4.0, y), egui::pos2(plot.left(), y)],
-            Stroke::new(1.0_f32, MUTED),
+            Stroke::new(1.0_f32, p.muted),
         );
         painter.text(
             egui::pos2(plot.left() - 10.0, y),
             Align2::RIGHT_CENTER,
             &tick.label,
             font.clone(),
-            MUTED,
+            p.muted,
         );
     }
     for tick in &x_axis.ticks {
         let x = plot.left() + x_axis.tick_fraction(tick.value) as f32 * plot.width();
         painter.line_segment(
             [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
-            Stroke::new(1.0_f32, Color32::from_rgb(239, 243, 248)),
+            Stroke::new(1.0_f32, p.border.gamma_multiply(0.5)),
         );
         painter.line_segment(
             [
                 egui::pos2(x, plot.bottom()),
                 egui::pos2(x, plot.bottom() + 4.0),
             ],
-            Stroke::new(1.0_f32, MUTED),
+            Stroke::new(1.0_f32, p.muted),
         );
         painter.text(
             egui::pos2(x, plot.bottom() + 10.0),
             Align2::CENTER_TOP,
             &tick.label,
             font.clone(),
-            MUTED,
+            p.muted,
         );
     }
     painter.line_segment(
         [plot.left_top(), plot.left_bottom()],
-        Stroke::new(1.2_f32, Color32::from_rgb(143, 158, 178)),
+        Stroke::new(1.2_f32, p.muted),
     );
     painter.line_segment(
         [plot.left_bottom(), plot.right_bottom()],
-        Stroke::new(1.2_f32, Color32::from_rgb(143, 158, 178)),
+        Stroke::new(1.2_f32, p.muted),
     );
     painter.text(
         egui::pos2(plot.left(), rect.top() + 19.0),
         Align2::LEFT_CENTER,
         &y_axis.caption,
         font.clone(),
-        INK,
+        p.ink,
     );
     painter.text(
         egui::pos2(plot.center().x, rect.bottom() - 14.0),
         Align2::CENTER_CENTER,
         &x_axis.caption,
         font.clone(),
-        INK,
+        p.ink,
     );
     let legend_x = plot.right() - 175.0;
     let legend_y = rect.top() + 20.0;
@@ -152,7 +153,7 @@ pub(super) fn draw_chart(
         Align2::LEFT_CENTER,
         "插值曲线",
         FontId::proportional(11.5),
-        INK,
+        p.ink,
     );
     painter.circle_filled(egui::pos2(plot.right() - 43.0, legend_y), 3.5, RED);
     painter.text(
@@ -160,7 +161,7 @@ pub(super) fn draw_chart(
         Align2::LEFT_CENTER,
         "Q 点",
         FontId::proportional(11.5),
-        INK,
+        p.ink,
     );
 
     let to_screen = |point: Point| {

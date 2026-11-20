@@ -2,7 +2,7 @@
 import type { Catalog, Field, Section, State, Tool, Budget } from "./types";
 import { decimal } from "./format";
 const samples = ["10.02", "10.01", "10.03", "10.02", "10.01"];
-export const fitPoints = [
+const fitPoints = [
   ["0", "0.197"],
   ["5", "0.208"],
   ["10", "0.231"],
@@ -10,7 +10,7 @@ export const fitPoints = [
   ["40", "0.338"],
   ["60", "0.439"],
 ];
-export const splinePoints = [
+const splinePoints = [
   ["250", "2002"],
   ["550", "6531"],
   ["850", "12285"],

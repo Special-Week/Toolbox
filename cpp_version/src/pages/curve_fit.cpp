@@ -78,32 +78,6 @@ std::wstring report(const CurveFit &fit, const DataPoints &points, const std::ws
     return text;
 }
 
-void copyText(HWND owner, const std::wstring &text) {
-    // 剪贴板成功接管内存后置空句柄；任一失败路径均自动释放内存并关闭剪贴板。
-    struct Allocation {
-        HGLOBAL memory = nullptr;
-        ~Allocation() {
-            if (memory) {
-                GlobalFree(memory);
-            }
-        }
-    } allocation;
-    std::size_t bytes = (text.size() + 1) * sizeof(wchar_t);
-    allocation.memory = GlobalAlloc(GMEM_MOVEABLE, bytes);
-    require(allocation.memory != nullptr, "无法分配剪贴板内存");
-    void *buffer = GlobalLock(allocation.memory);
-    require(buffer != nullptr, "无法写入剪贴板内存");
-    std::memcpy(buffer, text.c_str(), bytes);
-    GlobalUnlock(allocation.memory);
-    require(OpenClipboard(owner) != FALSE, "剪贴板正忙，请稍后重试");
-    struct ClipboardGuard {
-        ~ClipboardGuard() { CloseClipboard(); }
-    } guard;
-    require(EmptyClipboard() != FALSE, "无法清空剪贴板");
-    require(SetClipboardData(CF_UNICODETEXT, allocation.memory) != nullptr, "无法复制拟合结果");
-    allocation.memory = nullptr;
-}
-
 std::pair<std::size_t, std::size_t> pageRange(Page &p, const std::string &field, std::size_t count) {
     if (count <= rowsPerPage) {
         return {0, count};
@@ -212,6 +186,7 @@ void resultRows(Page &p, const CurveFit &fit, const DataPoints &points) {
 } // 命名空间
 
 void renderCurveFit(Page &p) {
+    p.beginSplit(0.46f);
     p.heading(L"拟合设置与校准数据");
     auto kind = CurveFitKind(p.select(
         "model", L"拟合模型", {L"一次（含常数项）", L"一次（过原点）", L"二次多项式", L"三次多项式"}));
@@ -228,22 +203,25 @@ void renderCurveFit(Page &p) {
     int count = p.count("points", L"校准数据", 6, 2, int(CurveFit::maximumPoints));
     p.note(L"每行一组 x、y，各列单位保持一致。");
     auto points = inputPoints(p, std::size_t(count), xLabel, yLabel);
+    p.rightColumn();
     p.check();
     CurveFit fit(points, kind);
 
-    p.y += 12;
+    p.y += 4;
     const std::wstring fittedEquation = equation(fit, false);
     float innerWidth = p.w - 28;
-    float equationHeight = p.app.paragraphHeight(fittedEquation, innerWidth, 17);
-    float cardHeight = 14 + 36 + 8 + equationHeight + 14;
-    p.ui.fill({p.x, p.y, p.w, cardHeight}, Soft, 7);
-    p.ui.text({p.x + 14, p.y + 14, 90, 34}, L"拟合方程", 14, Ink, true);
-    p.ui.button({p.x + 116, p.y + 14, 124, 34}, L"复制拟合结果",
+    float equationHeight = p.app.paragraphHeight(fittedEquation, innerWidth, 16);
+    float cardHeight = 14 + 34 + 8 + equationHeight + 14;
+    p.ui.fill({p.x, p.y, p.w, cardHeight}, Soft, 9);
+    p.ui.border({p.x, p.y, p.w, cardHeight}, Border, 9);
+    p.ui.text({p.x + 14, p.y + 14, 90, 32}, L"拟合方程", 14, Ink, true);
+    p.ui.button({p.x + 110, p.y + 13, 124, 32}, L"复制拟合结果",
                 [owner = &p.app, text = report(fit, points, xLabel, yLabel, p.tool)] {
-                    copyText(owner->handle(), text);
+                    owner->copyToClipboard(text, L"已复制校准曲线拟合结果");
                 });
-    p.ui.text({p.x + 14, p.y + 58, innerWidth, equationHeight}, fittedEquation, 17, Blue, false, false, true);
-    p.y += cardHeight + 12;
+    p.ui.text({p.x + 14, p.y + 54, innerWidth, equationHeight}, fittedEquation, 15.5f, Blue, true, false, true,
+              true);
+    p.y += cardHeight + 10;
     const wchar_t *coefficientNames[] = {L"K0（常数项）", L"K1（一次项）", L"K2（二次项）", L"K3（三次项）"};
     Metrics coefficients;
     for (std::size_t power = fit.coefficients.size(); power-- > 0;) {
@@ -260,6 +238,7 @@ void renderCurveFit(Page &p) {
     if (!fit.residualSd) {
         p.note(L"无剩余自由度，残差标准差不计算。");
     }
+    p.endSplit();
     p.heading(L"校准曲线");
     drawCurveFitChart(p, fit, points, xLabel, yLabel, false);
     if (p.collapse("residual.chart", L"残差图")) {

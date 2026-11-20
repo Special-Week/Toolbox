@@ -15,7 +15,7 @@ const USBBL: f64 = 42.0 * USGAL;
 const UKBBL: f64 = 35.0 * UKGAL;
 const CAL: f64 = 4.1868;
 const KCAL: f64 = CAL * 1000.0;
-const BTU: f64 = 1055.055_852_62;
+const BTU: f64 = 1_055.055_852_62;
 const METRIC_HP: f64 = 75.0 * G0;
 const UK_HP: f64 = 550.0 * FT * LBF;
 

@@ -2,9 +2,11 @@
 
 **Toolbox** 的 Windows 桌面版，使用 C++17、Win32、Direct2D 和 DirectWrite，提供 **7 个分类、50 个工具**。支持窗口缩放和分类折叠，采用系统字体与 DPI 适配。
 
-当前版本：**v2026.11.15**。
+当前版本：**v2026.11.20**。
 
 完整功能清单和通用计算约定见 [主项目 README](../README.md#功能分类)。本目录可独立构建。
+
+工具首页支持按名称、分类和简介搜索，并可叠加分类筛选。
 
 ## 构建与运行
 
@@ -18,7 +20,7 @@
 .\build.cmd
 ```
 
-生成 `dist/x64/Toolbox_cpp_x64_v2026.11.15.exe`。
+生成 `dist/x64/Toolbox_cpp_x64_v2026.11.20.exe`。
 
 ### 32 位
 
@@ -28,7 +30,7 @@
 .\build.cmd x86
 ```
 
-生成 `dist/x86/Toolbox_cpp_x86_v2026.11.15.exe`。
+生成 `dist/x86/Toolbox_cpp_x86_v2026.11.20.exe`。
 
 Windows 7 SP1 32 位构建方案使用 **GCC 8.1.0、POSIX/DWARF/MSVCRT** 工具链，处理器须支持 SSE2；尚未完成 Win7 真机验证。任意新版 mingw32 不保证 Win7 兼容。
 

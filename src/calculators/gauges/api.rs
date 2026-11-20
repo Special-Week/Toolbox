@@ -139,13 +139,12 @@ impl Form {
                         self.state["tpi"] = json!(tpi.to_string());
                     }
                 }
-                if changed == "series" {
-                    if let Some((_, tpi)) = variants
+                if changed == "series"
+                    && let Some((_, tpi)) = variants
                         .iter()
                         .find(|(s, _)| Some(s.as_str()) == self.state["series"].as_str())
-                    {
-                        self.state["tpi"] = json!(tpi.to_string());
-                    }
+                {
+                    self.state["tpi"] = json!(tpi.to_string());
                 }
                 let mut tpis: Vec<_> = variants.iter().map(|(_, p)| *p).collect();
                 tpis.sort_by(|a, b| b.total_cmp(a));

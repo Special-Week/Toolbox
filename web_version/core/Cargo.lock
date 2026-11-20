@@ -123,7 +123,7 @@ dependencies = [
 
 [[package]]
 name = "toolbox-web-core"
-version = "2026.11.15"
+version = "2026.11.20"
 dependencies = [
  "serde",
  "serde_json",

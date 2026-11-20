@@ -29,6 +29,7 @@ pub(crate) struct ElectricalSelection {
 }
 /// 压力允差先折算成电信号，两分量按均匀分布合成，并使用 k=2 扩展。
 /// reading 是读数百分数，fixed 与 output 使用相同信号单位；限值采用严格小于。
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn transmitter(
     dut: Range,
     reference: Range,

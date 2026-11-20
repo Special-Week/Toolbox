@@ -567,6 +567,9 @@ sptr<Box> MatrixAtom::createBox(Environment& e) {
           j = cols;
         }
           break;
+
+        default:
+          break;
       }
     }
 

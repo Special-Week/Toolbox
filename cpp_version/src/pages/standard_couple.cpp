@@ -68,6 +68,8 @@ static void standardReferenceProcess(Page &p, const StandardCouple &model, doubl
     p.processSteps.push_back(L"校准偏差 δ(t) = " + p.processValue(correction) + L" mV；校准电势 = 参考电势 + 偏差 = " + p.processValue(thermoEmf(model.kind, t)) + L" + " + p.processValue(correction) + L" = " + p.processValue(model.emf(t)) + L" mV。");
 }
 void standardCouplePage(Page &p) {
+    p.beginSplit(0.46f);
+    p.heading(L"校准与换算参数");
     const auto calibrationStart = p.ui.controls.size();
     int type = p.select("type", L"分度号", {L"S 型", L"B 型"}),
         mode = p.select("calibration", L"校准方式", {L"固定点实测热电势", L"温区多项式系数"});
@@ -137,6 +139,7 @@ void standardCouplePage(Page &p) {
                             direction == 0 ? unit.display(dt) : model.emf(dt));
     double cold = unit.celsius(p.number("cold." + std::to_string(unit.index),
                                         L"参考端温度 (" + unit.symbol() + L")", unit.display(0)));
+    p.rightColumn();
     p.check();
     double ce = model.emf(cold), t = direction == 0 ? unit.celsius(input) : model.temperature(input + ce),
            e = direction == 0 ? model.emf(t) - ce : input;
@@ -147,6 +150,7 @@ void standardCouplePage(Page &p) {
                             {L"测得热电势", format(e) + L" mV"},
                             {L"微分热电势 dE/dt", format(slope / unit.span()) + L" mV/" + unit.symbol()},
                             {L"参考端电势", format(ce) + L" mV"}});
+    p.endSplit();
     standardReferenceProcess(p, model, t, L"热端");
     p.processSteps.push_back(L"");
     standardReferenceProcess(p, model, cold, L"参考端");

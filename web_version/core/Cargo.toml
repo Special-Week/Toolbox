@@ -1,6 +1,6 @@
 [package]
 name = "toolbox-web-core"
-version = "2026.11.15"
+version = "2026.11.20"
 edition = "2024"
 license = "MIT"
 

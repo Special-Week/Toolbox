@@ -154,6 +154,8 @@ static void showDetails(Page &p, const std::vector<UncertaintyDetail> &items, in
     }
 }
 static void uncertainty(Page &p) {
+    p.beginSplit(0.54f);
+    p.heading(L"不确定度参数与分量");
     if (p.select("budget.mode", L"评定方式", {L"分量预算表", L"A/B 类快速评定"}) == 1) {
         int bn = p.count("quick.b.count", L"B 类分量", 2, 0, 50);
         int distribution = p.select("quick.distribution", L"B 类共用分布", distributions);
@@ -188,6 +190,7 @@ static void uncertainty(Page &p) {
         int digits =
             p.select("quick.result.digits", L"合成有效数字", {L"1 位", L"2 位", L"3 位", L"4 位"}, 1) + 1;
         bool carry = p.select("quick.result.rounding", L"合成修约方式", {L"四舍六入", L"进位"}, 1) == 1;
+        p.rightColumn();
         p.check();
         require(an + bn > 0, "至少需要一组 A 类数据或一个 B 类分量");
         require(k > 0, "包含因子须大于 0");
@@ -249,6 +252,7 @@ static void uncertainty(Page &p) {
     double k = p.number("budget.k", L"包含因子 k", 2);
     int digits = p.select("budget.digits", L"合成结果有效数字", {L"1 位", L"2 位", L"3 位", L"4 位"}, 1) + 1;
     bool carry = p.select("budget.round_v2", L"合成结果修约方式", {L"四舍六入", L"进位"}, 1) == 1;
+    p.rightColumn();
     p.check();
     require(k > 0, "包含因子须大于 0");
     Values contributions;
@@ -280,16 +284,14 @@ void renderErrors(Page &p) {
         return;
     }
     if (p.tool.kind == Kind::Repeatability) {
+        p.beginSplit(0.42f);
+        p.heading(L"重复测量数据");
         int n = p.count("sample.count", L"测量值", 5, 2, 50);
         auto v = p.values("sample", L"测量值", n, sampleDefaults);
+        p.rightColumn();
         p.check();
         auto s = statistics(v);
         finite({s.maximum - s.minimum});
-        if (p.collapse("residual", L"各项残差")) {
-            for (int i = 0; i < n; ++i) {
-                p.note(L"测量 " + std::to_wstring(i + 1) + L"：" + format(s.residuals[i]));
-            }
-        }
         double rsd = s.mean == 0 ? 0 : s.sd / std::abs(s.mean) * 100;
         finite({rsd});
         p.metrics(L"统计结果", {{L"测量次数", std::to_wstring(n)},
@@ -298,6 +300,12 @@ void renderErrors(Page &p) {
                                 {L"极差", format(s.maximum - s.minimum)},
                                 {L"平均值标准差 s/√n", format(s.standardError)},
                                 {L"相对标准偏差", s.mean == 0 ? L"平均值为 0" : format(rsd) + L" %"}});
+        if (p.collapse("residual", L"各项残差")) {
+            for (int i = 0; i < n; ++i) {
+                p.note(L"测量 " + std::to_wstring(i + 1) + L"：" + format(s.residuals[i]));
+            }
+        }
+        p.endSplit();
         sampleProcess(p, v, s, true);
         p.processSteps.push_back(L"");
         p.processSteps.push_back(L"极差 R = 最大值 − 最小值 = " + inputNumber(s.maximum) + L" − " + inputNumber(s.minimum) + L" = " + p.processValue(s.maximum - s.minimum) + L"；平均值标准差 = s/√n = " + p.processValue(s.sd) + L" / √" + std::to_wstring(n) + L" = " + p.processValue(s.standardError) + L"。");
@@ -305,11 +313,14 @@ void renderErrors(Page &p) {
         return;
     }
     if (p.tool.kind == Kind::RangeMethod) {
+        p.beginSplit(0.42f);
+        p.heading(L"极差法参数");
         int mode = p.select("method", L"输入方式", {L"逐项测量值", L"最大值、最小值与测量次数"}),
             n = p.count("count", L"测量次数", 5, 2, 9);
         double lo, hi;
         if (mode == 0) {
             auto values = p.values("sample", L"测量值", n, sampleDefaults);
+            p.rightColumn();
             p.check();
             auto bounds = std::minmax_element(values.begin(), values.end());
             lo = *bounds.first;
@@ -317,6 +328,7 @@ void renderErrors(Page &p) {
         } else {
             hi = p.number("max", L"最大值", 10.03);
             lo = p.number("min", L"最小值", 10.01);
+            p.rightColumn();
             p.check();
             require(hi >= lo, "最大值不能小于最小值");
         }
@@ -327,15 +339,19 @@ void renderErrors(Page &p) {
                                   {L"极差系数 d₂", format(coefficient)},
                                   {L"重复性标准差 s ≈ R/d₂", format(sd)},
                                   {L"平均值标准差 s/√n", format(sd / std::sqrt(double(n)))}});
+        p.endSplit();
         p.processSteps.push_back(L"极差 R = 最大值 − 最小值 = " + inputNumber(hi) + L" − " + inputNumber(lo) + L" = " + p.processValue(range) + L"。");
         p.processSteps.push_back(L"测量次数 n = " + std::to_wstring(n) + L"，查极差系数 d₂ = " + inputNumber(coefficient) + L"；s = R/d₂ = " + p.processValue(range) + L" / " + inputNumber(coefficient) + L" = " + p.processValue(sd) + L"。");
         p.processSteps.push_back(L"平均值标准差 = s/√n = " + p.processValue(sd) + L" / √" + std::to_wstring(n) + L" = " + p.processValue(sd / std::sqrt(double(n))) + L"。");
         return;
     }
     if (p.tool.kind == Kind::ErrorAnalysis) {
+        p.beginSplit(0.42f);
+        p.heading(L"测量值与真值");
         double measured = p.number("measured", L"测量值 x", 100.02),
                truth = p.number("truth", L"真值 x₀", 100);
         auto reference = p.textInput("reference", L"引用值（选填）", L"");
+        p.rightColumn();
         p.check();
         double ref = reference.empty() ? truth : parse(utf8(reference)), delta = measured - truth;
         finite({delta});
@@ -351,6 +367,7 @@ void renderErrors(Page &p) {
                                 {L"相对误差 δ", percent(truth)},
                                 {L"引用误差 γ", percent(ref)},
                                 {L"绝对值", format(std::abs(delta))}});
+        p.endSplit();
         p.processSteps.push_back(L"绝对误差 Δ = 测量值 − 真值 = " + inputNumber(measured) + L" − " + inputNumber(truth) + L" = " + p.processValue(delta) + L"；误差绝对值 |Δ| = " + p.processValue(std::abs(delta)) + L"。");
         p.processSteps.push_back(L"");
         p.processSteps.push_back(truth == 0 ? L"真值为 0，相对误差无定义。" : L"相对误差 = Δ/真值 × 100 = " + p.processValue(delta) + L" / " + inputNumber(truth) + L" × 100 = " + p.processValue(delta / truth * 100) + L"%。");
@@ -358,6 +375,8 @@ void renderErrors(Page &p) {
         p.processSteps.push_back(baseDescription + (ref == 0 ? L"引用值为 0，引用误差无定义。" : std::wstring(L"引用误差 = Δ/引用值 × 100 = ") + p.processValue(delta) + L" / " + inputNumber(ref) + L" × 100 = " + p.processValue(delta / ref * 100) + L"%。"));
         return;
     }
+    p.beginSplit(0.46f);
+    p.heading(L"误差分量参数");
     int mode = p.select("mode", L"分量输入", {L"同单位误差分量", L"压力分量（相对 / 绝对误差）"});
     Values contributions;
     std::wstring symbol;
@@ -424,6 +443,7 @@ void renderErrors(Page &p) {
                 : L"统一单位：" + p.processValue(absoluteError) + L" " + names[source] + L" × (" + inputNumber(list[source].factor) + L" / " + inputNumber(list[target].factor) + L") = " + p.processValue(contributions.back()) + L" " + names[target] + L"。");
         }
     }
+    p.rightColumn();
     double combined = rss(contributions), linear = 0, largest = 0;
     for (double c : contributions) {
         linear += std::abs(c);
@@ -437,6 +457,7 @@ void renderErrors(Page &p) {
                        {{L"最坏情况界限（绝对值求和）", format(linear)}, {L"最大单项贡献", format(largest)}});
     }
     p.metrics(L"合成结果", metrics);
+    p.endSplit();
     p.processSteps.push_back(L"");
     p.processSteps.push_back(L"合成误差 = √Σqᵢ² = " + p.processValue(combined) + symbol + L"；程序使用 hypot 累加。");
     if (mode == 0)

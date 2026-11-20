@@ -1,7 +1,8 @@
-//! 表单、结果卡片、错误提示及普通小数格式化的共用实现。
+//! 表单、结果卡片、分段选择器、双栏工作台、错误提示及普通小数格式化的共用实现。
 use crate::catalog::ToolKind;
-use crate::{BLUE, BLUE_SOFT, INK, MUTED, RED};
-use eframe::egui::{self, Color32, RichText, TextEdit};
+use crate::theme;
+use eframe::egui::{self, Align2, CornerRadius, FontId, RichText, Sense, Stroke, TextEdit, Vec2};
+use egui_phosphor::regular as icons;
 
 pub(crate) type Results = Result<Vec<(&'static str, String)>, String>;
 
@@ -9,12 +10,145 @@ pub(crate) fn panel<R>(
     ui: &mut egui::Ui,
     contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> egui::InnerResponse<R> {
+    let p = theme::palette(ui.ctx());
     egui::Frame::new()
-        .fill(Color32::WHITE)
-        .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(220, 229, 241)))
-        .corner_radius(8)
+        .fill(p.surface)
+        .stroke(Stroke::new(1.0_f32, p.border))
+        .corner_radius(CornerRadius::same(12))
         .inner_margin(16)
         .show(ui, contents)
+}
+
+/// 宽屏自适应双栏工作台（左输右显），窄屏自动回退为上下单栏。
+/// 严格限制左右两栏的 max_width，防止宽表或长控件向右撑出视口导致裁切。
+pub(crate) fn split_workspace<S, L, R>(
+    ui: &mut egui::Ui,
+    left_ratio: f32,
+    state: &mut S,
+    left: impl FnOnce(&mut egui::Ui, &mut S) -> L,
+    right: impl FnOnce(&mut egui::Ui, &mut S, L) -> R,
+) -> R {
+    let width = ui.available_width();
+    if width >= 900.0 {
+        let gap = 16.0;
+        let left_width = ((width - gap) * left_ratio).clamp(360.0, 560.0);
+        let right_width = (width - gap - left_width).max(320.0);
+        let mut right_out = None;
+        ui.horizontal_top(|ui| {
+            ui.set_max_width(width);
+            ui.spacing_mut().item_spacing.x = gap;
+            let left_out = ui
+                .allocate_ui_with_layout(
+                    Vec2::new(left_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_width(left_width);
+                        ui.set_max_width(left_width);
+                        left(ui, state)
+                    },
+                )
+                .inner;
+            right_out = Some(
+                ui.allocate_ui_with_layout(
+                    Vec2::new(right_width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_min_width(right_width);
+                        ui.set_max_width(right_width);
+                        right(ui, state, left_out)
+                    },
+                )
+                .inner,
+            );
+        });
+        right_out.unwrap()
+    } else {
+        ui.set_max_width(width);
+        let left_out = left(ui, state);
+        ui.add_space(12.0);
+        right(ui, state, left_out)
+    }
+}
+
+/// 现代胶囊分段选择器：固定单行精确均分槽宽，缩放窗口零闪烁、绝不折行。
+pub(crate) fn segmented_control(
+    ui: &mut egui::Ui,
+    options: &[&str],
+    selected: usize,
+) -> usize {
+    let p = theme::palette(ui.ctx());
+    let mut next = selected.min(options.len().saturating_sub(1));
+    let total_w = ui.available_width().max(80.0);
+    let (outer_rect, _) = ui.allocate_exact_size(Vec2::new(total_w, 36.0), Sense::hover());
+
+    let painter = ui.painter();
+    painter.rect_filled(outer_rect, CornerRadius::same(9), p.surface_subtle);
+    painter.rect_stroke(
+        outer_rect,
+        CornerRadius::same(9),
+        Stroke::new(1.0_f32, p.border),
+        egui::StrokeKind::Inside,
+    );
+
+    let count = options.len().max(1);
+    let inner = outer_rect.shrink(3.0);
+    let gap = 3.0_f32;
+    let seg_w = ((inner.width() - gap * (count - 1) as f32) / count as f32).max(1.0);
+    let seg_h = inner.height().max(1.0);
+
+    for (index, label) in options.iter().enumerate() {
+        let left = inner.left() + index as f32 * (seg_w + gap);
+        let seg_rect = egui::Rect::from_min_size(egui::pos2(left, inner.top()), Vec2::new(seg_w, seg_h));
+        let seg_id = ui.id().with(("segmented_opt", index));
+        let response = ui
+            .interact(seg_rect, seg_id, Sense::click())
+            .on_hover_cursor(egui::CursorIcon::PointingHand);
+        let is_active = index == next;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::WidgetType::SelectableLabel,
+                ui.is_enabled(),
+                is_active,
+                *label,
+            )
+        });
+        if response.clicked() {
+            next = index;
+        }
+
+        let is_active = index == next;
+        if is_active {
+            painter.rect_filled(seg_rect, CornerRadius::same(7), p.surface);
+            painter.rect_stroke(
+                seg_rect,
+                CornerRadius::same(7),
+                Stroke::new(1.0_f32, p.accent_border),
+                egui::StrokeKind::Inside,
+            );
+        } else if response.hovered() {
+            painter.rect_filled(seg_rect, CornerRadius::same(7), p.surface_hover);
+        }
+
+        let text_color = if is_active { p.accent } else { p.ink_secondary };
+        let galley = egui::WidgetText::from(
+            RichText::new(*label)
+                .size(12.5)
+                .strong()
+                .color(text_color),
+        )
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Truncate),
+            (seg_rect.width() - 8.0).max(1.0),
+            egui::TextStyle::Body,
+        );
+        let text_pos = egui::pos2(
+            seg_rect.center().x - galley.size().x * 0.5,
+            seg_rect.center().y - galley.size().y * 0.5,
+        );
+        painter.galley(text_pos, galley, text_color);
+    }
+    next
 }
 
 /// 保持已有卡片的列位置，新增卡片放入当前较短的一列。
@@ -59,17 +193,26 @@ pub(crate) fn form_row<R>(
     label: &str,
     contents: impl FnOnce(&mut egui::Ui) -> R,
 ) -> R {
-    if ui.available_width() < 720.0 {
+    let p = theme::palette(ui.ctx());
+    if ui.available_width() < 340.0 {
         ui.vertical(|ui| {
-            ui.label(RichText::new(label).size(12.0).color(MUTED));
+            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.label(RichText::new(label).size(12.0).color(p.muted));
             contents(ui)
         })
         .inner
     } else {
         ui.horizontal(|ui| {
+            let label_width = if ui.available_width() < 460.0 {
+                132.0
+            } else if ui.available_width() < 680.0 {
+                156.0
+            } else {
+                186.0
+            };
             ui.add_sized(
-                [186.0, 36.0],
-                egui::Label::new(RichText::new(label).size(12.0).color(MUTED)),
+                [label_width, 36.0],
+                egui::Label::new(RichText::new(label).size(12.5).color(p.muted)).wrap(),
             );
             contents(ui)
         })
@@ -83,6 +226,7 @@ pub(crate) fn text_input(
     width: f32,
     hint: &str,
 ) -> egui::Response {
+    let p = theme::palette(ui.ctx());
     let background = ui.painter().add(egui::Shape::Noop);
     let response = ui.add_sized(
         [width, 36.0],
@@ -96,17 +240,19 @@ pub(crate) fn text_input(
     let rect = response.rect.expand2(egui::vec2(10.0, 8.0));
     ui.painter().set(
         background,
-        egui::Shape::rect_filled(rect, 6, Color32::from_rgb(250, 252, 255)),
+        egui::Shape::rect_filled(rect, CornerRadius::same(8), p.input_bg),
     );
     ui.painter().rect_stroke(
         rect,
-        6,
-        egui::Stroke::new(
-            1.0_f32,
+        CornerRadius::same(8),
+        Stroke::new(
+            if response.has_focus() { 1.5_f32 } else { 1.0_f32 },
             if response.has_focus() {
-                BLUE
+                p.accent
+            } else if response.hovered() {
+                p.accent_border
             } else {
-                Color32::from_rgb(150, 168, 192)
+                p.border_strong
             },
         ),
         egui::StrokeKind::Inside,
@@ -310,52 +456,123 @@ pub(crate) fn show_result_or_error(ui: &mut egui::Ui, title: &str, result: Resul
 }
 
 pub(crate) fn render_metrics(ui: &mut egui::Ui, title: &str, metrics: &[(&str, String)]) {
-    ui.add_space(14.0);
-    ui.label(RichText::new(title).size(14.0).strong().color(INK));
-    ui.add_space(7.0);
+    let p = theme::palette(ui.ctx());
+    ui.add_space(12.0);
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(title).size(14.0).strong().color(p.ink));
+        ui.label(
+            RichText::new("点击卡片可复制数值")
+                .size(11.0)
+                .color(p.muted),
+        );
+    });
+    ui.add_space(8.0);
     let width = ui.available_width();
-    let columns = if width > 830.0 {
+    let columns = if width > 800.0 {
         3
-    } else if width > 510.0 {
+    } else if width > 460.0 {
         2
     } else {
         1
     };
+    let mut copied: Option<String> = None;
     for row in metrics.chunks(columns) {
         ui.columns(columns, |cols| {
             for (index, (label, value)) in row.iter().enumerate() {
-                egui::Frame::new()
-                    .fill(Color32::from_rgb(247, 250, 255))
-                    .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(220, 229, 241)))
-                    .corner_radius(8)
-                    .inner_margin(10)
-                    .show(&mut cols[index], |ui| {
-                        ui.set_min_width(ui.available_width());
-                        ui.set_min_height(66.0);
-                        ui.label(RichText::new(*label).size(11.5).color(MUTED));
-                        ui.add_space(2.0);
-                        ui.label(
-                            RichText::new(value.as_str())
-                                .size(15.5)
-                                .strong()
-                                .color(BLUE),
+                let is_primary = index == 0 && std::ptr::eq(row.as_ptr(), metrics.as_ptr());
+                let card_ui = &mut cols[index];
+                let card_w = card_ui.available_width();
+                let resp = egui::Frame::new()
+                    .fill(if is_primary {
+                        p.accent_soft
+                    } else {
+                        p.surface_subtle
+                    })
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        if is_primary { p.accent_border } else { p.border },
+                    ))
+                    .corner_radius(CornerRadius::same(10))
+                    .inner_margin(egui::Margin {
+                        left: 14,
+                        right: 12,
+                        top: 10,
+                        bottom: 10,
+                    })
+                    .show(card_ui, |ui| {
+                        ui.spacing_mut().item_spacing.y = 4.0;
+                        ui.set_min_width((card_w - 26.0).max(60.0));
+                        ui.set_min_height(56.0);
+                        ui.label(RichText::new(*label).size(11.5).color(p.muted));
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(value.as_str())
+                                    .font(FontId::monospace(if is_primary { 16.5 } else { 15.0 }))
+                                    .strong()
+                                    .color(if is_primary { p.accent } else { p.ink }),
+                            )
+                            .wrap(),
                         );
                     });
+                let rect = resp.response.rect;
+                // 左侧强调竖条
+                if is_primary {
+                    card_ui.painter().rect_filled(
+                        egui::Rect::from_min_size(
+                            egui::pos2(rect.left() + 1.0, rect.top() + 8.0),
+                            Vec2::new(3.0, (rect.height() - 16.0).max(8.0)),
+                        ),
+                        CornerRadius::same(2),
+                        p.accent,
+                    );
+                }
+                let click = card_ui
+                    .interact(
+                        rect,
+                        card_ui.id().with(("metric_copy", *label, index)),
+                        Sense::click(),
+                    )
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .on_hover_text("点击复制该结果");
+                if click.hovered() {
+                    card_ui.painter().rect_stroke(
+                        rect,
+                        CornerRadius::same(10),
+                        Stroke::new(1.2_f32, p.accent),
+                        egui::StrokeKind::Inside,
+                    );
+                    card_ui.painter().text(
+                        egui::pos2(rect.right() - 12.0, rect.top() + 14.0),
+                        Align2::CENTER_CENTER,
+                        icons::COPY,
+                        FontId::proportional(13.0),
+                        p.accent,
+                    );
+                }
+                if click.clicked() {
+                    copied = Some(value.clone());
+                }
             }
         });
-        ui.add_space(4.0);
+        ui.add_space(6.0);
+    }
+    if let Some(val) = copied {
+        ui.ctx().copy_text(val.clone());
+        theme::toast_success(ui.ctx(), format!("已复制：{val}"));
     }
 }
 
 pub(crate) fn render_error_message(ui: &mut egui::Ui, message: &str) {
-    ui.add_space(11.0);
+    let p = theme::palette(ui.ctx());
+    ui.add_space(10.0);
     egui::Frame::new()
-        .fill(Color32::from_rgb(255, 244, 243))
-        .stroke(egui::Stroke::new(1.0_f32, Color32::from_rgb(242, 205, 202)))
-        .corner_radius(8)
-        .inner_margin(10)
+        .fill(p.danger_soft)
+        .stroke(Stroke::new(1.0_f32, p.danger_border))
+        .corner_radius(CornerRadius::same(10))
+        .inner_margin(12)
         .show(ui, |ui| {
-            ui.add(egui::Label::new(RichText::new(format!("⚠ {message}")).color(RED)).wrap());
+            ui.set_width(ui.available_width());
+            ui.add(egui::Label::new(RichText::new(format!("⚠ {message}")).color(p.danger)).wrap());
         });
 }
 
@@ -369,14 +586,16 @@ pub(crate) fn collapsible_note(
     title: &str,
     contents: impl FnOnce(&mut egui::Ui),
 ) {
+    let p = theme::palette(ui.ctx());
     egui::Frame::new()
-        .fill(BLUE_SOFT)
-        .corner_radius(8)
-        .inner_margin(18)
+        .fill(p.accent_soft)
+        .stroke(Stroke::new(1.0_f32, p.accent_border))
+        .corner_radius(CornerRadius::same(12))
+        .inner_margin(16)
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.spacing_mut().item_spacing.y = 8.0;
-            egui::CollapsingHeader::new(RichText::new(title).size(14.0).strong().color(BLUE))
+            egui::CollapsingHeader::new(RichText::new(title).size(14.0).strong().color(p.accent))
                 .id_salt(id)
                 .default_open(false)
                 .show(ui, contents);
@@ -437,10 +656,10 @@ fn process_display_line(
     }
     let mut candidate = results.clone();
     for (i, part) in line.split('\u{2063}').enumerate() {
-        if i % 2 == 1 {
-            if let Ok(value) = part.parse::<f64>() {
-                candidate.insert(part.to_owned(), format_process_result(value));
-            }
+        if i % 2 == 1
+            && let Ok(value) = part.parse::<f64>()
+        {
+            candidate.insert(part.to_owned(), format_process_result(value));
         }
     }
     // 只保留有相消风险的操作数；同一行的其他结果仍按显示规则整理。
@@ -495,6 +714,7 @@ pub(crate) fn process_lines_for_test(lines: &[String], full_precision: bool) -> 
 
 /// 计算说明与公式一起展开，切换模型时保留展开状态。
 pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
+    let p = theme::palette(ui.ctx());
     let (summary, formula) = super::explanations::selected(kind, mode);
     if summary.is_empty() && formula.is_empty() {
         return;
@@ -509,14 +729,14 @@ pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
                 RichText::new("详细公式与取值")
                     .size(12.0)
                     .strong()
-                    .color(INK),
+                    .color(p.ink),
             );
             note_paragraph(ui, &formula);
             if matches!(kind, ToolKind::Uncertainty) {
                 ui.add(egui::Label::new(RichText::new("贝塞尔法先用全部测量值计算样本标准差 s，再按 u=s/√n 计算；取测量次数 n 留空时默认为 1。")
-                    .size(12.0).color(INK)).wrap());
+                    .size(12.0).color(p.ink)).wrap());
                 ui.add(egui::Label::new(RichText::new("分量填写有效数字后先按所选方式修约，再乘灵敏系数参与合成；留空保留原始计算精度。四舍六入按五成双处理。")
-                    .size(12.0).color(INK)).wrap());
+                    .size(12.0).color(p.ink)).wrap());
                 if mode == 1 {
                     ui.add(
                         egui::Label::new(
@@ -524,7 +744,7 @@ pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
                                 "合成结果按 uc 和 U 较大值确定修约位数；修约后 U=k×修约后的 uc。",
                             )
                             .size(12.0)
-                            .color(INK),
+                            .color(p.ink),
                         )
                         .wrap(),
                     );
@@ -535,6 +755,7 @@ pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
 }
 
 fn note_paragraph(ui: &mut egui::Ui, text: &str) {
+    let p = theme::palette(ui.ctx());
     if text
         .lines()
         .any(super::formula_layout::has_formattable_math)
@@ -546,7 +767,7 @@ fn note_paragraph(ui: &mut egui::Ui, text: &str) {
             }
         });
     } else {
-        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(INK)).wrap());
+        ui.add(egui::Label::new(RichText::new(text).size(12.0).color(p.ink)).wrap());
     }
 }
 

@@ -1,6 +1,6 @@
 {
   "name": "toolbox-web",
-  "version": "2026.11.15",
+  "version": "2026.11.20",
   "private": true,
   "type": "module",
   "scripts": {

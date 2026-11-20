@@ -138,13 +138,13 @@ impl Report {
                 for (heading, cell) in table.headings.iter().zip(row) {
                     if heading.ends_with("(mm)") {
                         for token in cell.raw.split_whitespace() {
-                            if let Ok(value) = token.parse::<f64>() {
-                                if !value.is_finite() || value <= 0. {
-                                    return Err(format!(
-                                        "当前参数及公差产生非正或无效尺寸（{}：{}），请核对直径、螺距和公差带。",
-                                        table.title, heading,
-                                    ));
-                                }
+                            if let Ok(value) = token.parse::<f64>()
+                                && (!value.is_finite() || value <= 0.)
+                            {
+                                return Err(format!(
+                                    "当前参数及公差产生非正或无效尺寸（{}：{}），请核对直径、螺距和公差带。",
+                                    table.title, heading,
+                                ));
                             }
                         }
                     }

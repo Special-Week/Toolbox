@@ -19,7 +19,7 @@ static const color yellow = 0xffffff00;
 static const color cyan = 0xff00ffff;
 static const color magenta = 0xffff00ff;
 
-#define TRANSPARENT (transparent)
+#define TEX_TRANSPARENT (transparent)
 #define BLACK (black)
 #define WHITE (white)
 #define RED (red)
@@ -111,7 +111,7 @@ struct Insets {
 
   Insets() : left(0), top(0), right(0), bottom(0) {}
 
-  Insets(int t, int l, int b, int r) : left(t), top(t), right(r), bottom(b) {}
+  Insets(int t, int l, int b, int r) : left(l), top(t), right(r), bottom(b) {}
 
   void set(int t, int l, int b, int r) {
     left = l;
@@ -147,10 +147,10 @@ struct Stroke {
   Join join;
 
   Stroke()
-    : lineWidth(1.f), cap(CAP_ROUND), join(JOIN_ROUND), miterLimit(0) {}
+    : lineWidth(1.f), miterLimit(0), cap(CAP_ROUND), join(JOIN_ROUND) {}
 
   Stroke(float w, Cap c, Join j, float ml = 0)
-    : lineWidth(w), cap(c), join(j), miterLimit(ml) {}
+    : lineWidth(w), miterLimit(ml), cap(c), join(j) {}
 
   void setStroke(float w, Cap c, Join j, float ml = 0) {
     lineWidth = w;

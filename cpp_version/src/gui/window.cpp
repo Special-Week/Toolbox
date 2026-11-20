@@ -1,20 +1,31 @@
-// Windows 7 基线窗口后端。较新 DPI API 一律动态查询，避免旧系统加载程序失败。
+// Windows 7 基线窗口后端。支持浅色/深色双主题、Ctrl+K 快搜命令面板、多工具标签栏与 Toast 轻提示。
 #include "toolbox/gui.hpp"
 #include "toolbox/resource_ids.h"
+#include <algorithm>
 #include <commctrl.h>
 #include <cstring>
 #include <memory>
 #include <windowsx.h>
 namespace toolbox {
 static constexpr UINT rebuildMessage = WM_APP + 1;
+static bool containsFold(const std::wstring &text, const std::wstring &query) {
+    if (query.empty())
+        return true;
+    const auto fold = [](wchar_t v) { return v >= L'A' && v <= L'Z' ? wchar_t(v + (L'a' - L'A')) : v; };
+    return std::search(text.begin(), text.end(), query.begin(), query.end(),
+                       [&](wchar_t a, wchar_t b) { return fold(a) == fold(b); }) != text.end();
+}
 static LRESULT CALLBACK editProcedure(HWND window, UINT msg, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR) {
-    // 编辑框的客户区使用文字选择光标，与是否获得焦点无关。
     if (msg == WM_SETCURSOR && LOWORD(l) == HTCLIENT) {
         SetCursor(LoadCursorW(nullptr, IDC_IBEAM));
         return TRUE;
     }
     if (msg == WM_MOUSEWHEEL) {
         return SendMessageW(GetParent(window), msg, w, l);
+    }
+    if (msg == WM_KEYDOWN && (w == VK_ESCAPE || w == VK_RETURN || w == VK_UP || w == VK_DOWN)) {
+        if (SendMessageW(GetParent(window), WM_APP + 2, w, reinterpret_cast<LPARAM>(window)))
+            return 0;
     }
     if (msg == WM_NCDESTROY) {
         RemoveWindowSubclass(window, editProcedure, 1);
@@ -23,13 +34,10 @@ static LRESULT CALLBACK editProcedure(HWND window, UINT msg, WPARAM w, LPARAM l,
 }
 static LRESULT CALLBACK comboProcedure(HWND window, UINT msg, WPARAM w, LPARAM l, UINT_PTR, DWORD_PTR data) {
     HWND face = reinterpret_cast<HWND>(data);
-    // 下拉框收起时，滚轮只滚动页面，避免误改分度号、单位等计算参数。
-    // 展开列表后仍保留原生滚动、点击与键盘选择行为。
     if (msg == WM_MOUSEWHEEL && !SendMessageW(window, CB_GETDROPPEDSTATE, 0, 0)) {
         return SendMessageW(GetParent(window), msg, w, l);
     }
     if (face && msg == WM_PAINT) {
-        // 只借用普通下拉框绘制收起时的外观；真正的下拉列表仍由原控件负责。
         RECT rect{};
         GetClientRect(window, &rect);
         SetWindowPos(face, nullptr, 0, 0, rect.right, rect.bottom, SWP_NOZORDER | SWP_NOACTIVATE);
@@ -98,8 +106,8 @@ static std::array<std::wstring, 3> specColumns(const std::wstring &text) {
     return {text.substr(0, first), text.substr(first + 2, second - first - 2),
             text.substr(second + 3, text.size() - second - 4)};
 }
+
 App::~App() {
-    // 窗口正常退出和初始化中途失败都由同一所有者回收资源。
     exportJob.cancel = true;
     if (exportJob.worker.joinable()) {
         exportJob.worker.join();
@@ -119,9 +127,130 @@ App::~App() {
 }
 void App::releaseTarget() {
     release(iconBitmap_);
-    for (auto &entry : dynamicMathBitmaps_) release(entry.second);
+    for (auto &entry : dynamicMathBitmaps_)
+        release(entry.second);
     dynamicMathBitmaps_.clear();
     release(target_);
+}
+void App::updateEditBrush() {
+    if (editBrush_) {
+        DeleteObject(editBrush_);
+        editBrush_ = nullptr;
+    }
+    editBrush_ = CreateSolidBrush(darkMode ? RGB(19, 28, 43) : RGB(252, 253, 255));
+}
+void App::loadUiPrefs() {
+    State prefs;
+    if (!readCalibrationJson(uiPrefsPath(), prefs))
+        return;
+    darkMode = prefs.choices["theme.dark"] != 0;
+    applyTheme(darkMode);
+    favorites.clear();
+    for (int i = 0; i < 64; ++i) {
+        auto it = prefs.values.find("fav." + std::to_string(i));
+        if (it == prefs.values.end())
+            break;
+        favorites.push_back(utf8(it->second));
+    }
+    recent.clear();
+    for (int i = 0; i < 16; ++i) {
+        auto it = prefs.values.find("recent." + std::to_string(i));
+        if (it == prefs.values.end())
+            break;
+        recent.push_back(utf8(it->second));
+    }
+}
+void App::saveUiPrefs() {
+    State prefs;
+    prefs.choices["theme.dark"] = darkMode ? 1 : 0;
+    for (std::size_t i = 0; i < favorites.size(); ++i)
+        prefs.values["fav." + std::to_string(i)] = wide(favorites[i]);
+    for (std::size_t i = 0; i < recent.size(); ++i)
+        prefs.values["recent." + std::to_string(i)] = wide(recent[i]);
+    writeCalibrationJson(uiPrefsPath(), prefs);
+}
+void App::toggleTheme() {
+    darkMode = !darkMode;
+    applyTheme(darkMode);
+    updateEditBrush();
+    saveUiPrefs();
+    refresh();
+    if (window_)
+        RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
+}
+bool App::isFavorite(const std::string &id) const {
+    return std::find(favorites.begin(), favorites.end(), id) != favorites.end();
+}
+void App::toggleFavorite(const std::string &id, const std::wstring &name) {
+    auto it = std::find(favorites.begin(), favorites.end(), id);
+    if (it != favorites.end()) {
+        favorites.erase(it);
+        showToast(L"已取消收藏：" + name);
+    } else {
+        favorites.insert(favorites.begin(), id);
+        showToast(L"已收藏：" + name);
+    }
+    saveUiPrefs();
+    refresh();
+}
+void App::closeTab(int toolIndex) {
+    auto it = std::find(openTabs.begin(), openTabs.end(), toolIndex);
+    if (it == openTabs.end())
+        return;
+    std::size_t pos = std::size_t(it - openTabs.begin());
+    openTabs.erase(it);
+    if (selected == toolIndex) {
+        if (openTabs.empty()) {
+            open(-1);
+        } else {
+            open(openTabs[std::min(pos, openTabs.size() - 1)]);
+        }
+    } else {
+        refresh();
+    }
+}
+void App::openPalette() {
+    paletteOpen = true;
+    paletteHighlight = 0;
+    state.values["__palette.query"] = L"";
+    refresh();
+}
+void App::closePalette() {
+    paletteOpen = false;
+    SetFocus(window_);
+    refresh();
+}
+void App::showToast(const std::wstring &text) {
+    toastMessage = text;
+    toastExpire = GetTickCount64() + 2400;
+    refresh();
+}
+void App::copyToClipboard(const std::wstring &text, const std::wstring &toastText) {
+    struct Allocation {
+        HGLOBAL handle = nullptr;
+        ~Allocation() {
+            if (handle)
+                GlobalFree(handle);
+        }
+    } allocation;
+    const auto bytes = (text.size() + 1) * sizeof(wchar_t);
+    allocation.handle = GlobalAlloc(GMEM_MOVEABLE, bytes);
+    if (!allocation.handle)
+        return;
+    auto buffer = GlobalLock(allocation.handle);
+    if (!buffer)
+        return;
+    std::memcpy(buffer, text.c_str(), bytes);
+    GlobalUnlock(allocation.handle);
+    if (!OpenClipboard(window_))
+        return;
+    struct Guard {
+        ~Guard() { CloseClipboard(); }
+    } guard;
+    if (EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, allocation.handle)) {
+        allocation.handle = nullptr;
+        showToast(toastText.empty() ? L"已复制到剪贴板" : toastText);
+    }
 }
 void App::refresh() {
     if (window_) {
@@ -135,6 +264,18 @@ void App::open(int index) {
     }
     selected = index;
     scroll = 0;
+    if (index >= 0) {
+        const auto &tool = tools().at(std::size_t(index));
+        expanded[int(tool.group)] = true;
+        if (std::find(openTabs.begin(), openTabs.end(), index) == openTabs.end()) {
+            openTabs.push_back(index);
+        }
+        recent.erase(std::remove(recent.begin(), recent.end(), tool.id), recent.end());
+        recent.insert(recent.begin(), tool.id);
+        if (recent.size() > 8)
+            recent.resize(8);
+        saveUiPrefs();
+    }
     refresh();
 }
 void App::clearToolInputs(const Tool &tool) {
@@ -176,16 +317,17 @@ void App::restoreExample() {
     calibrationSelection.erase(tool.id);
     inputHistory_.observe(tool, state);
     inputHistory_.flush(true);
+    showToast(tool.kind == Kind::PdfDownload ? L"已清空检索条件" : L"已恢复示例输入");
     refresh();
 }
 int App::run(HINSTANCE instance, int show) {
+    applyTheme(false);
+    loadUiPrefs();
     inputHistory_.load(state);
-    // Win7 使用系统 DPI；Win10 及以后按每屏 DPI 缩放同一套逻辑坐标。
     auto user = GetModuleHandleW(L"user32.dll");
     using SetContext = BOOL(WINAPI *)(HANDLE);
     auto contextAddress = GetProcAddress(user, "SetProcessDpiAwarenessContext");
     SetContext setContext = nullptr;
-    // Win32 的 FARPROC 仅保存地址；复制到真实签名，避免调用不兼容的函数指针类型。
     static_assert(sizeof(setContext) == sizeof(contextAddress), "Win32 函数指针大小不一致");
     std::memcpy(&setContext, &contextAddress, sizeof(setContext));
     if (!setContext || !setContext(reinterpret_cast<HANDLE>(-4))) {
@@ -200,7 +342,6 @@ int App::run(HINSTANCE instance, int show) {
     wc.lpszClassName = L"ToolboxCppWindow";
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hIcon = LoadIconW(instance, MAKEINTRESOURCEW(TOOLBOX_ICON));
-    // 标题栏使用 ICO 中专门绘制的小尺寸图像，避免直接缩小大图导致细节模糊。
     wc.hIconSm = static_cast<HICON>(LoadImageW(instance, MAKEINTRESOURCEW(TOOLBOX_ICON), IMAGE_ICON,
                                                GetSystemMetrics(SM_CXSMICON), GetSystemMetrics(SM_CYSMICON),
                                                LR_SHARED));
@@ -215,14 +356,13 @@ int App::run(HINSTANCE instance, int show) {
     HDC dc = GetDC(nullptr);
     dpi_ = float(GetDeviceCaps(dc, LOGPIXELSX));
     ReleaseDC(nullptr, dc);
-    editBrush_ = CreateSolidBrush(RGB(250, 252, 255));
-    window_ = CreateWindowExW(0, wc.lpszClassName, L"工具箱 · 桌面版 v2026.11.15", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-                              CW_USEDEFAULT, CW_USEDEFAULT, int(1220 * dpi_ / 96), int(820 * dpi_ / 96),
+    updateEditBrush();
+    window_ = CreateWindowExW(0, wc.lpszClassName, L"工具箱 · 桌面版 v2026.11.20", WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                              CW_USEDEFAULT, CW_USEDEFAULT, int(1280 * dpi_ / 96), int(840 * dpi_ / 96),
                               nullptr, nullptr, instance, this);
     if (!window_) {
         return 1;
     }
-    // 许可文字与运行库一起嵌入 EXE，可从窗口系统菜单阅读，不需要随附文本文件。
     if (auto menu = GetSystemMenu(window_, FALSE)) {
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
         AppendMenuW(menu, MF_STRING, TOOLBOX_LICENSE_MENU, L"开源许可…");
@@ -232,6 +372,13 @@ int App::run(HINSTANCE instance, int show) {
     SetTimer(window_, 1, 200, nullptr);
     MSG msg{};
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        if (msg.message == WM_KEYDOWN && msg.wParam == 'K' && (GetKeyState(VK_CONTROL) & 0x8000)) {
+            if (paletteOpen)
+                closePalette();
+            else
+                openPalette();
+            continue;
+        }
         if (msg.message == WM_KEYDOWN && msg.wParam == VK_TAB && IsDialogMessageW(window_, &msg)) {
             continue;
         }
@@ -250,7 +397,6 @@ LRESULT CALLBACK App::procedure(HWND window, UINT msg, WPARAM w, LPARAM l) {
     try {
         return app ? app->message(msg, w, l) : DefWindowProcW(window, msg, w, l);
     } catch (const std::exception &error) {
-        // 异常不能穿过系统窗口回调边界，计算错误通常已由工具页面就地显示。
         auto text = wide(error.what());
         MessageBoxW(window, text.c_str(), L"工具箱", MB_ICONERROR);
         return 0;
@@ -258,6 +404,47 @@ LRESULT CALLBACK App::procedure(HWND window, UINT msg, WPARAM w, LPARAM l) {
 }
 LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
+    case WM_APP + 2: {
+        // 命令面板输入框按键转发：支持 Esc/上下键/回车直达
+        if (!paletteOpen)
+            return 0;
+        HWND child = reinterpret_cast<HWND>(l);
+        auto it = nativeKeys_.find(child);
+        if (it == nativeKeys_.end() || it->second != "__palette.query")
+            return 0;
+        if (w == VK_ESCAPE) {
+            closePalette();
+            return 1;
+        }
+        std::wstring q = state.values["__palette.query"];
+        std::vector<int> matches;
+        for (std::size_t i = 0; i < tools().size(); ++i) {
+            const auto &t = tools()[i];
+            if (containsFold(t.name, q) || containsFold(groupName(t.group), q) ||
+                containsFold(t.description, q) || containsFold(wide(t.id), q)) {
+                matches.push_back(int(i));
+                if (matches.size() >= 10)
+                    break;
+            }
+        }
+        if (w == VK_DOWN && !matches.empty()) {
+            paletteHighlight = (paletteHighlight + 1) % int(matches.size());
+            refresh();
+            return 1;
+        }
+        if (w == VK_UP && !matches.empty()) {
+            paletteHighlight = (paletteHighlight - 1 + int(matches.size())) % int(matches.size());
+            refresh();
+            return 1;
+        }
+        if (w == VK_RETURN && !matches.empty()) {
+            int chosen = matches[std::clamp(paletteHighlight, 0, int(matches.size()) - 1)];
+            closePalette();
+            open(chosen);
+            return 1;
+        }
+        return 0;
+    }
     case WM_SYSCOMMAND:
         if ((w & 0xFFF0) == TOOLBOX_LICENSE_MENU) {
             showLicenses(window_, dpi_);
@@ -318,11 +505,11 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         refresh();
         return 0;
     case WM_MOUSEWHEEL: {
-        if (pdfModal != PdfModal::None)
+        if (pdfModal != PdfModal::None || paletteOpen)
             return 0;
         POINT p{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
         ScreenToClient(window_, &p);
-        float side = width >= 880 ? (collapsed ? 92.f : 245.f) : 0;
+        float side = width >= 880 ? (collapsed ? 76.f : 248.f) : 0;
         float delta = -GET_WHEEL_DELTA_WPARAM(w) / 120.f * 64;
         for (auto it = scene.scrollRegions.rbegin(); it != scene.scrollRegions.rend(); ++it) {
             float px = p.x * 96.f / dpi_, py = p.y * 96.f / dpi_;
@@ -338,7 +525,6 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
             scroll = std::clamp(scroll + delta, 0.f, std::max(0.f, contentHeight_ - (height - 96)));
         }
         rebuild(true);
-        // 滚轮消息连续到达时也要及时重画子控件，否则旧位置的画面会累积成重影。
         RedrawWindow(window_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN | RDW_UPDATENOW);
         return 0;
     }
@@ -361,16 +547,16 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         const auto native = native_.find(key->second);
         if (native == native_.end())
             break;
-        const bool selected = (item->itemState & ODS_SELECTED) != 0;
+        const bool selectedItem = (item->itemState & ODS_SELECTED) != 0;
         const bool closed = (item->itemState & ODS_COMBOBOXEDIT) != 0;
         FillRect(item->hDC, &item->rcItem,
-                 GetSysColorBrush(selected ? COLOR_HIGHLIGHT
-                                  : closed ? COLOR_BTNFACE
-                                           : COLOR_WINDOW));
+                 GetSysColorBrush(selectedItem ? COLOR_HIGHLIGHT
+                                  : closed     ? COLOR_BTNFACE
+                                               : COLOR_WINDOW));
         const int previousMode = SetBkMode(item->hDC, TRANSPARENT);
         const COLORREF previousColor =
             SetTextColor(item->hDC, GetSysColor((item->itemState & ODS_DISABLED) ? COLOR_GRAYTEXT
-                                                : selected                       ? COLOR_HIGHLIGHTTEXT
+                                                : selectedItem                   ? COLOR_HIGHLIGHTTEXT
                                                                                  : COLOR_WINDOWTEXT));
         HGDIOBJ previous = SelectObject(
             item->hDC, font_ ? font_ : reinterpret_cast<HFONT>(GetStockObject(DEFAULT_GUI_FONT)));
@@ -435,8 +621,6 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_SETCURSOR:
-        // 子控件也会把此消息交给父窗口。返回 FALSE，让输入框、下拉框自行设置光标；
-        // 否则父窗口的箭头/手形逻辑会覆盖编辑框原生的 I 形光标。
         if (reinterpret_cast<HWND>(w) != window_) {
             return FALSE;
         }
@@ -473,13 +657,14 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
                     GetWindowTextW(child, text.data(), length + 1);
                     text.resize(length);
                     state.values[it->second] = text;
+                    if (it->second == "__palette.query")
+                        paletteHighlight = 0;
                     refresh();
                 } else {
                     const bool suggestion = it->second == "gauge_unified.gauge.size.suggestion" ||
                                             it->second == "gauge_unified.gauge.tpi.suggestion";
                     const auto notification = HIWORD(w);
                     if (notification == CBN_SELCHANGE || (suggestion && notification == CBN_SELENDOK)) {
-                        // 浏览展开列表时不触发整页重算，确认选择或收起状态下用键盘选择仍立即生效。
                         if (suggestion && notification == CBN_SELCHANGE &&
                             SendMessageW(child, CB_GETDROPPEDSTATE, 0, 0))
                             return 0;
@@ -501,11 +686,15 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
     case WM_CTLCOLOREDIT:
     case WM_CTLCOLORLISTBOX: {
         auto dc = reinterpret_cast<HDC>(w);
-        SetTextColor(dc, RGB(35, 48, 67));
-        SetBkColor(dc, RGB(250, 252, 255));
+        SetTextColor(dc, darkMode ? RGB(236, 242, 249) : RGB(24, 34, 48));
+        SetBkColor(dc, darkMode ? RGB(19, 28, 43) : RGB(252, 253, 255));
         return reinterpret_cast<LRESULT>(editBrush_);
     }
     case WM_KEYDOWN:
+        if (paletteOpen && w == VK_ESCAPE) {
+            closePalette();
+            return 0;
+        }
         if (pdfModal != PdfModal::None) {
             if (w == VK_ESCAPE) {
                 pdfModal = PdfModal::None;
@@ -527,6 +716,10 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
     case WM_TIMER:
         inputHistory_.flush();
         pollPdfDownload();
+        if (!toastMessage.empty() && GetTickCount64() >= toastExpire) {
+            toastMessage.clear();
+            refresh();
+        }
         if (exportJob.active) {
             refresh();
         }
@@ -549,6 +742,7 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
     }
     return DefWindowProcW(window_, msg, w, l);
 }
+
 void App::synchronizeControls(bool scrolling) {
     synchronizing_ = true;
     if (!font_) {
@@ -576,7 +770,6 @@ void App::synchronizeControls(bool scrolling) {
         auto &n = native_[c.key];
         bool combo = !c.options.empty();
         const bool alignedSpecs = c.key == "gauge_unified.gauge.size.suggestion";
-        // 两个相邻按钮使用相同的原生外框与绘制方式，规格列表滚动时始终逐项绘制。
         const bool ownerDraw = alignedSpecs || c.key == "gauge_unified.gauge.tpi.suggestion";
         if (n.window && n.combo != combo) {
             nativeKeys_.erase(n.window);
@@ -623,8 +816,6 @@ void App::synchronizeControls(bool scrolling) {
                     SendMessageW(n.window, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(o.c_str()));
                 }
             }
-            // 收起按钮可以很窄，展开列表须按当前字体测量最长选项，避免截断规格及单位备注。
-            // 仅在选项或 DPI 改变时重新测宽，滚动页面时复用缓存。
             if (changed || n.optionDpi != dpi_) {
                 n.optionTextWidth = 0;
                 n.optionColumns = {};
@@ -711,7 +902,6 @@ void App::synchronizeControls(bool scrolling) {
             pw = int(c.rect.w * scale) - 2;
         SetWindowPos(n.window, HWND_TOP, px, py, pw, ph,
                      SWP_NOACTIVATE | SWP_SHOWWINDOW | (scrolling ? SWP_NOCOPYBITS : 0));
-        // 裁去离开视口的部分；编辑框不截获滚轮，主窗口负责纵向滚动。
         int clipTop = std::max(0, int(top * scale) - py), clipBottom = std::min(ph, int(bottom * scale) - py);
         if (combo && top <= c.rect.y && bottom >= c.rect.y + c.rect.h) {
             SetWindowRgn(n.window, nullptr, TRUE);
@@ -727,8 +917,106 @@ void App::synchronizeControls(bool scrolling) {
             ShowWindow(entry.second.window, SW_HIDE);
         }
     }
+    if (paletteOpen) {
+        auto it = native_.find("__palette.query");
+        if (it != native_.end() && IsWindowVisible(it->second.window) && GetFocus() != it->second.window) {
+            SetFocus(it->second.window);
+        }
+    }
     synchronizing_ = false;
 }
+
+void App::renderPalette() {
+    if (!paletteOpen)
+        return;
+    scene.clip = {0, 0, width, height};
+    scene.controls.clear();
+    scene.hits.clear();
+    scene.scrollRegions.clear();
+
+    // 遮罩点击关闭
+    scene.fill({0, 0, width, height}, Color(0, 0, 0, darkMode ? .58f : .36f));
+    scene.hits.push_back({{0, 0, width, height}, scene.clip, [this] { closePalette(); }});
+
+    const float dlgW = std::min(560.f, width - 36.f);
+    const float dlgX = (width - dlgW) / 2.f;
+    const float dlgY = std::max(60.f, height * 0.12f);
+
+    std::wstring q = state.value("__palette.query", L"");
+    std::vector<int> matches;
+    for (std::size_t i = 0; i < tools().size(); ++i) {
+        const auto &t = tools()[i];
+        if (containsFold(t.name, q) || containsFold(groupName(t.group), q) || containsFold(t.description, q) ||
+            containsFold(wide(t.id), q)) {
+            matches.push_back(int(i));
+            if (matches.size() >= 10)
+                break;
+        }
+    }
+    if (!matches.empty())
+        paletteHighlight = std::clamp(paletteHighlight, 0, int(matches.size()) - 1);
+
+    const float listH = matches.empty() ? 56.f : float(matches.size()) * 46.f + 12.f;
+    const float dlgH = std::min(height - dlgY - 32.f, 64.f + listH);
+    Rect dlg{dlgX, dlgY, dlgW, dlgH};
+    scene.fill({dlgX + 2, dlgY + 8, dlgW, dlgH}, Color(0, 0, 0, .14f), 12);
+    scene.fill(dlg, White, 12);
+    scene.border(dlg, Border, 12);
+    // 阻断遮罩点击穿透
+    scene.hits.push_back({dlg, scene.clip, [] {}});
+
+    scene.text({dlgX + 16, dlgY + 14, 24, 34}, L"⌕", 16, Muted, false, true);
+    scene.input("__palette.query", {dlgX + 44, dlgY + 14, dlgW - 110, 34}, q);
+    Rect escRect{dlgX + dlgW - 58, dlgY + 18, 42, 26};
+    scene.fill(escRect, SurfaceSubtle, 6);
+    scene.border(escRect, Border, 6);
+    scene.text(escRect, L"ESC", 10.5f, Muted, true, true, false, true);
+    scene.hits.push_back({escRect, scene.clip, [this] { closePalette(); }});
+    scene.line(dlgX, dlgY + 58, dlgX + dlgW, dlgY + 58, Border);
+
+    float iy = dlgY + 64.f;
+    if (matches.empty()) {
+        scene.text({dlgX + 16, iy + 8, dlgW - 32, 34}, L"未找到匹配的工具", 13, Muted, false, true);
+    } else {
+        for (std::size_t idx = 0; idx < matches.size(); ++idx) {
+            if (iy + 44.f > dlgY + dlgH - 4.f)
+                break;
+            const int toolIdx = matches[idx];
+            const auto &t = tools()[std::size_t(toolIdx)];
+            const auto accent = groupAccent(t.group);
+            Rect row{dlgX + 10, iy, dlgW - 20, 42};
+            if (int(idx) == paletteHighlight) {
+                scene.fill(row, Soft, 8);
+            }
+            scene.fill({row.x + 8, row.y + 6, 30, 30}, accent.bg, 7);
+            scene.text({row.x + 8, row.y + 6, 30, 30}, t.icon.empty() ? L"工" : t.icon, 13, accent.fg, true, true);
+            scene.text({row.x + 48, row.y + 3, row.w - 134, 20}, t.name, 13, Ink, true);
+            scene.text({row.x + 48, row.y + 22, row.w - 134, 17}, t.description, 11, Muted);
+            Rect tag{row.x + row.w - 76, row.y + 10, 68, 22};
+            scene.fill(tag, accent.bg, 11);
+            scene.text(tag, shortGroupName(t.group), 10.5f, accent.fg, true, true);
+            scene.hits.push_back({row, scene.clip, [this, toolIdx] {
+                                      closePalette();
+                                      open(toolIdx);
+                                  }});
+            iy += 46.f;
+        }
+    }
+}
+
+void App::renderToast() {
+    if (toastMessage.empty() || GetTickCount64() >= toastExpire)
+        return;
+    scene.clip = {0, 0, width, height};
+    const float tw = std::min(width - 40.f, std::max(180.f, textWidth(toastMessage, 12.5f) + 42.f));
+    const float th = 38.f;
+    const float tx = width - tw - 20.f;
+    const float ty = height - th - 20.f;
+    scene.fill({tx, ty, tw, th}, Ink, 9);
+    scene.text({tx + 14, ty, 18, th}, L"✓", 13, Green, true, true);
+    scene.text({tx + 34, ty, tw - 44, th}, toastMessage, 12.5f, White);
+}
+
 void App::rebuild(bool scrolling) {
     if (!window_ || width < 10 || height < 10) {
         return;
@@ -738,63 +1026,150 @@ void App::rebuild(bool scrolling) {
     chartArea = {};
     scene.clip = {0, 0, width, height};
     scene.fill({0, 0, width, height}, Background);
-    scene.fill({0, 0, width, 68}, White);
-    scene.line(0, 68, width, 68, Border);
-    scene.icon({23, 14, 42, 42});
-    scene.text({74, 14, 240, 42}, L"工具箱", 19, Ink, true);
-    scene.text({width - 182, 20, 165, 30}, std::to_wstring(tools().size()) + L" 项工具  ● 本地计算", 12,
-               Green, false, true);
+
+    // 现代紧凑 52px 顶栏
+    const float headerH = 52.f;
+    scene.fill({0, 0, width, headerH}, White);
+    scene.line(0, headerH, width, headerH, Border);
+
+    // 左侧品牌（点击回首页）
+    Rect brandRect{14, 7, 196, 38};
+    scene.icon({16, 10, 32, 32});
+    scene.text({56, 8, 120, 22}, L"工具箱", 16, Ink, true);
+    scene.text({56, 28, 160, 16}, L"计量工程工作台 · " + std::to_wstring(tools().size()) + L" 项", 10.5f, Muted);
+    scene.hits.push_back({brandRect, scene.clip, [this] { open(-1); }});
+
+    // 右侧深浅主题切换 + 状态徽章
+    Rect themeBtn{width - 96.f, 10.f, 82.f, 32.f};
+    scene.fill(themeBtn, SurfaceSubtle, 8);
+    scene.border(themeBtn, Border, 8);
+    scene.text(themeBtn, darkMode ? L"☀ 浅色" : L"☾ 深色", 12, Ink, false, true);
+    scene.hits.push_back({themeBtn, scene.clip, [this] { toggleTheme(); }});
+
+    float rightEdge = themeBtn.x - 10.f;
+    if (width >= 900) {
+        Rect badge{rightEdge - 86.f, 13.f, 86.f, 26.f};
+        scene.fill(badge, SuccessSoft, 13);
+        scene.text(badge, L"● 本地计算", 11, Green, true, true);
+        rightEdge = badge.x - 12.f;
+    }
+
+    // 中间快速搜索胶囊（Ctrl+K）
+    if (rightEdge - 224.f >= 160.f) {
+        const float sw = std::min(340.f, rightEdge - 236.f);
+        const float sx = std::max(226.f, (width - sw) / 2.f);
+        Rect searchPill{sx, 10.f, sw, 32.f};
+        scene.fill(searchPill, SurfaceSubtle, 9);
+        scene.border(searchPill, Border, 9);
+        scene.text({sx + 12, 10.f, sw - 74, 32.f}, L"⌕  快速搜索任意工具…", 12, Muted);
+        scene.fill({sx + sw - 54, 15.f, 44, 22.f}, White, 5);
+        scene.border({sx + sw - 54, 15.f, 44, 22.f}, Border, 5);
+        scene.text({sx + sw - 54, 15.f, 44, 22.f}, L"Ctrl K", 10, Muted, true, true, false, true);
+        scene.hits.push_back({searchPill, scene.clip, [this] { openPalette(); }});
+    }
+
     navigation();
-    float left = width >= 880 ? (collapsed ? 92.f : 245.f) : 0;
-    float top = width >= 880 ? 82.f : 126.f;
+
+    float left = width >= 880 ? (collapsed ? 76.f : 248.f) : 0;
+    float baseTop = width >= 880 ? headerH : headerH + 48.f;
+
+    // 多工具标签栏
+    float tabBarH = 0.f;
+    if (!openTabs.empty()) {
+        tabBarH = 38.f;
+        scene.clip = {left + 1, baseTop, width - left - 2, tabBarH};
+        scene.fill({left + 1, baseTop, width - left - 2, tabBarH}, SurfaceSubtle);
+        scene.line(left + 1, baseTop + tabBarH - 1, width, baseTop + tabBarH - 1, Border);
+        float tx = left + 16.f;
+        // 首页标签
+        {
+            Rect homeTab{tx, baseTop + 5, 58, 28};
+            const bool active = selected < 0;
+            scene.fill(homeTab, active ? Soft : White, 7);
+            scene.border(homeTab, active ? Blue : Border, 7);
+            scene.text(homeTab, L"首页", 12, active ? Blue : Muted, active, true);
+            scene.hits.push_back({homeTab, scene.clip, [this] { open(-1); }});
+            tx += 64.f;
+        }
+        for (int tabIdx : openTabs) {
+            if (tx > width - 60.f)
+                break;
+            const auto &t = tools().at(std::size_t(tabIdx));
+            const auto accent = groupAccent(t.group);
+            const bool active = selected == tabIdx;
+            float tw = std::min(196.f, textWidth(t.name, 12) + 46.f);
+            Rect pill{tx, baseTop + 5, tw, 28};
+            scene.fill(pill, active ? accent.bg : White, 7);
+            scene.border(pill, active ? accent.fg : Border, 7);
+            scene.fill({tx + 9, baseTop + 16, 6, 6}, accent.fg, 3);
+            scene.text({tx + 20, baseTop + 5, tw - 44, 28}, t.name, 12, active ? accent.fg : Ink, active);
+            scene.hits.push_back({{tx, baseTop + 5, tw - 22, 28}, scene.clip, [this, tabIdx] { open(tabIdx); }});
+            Rect closeRect{tx + tw - 22, baseTop + 7, 18, 24};
+            scene.text(closeRect, L"×", 13, Muted, false, true);
+            scene.hits.push_back({closeRect, scene.clip, [this, tabIdx] { closeTab(tabIdx); }});
+            tx += tw + 6.f;
+        }
+    }
+
+    float top = baseTop + tabBarH;
     scene.clip = {left + 1, top, width - left - 2, height - top};
     if (selected < 0) {
         homepage();
     } else {
         const auto &tool = tools().at(std::size_t(selected));
-        float x = left + 24,
-              w = std::min(width - left - 48,
-                           tool.group == Group::Gauges || tool.kind == Kind::BSplineInterpolation ||
-                                   tool.kind == Kind::CalibrationCurveFit || tool.kind == Kind::PdfDownload ||
-                                   tool.kind == Kind::Uncertainty
-                               ? 960.f
-                               : 820.f),
-              y = top + 10 - scroll;
-        scene.button({x, y, 86, 28}, L"← 工具箱", [this] { open(-1); });
-        scene.text({x + 96, y, w - 96, 28}, L"/ " + groupName(tool.group) + L" / " + tool.name, 12, Muted);
-        y += 44;
-        if (!tool.icon.empty()) {
-            scene.fill({x, y, 48, 48}, Soft, 4);
-            scene.text({x, y, 48, 48}, tool.icon, 18, Blue, false, true);
-        }
-        float offset = tool.icon.empty() ? 0 : 60;
-        const float actionWidth = 104, actionGap = 16;
-        const bool actionBelow = textWidth(tool.name, 26) + offset + actionWidth + actionGap > w;
-        const float textSpace =
-            w - offset - (!exportJob.active && !actionBelow ? actionWidth + actionGap : 0);
-        scene.text({x + offset, y, textSpace, 32}, tool.name, 26, Ink, true);
-        scene.text({x + offset, y + 34, textSpace, 44}, tool.description, 12, Muted);
-        if (!exportJob.active && !actionBelow) {
-            scene.button({x + w - actionWidth, y + 3, actionWidth, 40},
+        const auto accent = groupAccent(tool.group);
+        float w = std::min(width - left - 48.f, 1240.f);
+        float x = left + std::max(24.f, (width - left - w) / 2.f);
+        float y = top + 14.f - scroll;
+
+        // 面包屑
+        scene.button({x, y, 82, 28}, L"← 首页", [this] { open(-1); });
+        scene.text({x + 92, y, w - 92, 28}, L"/  " + groupName(tool.group) + L"  /  " + tool.name, 12, Muted);
+        y += 38.f;
+
+        // 工具头部（带分类色图标 + 收藏星标 + 恢复示例按钮）
+        const float iconSize = 44.f;
+        scene.fill({x, y, iconSize, iconSize}, accent.bg, 10);
+        scene.text({x, y, iconSize, iconSize}, tool.icon.empty() ? L"工" : tool.icon, 18, accent.fg, true, true);
+        float offset = 56.f;
+        const float actionWidth = 100.f, starWidth = 34.f, actionGap = 8.f;
+        const float totalRight = (!exportJob.active ? actionWidth + actionGap : 0.f) + starWidth + 12.f;
+        const float textSpace = std::max(140.f, w - offset - totalRight);
+        scene.text({x + offset, y - 2, textSpace, 28}, tool.name, 22, Ink, true);
+        scene.text({x + offset, y + 26, textSpace, 22}, tool.description, 12, Muted);
+
+        // 收藏星标按钮
+        const bool fav = isFavorite(tool.id);
+        float rightCursor = x + w;
+        if (!exportJob.active) {
+            rightCursor -= actionWidth;
+            scene.button({rightCursor, y + 4, actionWidth, 34},
                          tool.kind == Kind::PdfDownload ? L"清空" : L"恢复示例",
                          [this] { restoreExample(); });
+            rightCursor -= actionGap;
         }
-        y += 86;
-        if (!exportJob.active && actionBelow) {
-            scene.button({x + w - actionWidth, y, actionWidth, 40},
-                         tool.kind == Kind::PdfDownload ? L"清空" : L"恢复示例",
-                         [this] { restoreExample(); });
-            y += 52;
-        }
+        rightCursor -= starWidth;
+        Rect starBtn{rightCursor, y + 4, starWidth, 34};
+        scene.fill(starBtn, SurfaceSubtle, 8);
+        scene.border(starBtn, Border, 8);
+        scene.text(starBtn, fav ? L"★" : L"☆", 15, fav ? StarGold : Muted, false, true);
+        scene.hits.push_back({starBtn, scene.clip, [this, id = tool.id, name = tool.name] {
+                                  toggleFavorite(id, name);
+                              }});
+
+        y += 58.f;
+
         Page page(*this, scene, tool, x, y, w);
         try {
             renderPage(page);
             page.check();
         } catch (const std::exception &e) {
+            page.endSplit();
             page.processSteps.clear();
             page.error(page.inputError.empty() ? wide(e.what()) : page.inputError);
         }
-        page.y += 14;
+        page.endSplit();
+        page.y += 10;
         page.showProcess();
         page.explain();
         contentHeight_ = page.y + scroll - top + 52;
@@ -805,12 +1180,15 @@ void App::rebuild(bool scrolling) {
         scene.fill({width - 7,
                     top + 6 + (track - thumb) * scroll / std::max(1.f, contentHeight_ - (height - top)), 4,
                     thumb},
-                   Border, 2);
+                   BorderStrong, 2);
     }
     renderPdfModal();
+    renderPalette();
+    renderToast();
     synchronizeControls(scrolling);
     InvalidateRect(window_, nullptr, FALSE);
 }
+
 void App::paint() {
     PAINTSTRUCT ps;
     BeginPaint(window_, &ps);
@@ -835,7 +1213,7 @@ void App::paint() {
         loadIconBitmap();
         target_->BeginDraw();
         target_->SetTextAntialiasMode(D2D1_TEXT_ANTIALIAS_MODE_CLEARTYPE);
-        target_->Clear(D2D1::ColorF(1, 1, 1));
+        target_->Clear(D2D1::ColorF(Background.r, Background.g, Background.b));
         ID2D1SolidColorBrush *brush = nullptr;
         target_->CreateSolidColorBrush(D2D1::ColorF(0, 0, 0), &brush);
         if (brush) {
@@ -875,9 +1253,10 @@ void App::paint() {
                         target_->DrawBitmap(bitmap, r, 1.f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
                     } else {
                         IDWriteTextFormat *format = nullptr;
-                        const float fallbackSize = std::min(13.f, 13.f * d.rect.w / std::max(1.f, textWidth(d.text, 13)));
-                        if (SUCCEEDED(textFactory_->CreateTextFormat(L"Microsoft YaHei", nullptr,
-                                DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
+                        const float fallbackSize =
+                            std::min(13.f, 13.f * d.rect.w / std::max(1.f, textWidth(d.text, 13)));
+                        if (SUCCEEDED(textFactory_->CreateTextFormat(
+                                L"Microsoft YaHei", nullptr, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL,
                                 DWRITE_FONT_STRETCH_NORMAL, fallbackSize, L"zh-cn", &format))) {
                             format->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                             target_->DrawTextW(d.text.c_str(), UINT32(d.text.size()), format, r, brush,
@@ -887,9 +1266,9 @@ void App::paint() {
                     }
                 } else {
                     IDWriteTextFormat *format = nullptr;
+                    const wchar_t *family = d.mono ? L"Consolas" : L"Microsoft YaHei";
                     textFactory_->CreateTextFormat(
-                        L"Microsoft YaHei", nullptr,
-                        d.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
+                        family, nullptr, d.bold ? DWRITE_FONT_WEIGHT_SEMI_BOLD : DWRITE_FONT_WEIGHT_NORMAL,
                         DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, d.size, L"zh-cn", &format);
                     if (format) {
                         format->SetParagraphAlignment(d.paragraph ? DWRITE_PARAGRAPH_ALIGNMENT_NEAR

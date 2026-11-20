@@ -6,10 +6,10 @@
 namespace toolbox {
 namespace {
 void button(Scene &ui, Rect rect, const std::wstring &label, std::function<void()> action, bool primary) {
-    ui.fill(rect, primary ? Blue : White, 6);
+    ui.fill(rect, primary ? Blue : SurfaceSubtle, 7);
     if (!primary)
-        ui.border(rect, Border, 6);
-    ui.text(rect, label, 14, primary ? White : Ink, false, true);
+        ui.border(rect, Border, 7);
+    ui.text(rect, label, 13.5f, primary ? AccentText : Ink, primary, true);
     ui.hits.push_back({rect, ui.clip, std::move(action)});
 }
 }

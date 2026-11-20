@@ -1,10 +1,10 @@
-//! 拟合曲线与残差图；复用工程刻度轴，图表只悬停取值，不截获滚轮。
+//! 拟合曲线与残差图；复用工程刻度轴，自适应深浅主题，图表只悬停取值，不截获滚轮。
 use super::model::CurveFit;
 use crate::calculators::{
     axis::{Axis, draw_curve_cursor},
     common::format_number,
 };
-use crate::{BLUE, INK, MUTED, RED};
+use crate::{BLUE, RED, theme};
 use eframe::egui::{self, Align2, Color32, FontId, Rect, Stroke, Vec2};
 
 pub(super) fn draw(
@@ -48,13 +48,14 @@ pub(super) fn draw(
     } else {
         (width * 0.39).clamp(310.0, 390.0)
     };
+    let p = theme::palette(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), egui::Sense::hover());
     let painter = ui.painter_at(rect);
     let font = FontId::proportional(12.0);
     let y_axis = Axis::new(y_label, minimum_y, maximum_y, 5, true);
     let measure = |label: &str| {
         painter
-            .layout_no_wrap(label.to_owned(), font.clone(), MUTED)
+            .layout_no_wrap(label.to_owned(), font.clone(), p.muted)
             .size()
             .x
     };
@@ -86,62 +87,62 @@ pub(super) fn draw(
         rect.min + egui::vec2(left.max(tick_width / 2.0 + 12.0), 43.0),
         rect.max - egui::vec2((tick_width / 2.0 + 12.0).max(24.0), 54.0),
     );
-    painter.rect_filled(rect, 7.0, Color32::WHITE);
+    painter.rect_filled(rect, 10.0, p.surface);
     painter.rect_stroke(
         rect,
-        7.0,
-        Stroke::new(1.0_f32, Color32::from_rgb(223, 230, 239)),
+        10.0,
+        Stroke::new(1.0_f32, p.border),
         egui::StrokeKind::Inside,
     );
     for tick in &y_axis.ticks {
         let y = plot.bottom() - y_axis.tick_fraction(tick.value) as f32 * plot.height();
         painter.line_segment(
             [egui::pos2(plot.left(), y), egui::pos2(plot.right(), y)],
-            Stroke::new(1.0_f32, Color32::from_rgb(232, 237, 244)),
+            Stroke::new(1.0_f32, p.border.gamma_multiply(0.7)),
         );
         painter.text(
             egui::pos2(plot.left() - 9.0, y),
             Align2::RIGHT_CENTER,
             &tick.label,
             font.clone(),
-            MUTED,
+            p.muted,
         );
     }
     for tick in &x_axis.ticks {
         let x = plot.left() + x_axis.tick_fraction(tick.value) as f32 * plot.width();
         painter.line_segment(
             [egui::pos2(x, plot.top()), egui::pos2(x, plot.bottom())],
-            Stroke::new(1.0_f32, Color32::from_rgb(239, 243, 248)),
+            Stroke::new(1.0_f32, p.border.gamma_multiply(0.5)),
         );
         painter.text(
             egui::pos2(x, plot.bottom() + 10.0),
             Align2::CENTER_TOP,
             &tick.label,
             font.clone(),
-            MUTED,
+            p.muted,
         );
     }
     painter.line_segment(
         [plot.left_top(), plot.left_bottom()],
-        Stroke::new(1.2_f32, MUTED),
+        Stroke::new(1.2_f32, p.muted),
     );
     painter.line_segment(
         [plot.left_bottom(), plot.right_bottom()],
-        Stroke::new(1.2_f32, MUTED),
+        Stroke::new(1.2_f32, p.muted),
     );
     painter.text(
         egui::pos2(plot.left(), rect.top() + 19.0),
         Align2::LEFT_CENTER,
         &y_axis.caption,
         font.clone(),
-        INK,
+        p.ink,
     );
     painter.text(
         egui::pos2(plot.center().x, rect.bottom() - 14.0),
         Align2::CENTER_CENTER,
         &x_axis.caption,
         font.clone(),
-        INK,
+        p.ink,
     );
     let to_screen = |point: (f64, f64)| {
         egui::pos2(

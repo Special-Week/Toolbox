@@ -15,11 +15,11 @@ void FontInfo::__register(const FontSet& set) {
   for (auto r : regs) r.reg();
 }
 
-const float* const FontInfo::getMetrics(wchar_t ch) const {
+const float* FontInfo::getMetrics(wchar_t ch) const {
   return _metrics.isEmpty() ? nullptr : _metrics((float)ch) + 1;
 }
 
-const int* const FontInfo::getExtension(wchar_t ch) const {
+const int* FontInfo::getExtension(wchar_t ch) const {
   return _extensions.isEmpty() ? nullptr : _extensions((int)ch) + 1;
 }
 

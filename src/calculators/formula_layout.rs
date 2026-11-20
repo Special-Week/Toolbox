@@ -143,10 +143,10 @@ fn tex_operand(value: &str) -> String {
                 {
                     root.push(chars.next().unwrap());
                 }
-                if root.is_empty() {
-                    if let Some(next) = chars.next() {
-                        root.push(next);
-                    }
+                if root.is_empty()
+                    && let Some(next) = chars.next()
+                {
+                    root.push(next);
                 }
                 out.push_str(&format!(r"\sqrt{{{root}}}"));
             }
@@ -214,17 +214,17 @@ fn tex_formula(line: &str) -> Option<(&str, &str, std::borrow::Cow<'static, str>
         }
     }
     for (source, tex) in TEX_FORMULAS {
-        if let Some(start) = line.find(source) {
-            if best.as_ref().is_none_or(|(before, current, _, _)| {
+        if let Some(start) = line.find(source)
+            && best.as_ref().is_none_or(|(before, current, _, _)| {
                 start < before.len() || (start == before.len() && source.len() > current.len())
-            }) {
-                best = Some((
-                    &line[..start],
-                    source,
-                    (*tex).into(),
-                    &line[start + source.len()..],
-                ));
-            }
+            })
+        {
+            best = Some((
+                &line[..start],
+                source,
+                (*tex).into(),
+                &line[start + source.len()..],
+            ));
         }
     }
     static CATALOG: OnceLock<Vec<[String; 2]>> = OnceLock::new();
@@ -232,17 +232,17 @@ fn tex_formula(line: &str) -> Option<(&str, &str, std::borrow::Cow<'static, str>
         serde_json::from_str(include_str!("../../assets/math/formula-catalog.json"))
             .expect("内置公式目录应为有效 JSON")
     }) {
-        if let Some(start) = line.find(source.as_str()) {
-            if best.as_ref().is_none_or(|(before, current, _, _)| {
+        if let Some(start) = line.find(source.as_str())
+            && best.as_ref().is_none_or(|(before, current, _, _)| {
                 start < before.len() || (start == before.len() && source.len() > current.len())
-            }) {
-                best = Some((
-                    &line[..start],
-                    source.as_str(),
-                    tex.as_str().into(),
-                    &line[start + source.len()..],
-                ));
-            }
+            })
+        {
+            best = Some((
+                &line[..start],
+                source.as_str(),
+                tex.as_str().into(),
+                &line[start + source.len()..],
+            ));
         }
     }
     static PATTERNS: OnceLock<Vec<(Regex, String)>> = OnceLock::new();
@@ -363,7 +363,7 @@ fn formula_screen_image(
     let width = ((source.width as f32 * scale / raster_scale).ceil() as u32).max(1);
     let height = ((source.height as f32 * scale / raster_scale).ceil() as u32).max(1);
     // 先转成预乘透明度，避免缩放时透明边缘混入黑色。
-    for pixel in source.rgba.chunks_exact_mut(4) {
+    for pixel in source.rgba.as_chunks_mut::<4>().0 {
         let alpha = u16::from(pixel[3]);
         for channel in &mut pixel[..3] {
             *channel = ((u16::from(*channel) * alpha + 127) / 255) as u8;
@@ -383,11 +383,9 @@ fn formula_screen_image(
         let alpha = u16::from(pixel[3]);
         let adjusted = u16::from(coverage[usize::from(pixel[3])]);
         for channel in &mut pixel.0[..3] {
-            let value = if alpha == 0 {
-                0
-            } else {
-                (u16::from(*channel) * adjusted + alpha / 2) / alpha
-            };
+            let value = (u16::from(*channel) * adjusted + alpha / 2)
+                .checked_div(alpha)
+                .unwrap_or(0);
             *channel = value.min(adjusted) as u8;
         }
         pixel[3] = adjusted as u8;
@@ -791,11 +789,7 @@ mod tests {
             vec![Part::Text("值 = "), Part::Fraction("(1 + 2)", "3")]
         );
         assert_eq!(parts("值 = (1/1000)"), vec![Part::Text("值 = (1/1000)")]);
-        assert!(
-            parts("CVD：R/R₀ = 1 + At")
-                .iter()
-                .any(|p| *p == Part::Fraction("R", "R₀"))
-        );
+        assert!(parts("CVD：R/R₀ = 1 + At").contains(&Part::Fraction("R", "R₀")));
     }
 
     #[test]
@@ -849,7 +843,7 @@ mod tests {
             assert_eq!(first_baseline, baseline);
         }
         assert_eq!(formula_raster_scale(16.0), 16.0);
-        assert!(first.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+        assert!(first.rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0));
     }
 
     #[test]
@@ -913,7 +907,7 @@ mod tests {
                 render_formula(&tex, 17.5, 1.0).unwrap_or_else(|error| panic!("{source}: {error}"));
             let image = eframe::icon_data::from_png_bytes(&png).unwrap();
             assert!(
-                image.rgba.chunks_exact(4).any(|pixel| pixel[3] > 0),
+                image.rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] > 0),
                 "{source}"
             );
         }

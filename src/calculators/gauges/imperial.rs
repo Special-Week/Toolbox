@@ -77,10 +77,10 @@ pub(super) fn un_option_columns(size: &str) -> Result<[String; 3], String> {
 pub(super) fn un_sizes() -> Vec<String> {
     let mut list = Vec::new();
     for row in rows(&un_data::data()["series"]) {
-        if let Some(s) = row["size"].as_str() {
-            if !list.iter().any(|x| x == s) {
-                list.push(s.into());
-            }
+        if let Some(s) = row["size"].as_str()
+            && !list.iter().any(|x| x == s)
+        {
+            list.push(s.into());
         }
     }
     list

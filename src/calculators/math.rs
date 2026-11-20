@@ -55,16 +55,17 @@ pub(crate) fn solve_3x3(rows: Vec<[f64; 3]>, rhs: Vec<f64>) -> Option<[f64; 3]> 
         }
         a.swap(col, pivot);
         let divisor = a[col][col];
-        for j in col..4 {
-            a[col][j] /= divisor;
+        for cell in &mut a[col][col..] {
+            *cell /= divisor;
         }
-        for row in 0..3 {
+        let pivot_row = a[col];
+        for (row, r) in a.iter_mut().enumerate() {
             if row == col {
                 continue;
             }
-            let factor = a[row][col];
-            for j in col..4 {
-                a[row][j] -= factor * a[col][j];
+            let factor = r[col];
+            for (cell, &p) in r[col..].iter_mut().zip(&pivot_row[col..]) {
+                *cell -= factor * p;
             }
         }
     }

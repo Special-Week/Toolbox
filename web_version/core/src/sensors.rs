@@ -1,7 +1,7 @@
 //! 温标页面适配；正反算、允差与分度表共用桌面参考曲线。
 use crate::api::{Input, Output, celsius_in_bounds, division};
 use crate::calculators::common::{format_process_computed as c, format_process_number as n};
-use crate::calculators::{calibration::TemperatureUnit, rtd, sprt, thermistor, thermocouple as tc};
+use crate::calculators::{rtd, sprt, thermistor, thermocouple as tc};
 use crate::catalog::ToolKind;
 use serde_json::{Value, json};
 
@@ -731,9 +731,8 @@ fn ntc(i: &Input) -> Result<Output, String> {
                 c(t0 + 273.15),
                 n(beta)
             ),
-            format!(
-                "ln(R) = ln(R₀) + β(1/T−1/T₀)；1/T = 1/T₀ + [ln(R)−ln(R₀)]/β。T 用 K、R 用 Ω。"
-            ),
+            "ln(R) = ln(R₀) + β(1/T−1/T₀)；1/T = 1/T₀ + [ln(R)−ln(R₀)]/β。T 用 K、R 用 Ω。"
+                .to_string(),
             format!(
                 "当前温度 = {} °C = {} K，电阻 = {} Ω。",
                 c(t),

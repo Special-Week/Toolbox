@@ -11,6 +11,7 @@ void renderOther(Page &p) {
         return;
     }
     if (p.tool.kind == Kind::Transmitter) {
+        p.beginSplit(0.44f);
         p.heading(L"变送器量程换算");
         int quantity = p.select("quantity", L"被测量类型", {L"压力", L"温度", L"湿度"});
         std::vector<std::wstring> options;
@@ -54,6 +55,7 @@ void renderOther(Page &p) {
                                 direction == 0 ? L"输入被测量 (" + symbol + L")"
                                                : L"输入信号 (" + std::wstring(signals[signal]) + L")",
                                 direction == 0 ? (low + high) / 2 : 12);
+        p.rightColumn();
         p.check();
         if (quantity == 2) {
             require(unit != 0 || (a >= 0 && b <= 100), "相对湿度量程应在 0～100 %RH 内");
@@ -70,6 +72,7 @@ void renderOther(Page &p) {
                   {{L"被测量值", format(direction == 0 ? input : result.first) + L" " + symbol},
                    {L"输出信号", format(direction == 0 ? result.first : input) + L" " + signals[signal]},
                    {L"量程比例", format(result.second * 100) + L" %"}});
+        p.endSplit();
         p.processSteps.push_back(L"过程量范围 = " + inputNumber(a) + L"～" + inputNumber(b) + L" " + symbol + L"，跨度 = " + p.processValue(process.span) + L"；输出范围 = " + inputNumber(sl) + L"～" + inputNumber(sh) + L" " + signals[signal] + L"，跨度 = " + p.processValue(output.span) + L"。");
         if (direction == 0) {
             p.processSteps.push_back(L"过程量比例 f = (输入 − 下限)/跨度 = (" + inputNumber(input) + L" − " + inputNumber(a) + L") / " + p.processValue(process.span) + L" = " + p.processValue(result.second) + L"。");
@@ -81,6 +84,7 @@ void renderOther(Page &p) {
         }
         return;
     }
+    p.beginSplit(0.46f);
     p.heading(L"插值参数");
     double minimum = p.number("minimum", L"曲线最小 x", 0),
            maximum = p.number("maximum", L"曲线最大 x", 2650), step = p.number("step", L"采样步进", .5);
@@ -89,10 +93,11 @@ void renderOther(Page &p) {
     const std::vector<std::pair<double, double>> defaults{{250, 2002},   {550, 6531},   {850, 12285},
                                                           {1150, 18708}, {1450, 25475}, {1750, 32170},
                                                           {2050, 38455}, {2350, 43954}, {2650, 48340}};
-    p.ui.text({p.x + 60, p.y, (p.w - 64) / 2, 28}, L"x", 13, Ink, true);
-    p.ui.text({p.x + 64 + (p.w - 64) / 2, p.y, (p.w - 64) / 2, 28}, L"y", 13, Ink, true);
-    p.y += 30;
+    p.ui.text({p.x + 52, p.y, (p.w - 60) / 2, 26}, L"x", 12.5f, Ink, true);
+    p.ui.text({p.x + 58 + (p.w - 60) / 2, p.y, (p.w - 60) / 2, 26}, L"y", 12.5f, Ink, true);
+    p.y += 28;
     auto raw = p.pairs("q", L"Q", count, defaults, 270);
+    p.rightColumn();
     p.check();
     std::vector<Point> points;
     for (auto a : raw) {
@@ -132,6 +137,7 @@ void renderOther(Page &p) {
         rows.push_back({format(x), format(spline->y(x))});
     }
     p.table({L"x", L"y"}, rows);
+    p.endSplit();
     p.chart(curve, points, [spline](double x) { return spline->y(x); });
     bool full = false;
     p.processSteps.push_back(L"输入 " + std::to_wstring(points.size()) + L" 个 Q 型值点，x 严格递增；自然端点二阶导数为零。");

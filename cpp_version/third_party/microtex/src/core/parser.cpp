@@ -499,7 +499,7 @@ sptr<Atom> TeXParser::processEscape() {
   }
   // Show invalid command
   auto rm = sptrOf<RomanAtom>(Formula(L"\\backslash " + command)._root);
-  return sptrOf<ColorAtom>(rm, TRANSPARENT, RED);
+  return sptrOf<ColorAtom>(rm, TEX_TRANSPARENT, RED);
 }
 
 sptr<Atom> TeXParser::processCommands(const wstring& cmd, MacroInfo* mac) {
@@ -797,6 +797,7 @@ void TeXParser::parse() {
       case '\n':
         _line++;
         _col = _pos;
+        [[fallthrough]];
       case '\t':
       case '\r':
         _pos++;
@@ -997,7 +998,7 @@ sptr<Atom> TeXParser::convertCharacter(wchar_t c, bool oneChar) {
         if (_hideUnknownChar) return nullptr;
         sptr<Atom> rm(new RomanAtom(
           Formula(L"\\text{(unknown char " + towstring((int) c) + L")}")._root));
-        return sptrOf<ColorAtom>(rm, TRANSPARENT, RED);
+        return sptrOf<ColorAtom>(rm, TEX_TRANSPARENT, RED);
       }
     } else {
       /*

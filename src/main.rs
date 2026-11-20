@@ -8,19 +8,18 @@ mod fonts;
 mod icon;
 mod navigation;
 mod pdf_download;
+mod theme;
 mod units;
 
 use crate::app::ToolboxApp;
 use crate::fonts::configure_fonts;
-use eframe::egui::{self, Color32, Vec2};
+use eframe::egui::{self, Color32};
 
-pub(crate) const BLUE: Color32 = Color32::from_rgb(39, 105, 220);
-pub(crate) const BLUE_SOFT: Color32 = Color32::from_rgb(234, 242, 255);
-pub(crate) const TABLE_STRIPE: Color32 = Color32::from_rgb(225, 235, 250);
-pub(crate) const INK: Color32 = Color32::from_rgb(35, 48, 67);
-pub(crate) const MUTED: Color32 = Color32::from_rgb(111, 126, 146);
-pub(crate) const PAGE: Color32 = Color32::from_rgb(246, 248, 251);
-pub(crate) const RED: Color32 = Color32::from_rgb(183, 72, 70);
+pub(crate) const BLUE: Color32 = theme::LIGHT.accent;
+pub(crate) const BLUE_SOFT: Color32 = theme::LIGHT.accent_soft;
+pub(crate) const INK: Color32 = theme::LIGHT.ink;
+pub(crate) const MUTED: Color32 = theme::LIGHT.muted;
+pub(crate) const RED: Color32 = theme::LIGHT.danger;
 
 fn main() -> eframe::Result<()> {
     // 发布版在 Windows 上使用 GUI 子系统，启动时不额外弹出控制台窗口。
@@ -28,7 +27,7 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_title(concat!("工具箱 · 桌面版 v", env!("CARGO_PKG_VERSION")))
             .with_icon(icon::data().clone())
-            .with_inner_size([1220.0, 820.0])
+            .with_inner_size([1280.0, 840.0])
             .with_min_inner_size([620.0, 520.0]),
         ..Default::default()
     };
@@ -43,34 +42,6 @@ fn main() -> eframe::Result<()> {
     )
 }
 
-fn configure_style(ctx: &egui::Context) {
-    let mut style = (*ctx.style()).clone();
-    style.spacing.item_spacing = Vec2::new(10.0, 10.0);
-    style.spacing.button_padding = Vec2::new(12.0, 8.0);
-    style.visuals = egui::Visuals::light();
-    style.visuals.faint_bg_color = TABLE_STRIPE;
-    style.visuals.widgets.noninteractive.bg_fill = Color32::WHITE;
-    style.visuals.widgets.noninteractive.fg_stroke.color = INK;
-    style.visuals.widgets.noninteractive.bg_stroke =
-        egui::Stroke::new(1.0_f32, Color32::from_rgb(220, 229, 241));
-    style.visuals.widgets.noninteractive.corner_radius = 8.into();
-    style.visuals.widgets.inactive.bg_fill = Color32::WHITE;
-    style.visuals.widgets.inactive.weak_bg_fill = Color32::WHITE;
-    style.visuals.widgets.inactive.fg_stroke.color = INK;
-    style.visuals.widgets.inactive.bg_stroke =
-        egui::Stroke::new(1.0_f32, Color32::from_rgb(202, 214, 230));
-    style.visuals.widgets.inactive.corner_radius = 6.into();
-    style.visuals.widgets.hovered.bg_fill = BLUE_SOFT;
-    style.visuals.widgets.hovered.weak_bg_fill = BLUE_SOFT;
-    style.visuals.widgets.hovered.fg_stroke.color = BLUE;
-    style.visuals.widgets.hovered.bg_stroke = egui::Stroke::new(1.0_f32, BLUE);
-    style.visuals.widgets.hovered.corner_radius = 6.into();
-    style.visuals.widgets.active.bg_fill = BLUE;
-    style.visuals.widgets.active.weak_bg_fill = BLUE;
-    style.visuals.widgets.active.fg_stroke.color = Color32::WHITE;
-    style.visuals.widgets.active.bg_stroke = egui::Stroke::new(1.0_f32, BLUE);
-    style.visuals.widgets.active.corner_radius = 6.into();
-    style.visuals.selection.bg_fill = BLUE;
-    style.visuals.selection.stroke.color = Color32::WHITE;
-    ctx.set_style(style);
+pub(crate) fn configure_style(ctx: &egui::Context) {
+    theme::apply_theme(ctx, theme::ThemeMode::Light);
 }

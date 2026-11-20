@@ -21,6 +21,7 @@ static void electricalProcess(Page &p, Range dut, Range output, double da, doubl
     p.processSteps.push_back(L"按均匀分布合成，U = 2 × √(压力分量² + 电测分量²)/√3 = " + p.processValue(s.expanded) + L" " + unit + L"；允许限值 = 输出跨度 × 被检准确度/100/量传比 = " + p.processValue(output.span) + L" × " + inputNumber(da) + L"/100/" + inputNumber(required) + L" = " + p.processValue(s.allowance) + L" " + unit + L"。合成结果须严格小于允许限值，且压力通道满足要求；综合判断：" + judgement(s.meets) + L"。");
 }
 static void legacy(Page &p) {
+    p.beginSplit(0.45f);
     p.heading(L"变送器通道参数");
     double dl = p.number("dut_low", L"被检压力下限", 0), dh = p.number("dut_high", L"被检压力上限", 1),
            da = p.number("dut_accuracy", L"被检压力准确度 (%)", .1),
@@ -33,6 +34,7 @@ static void legacy(Page &p) {
            rsl = p.number("ref_signal_low", L"标准电测下限 (mA)", 0),
            rsh = p.number("ref_signal_high", L"标准电测上限 (mA)", 24),
            required = p.number("required", L"量传比要求", 3);
+    p.rightColumn();
     p.check();
     auto pressure = selectStandard(Range(dl, dh), Range(rl, rh), da, ra, required),
          signal = selectStandard(Range(sl, sh), Range(rsl, rsh), sa, rsa, required);
@@ -46,6 +48,7 @@ static void legacy(Page &p) {
                             {L"电信号量程覆盖", judgement(signal.coverage)},
                             {L"规程要求", L"≥ " + format(required) + L" 倍"},
                             {L"综合判断", judgement(pressure.meets && signal.meets)}});
+    p.endSplit();
     selectionProcess(p, Range(dl, dh), Range(rl, rh), da, ra, required, false, pressure, L"压力单位");
     p.processSteps.push_back(L"");
     selectionProcess(p, Range(sl, sh), Range(rsl, rsh), sa, rsa, required, false, signal, L"mA");
@@ -55,6 +58,8 @@ static void selection(Page &p, bool transmitter) {
         legacy(p);
         return;
     }
+    p.beginSplit(0.45f);
+    p.heading(L"选型参数");
     int mode =
         p.select("selection.mode", L"选型方式", {L"核验指定标准器", L"按被检量程推荐", L"按检定范围推荐"});
     const auto &unitsList = units(Dimension::Pressure);
@@ -101,6 +106,7 @@ static void selection(Page &p, bool transmitter) {
         double rl = p.number("ref_low", L"标准器量程下限", 0),
                rh = p.number("ref_high", L"标准器量程上限", 1.6),
                ra = p.number("ref_accuracy", L"标准器准确度 (%)", transmitter ? .01 : .05);
+        p.rightColumn();
         p.check();
         Range dut(dl, dh), reference(rl, rh);
         if (transmitter) {
@@ -123,10 +129,12 @@ static void selection(Page &p, bool transmitter) {
                                     {L"综合判断", judgement(s.meets)}});
             selectionProcess(p, dut, reference, da, ra, required, piston, s, labels[index]);
         }
+        p.endSplit();
         return;
     }
     int series = transmitter ? 0 : p.select("series", L"标准量程系列", {L"常用公制量程", L"扩展量程"});
     double fixedAccuracy = mode == 2 ? p.number("ref_accuracy", L"标准器准确度 (%)", .05) : 0;
+    p.rightColumn();
     p.check();
     Range dut(dl, dh);
     selectStandard(dut, dut, da, .01, required, piston);
@@ -190,6 +198,7 @@ static void selection(Page &p, bool transmitter) {
         }
     }
     p.metrics(L"选型结果", {{L"满足条件的量程 / 准确度组合", std::to_wstring(count)}});
+    p.endSplit();
 }
 void renderPressure(Page &p) {
     if (p.tool.kind == Kind::PressureReference || p.tool.kind == Kind::TransmitterReference) {
@@ -197,9 +206,12 @@ void renderPressure(Page &p) {
         return;
     }
     if (p.tool.kind == Kind::AltitudePressure) {
+        p.beginSplit(0.42f);
+        p.heading(L"气压与高度参数");
         int mode = p.select("mode", L"计算方式", {L"位势高度 → 标准气压", L"标准气压 → 位势高度"});
         double input = p.number(mode == 0 ? "altitude" : "pressure",
                                 mode == 0 ? L"位势高度 (m)" : L"标准气压 (kPa)", mode == 0 ? 0 : 101.325);
+        p.rightColumn();
         p.check();
         double h = mode == 0 ? input : atmosphereAltitude(input * 1000),
                pressure = mode == 0 ? atmospherePressure(h) : input * 1000;
@@ -207,6 +219,7 @@ void renderPressure(Page &p) {
                   {{L"气压高度", format(h) + L" m"},
                    {L"标准气压", format(pressure / 1000) + L" kPa"},
                    {L"空气密度", format(pressure / (287.05287 * atmosphereTemperature(h))) + L" kg/m³"}});
+        p.endSplit();
         p.processSteps.push_back(mode == 0 ? L"输入位势高度 = " + inputNumber(h) + L" m；从 0 m、101325 Pa 开始逐层计算。" : L"输入气压 = " + inputNumber(input) + L" kPa；在 −1000～86000 m 的分层模型中二分 90 次，得到高度 " + p.processValue(h) + L" m。");
         double base = 0, modelPressure = 101325;
         const double layers[][2] = {{11000, -.0065}, {20000, 0}, {32000, .001}, {47000, .0028}, {51000, 0}, {71000, -.0028}, {86000, -.002}};
@@ -227,6 +240,7 @@ void renderPressure(Page &p) {
         p.processSteps.push_back(L"标准温度 T = " + p.processValue(temperature) + L" K；空气密度 ρ = p/(R T) = " + p.processValue(pressure) + L" / (287.05287 × " + p.processValue(temperature) + L") = " + p.processValue(pressure / (287.05287 * temperature)) + L" kg/m³。");
         return;
     }
+    p.beginSplit(0.42f);
     p.heading(L"高差与传压介质");
     int medium = p.select("medium", L"介质类型", {L"液体", L"气体（输入密度）"});
     double h = p.number("height", L"高度差 ΔH (m)", .1);
@@ -245,6 +259,7 @@ void renderPressure(Page &p) {
         ambient = p.number("gas.ambient", L"环境大气压 (kPa)", 101.325);
     }
     double g = p.number("gravity", L"重力加速度 g (m/s²)", 9.80665);
+    p.rightColumn();
     p.check();
     double dp = gas == 1 ? gasDifference(h, rho, g, t, pressure * 1000, ambient * 1000, gauge)
                          : hydrostatic(h, rho, g);
@@ -253,6 +268,7 @@ void renderPressure(Page &p) {
                {L"标准值移至被检高度的修正量", format(-dp / 1000) + L" kPa"},
                {L"等效水柱（4 °C）", format(dp / 9.80638) + L" mmH₂O"},
                {L"修正方向", h > 0 ? L"被检表高于标准器" : (h < 0 ? L"被检表低于标准器" : L"无高差")}});
+    p.endSplit();
     double localDensity = rho;
     if (gas == 1) {
         double absolute = pressure * 1000 + (gauge ? ambient * 1000 : 0);

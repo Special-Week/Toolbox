@@ -1,7 +1,10 @@
-//! 传感器分度表、分页预览及 CSV 导出；所有温度曲线回调均接收摄氏温度。
+//! 传感器分度表（虚拟滚动表格 + 一键复制 TSV + CSV 导出）与 egui_plot 交互式特性曲线。
 use super::{calibration::TemperatureUnit, common::*};
-use crate::{BLUE, INK, MUTED, app::ToolboxApp, catalog::ToolDef};
-use eframe::egui::{self, RichText};
+use crate::{app::ToolboxApp, catalog::ToolDef, theme};
+use eframe::egui::{self, Align, Color32, CornerRadius, FontId, RichText, Stroke, Vec2};
+use egui_extras::{Column, TableBuilder};
+use egui_phosphor::regular as icons;
+use egui_plot::{Line, Plot, PlotPoints};
 use std::io::Write;
 
 /// 写出完整数值和 UTF-8 BOM；任一行无效时返回错误，由调用者放弃临时文件。
@@ -63,6 +66,7 @@ pub(crate) fn sample_points(start: f64, end: f64, step: f64) -> Result<Vec<f64>,
 }
 
 impl ToolboxApp {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_division_table(
         &mut self,
         ui: &mut egui::Ui,
@@ -73,216 +77,381 @@ impl ToolboxApp {
         signal_unit: &str,
         curve: impl Fn(f64) -> Result<f64, String>,
     ) {
-        egui::CollapsingHeader::new("分度表与特性曲线")
-            .id_salt((tool.id, key))
+        let p = theme::palette(ui.ctx());
+        ui.add_space(10.0);
+        egui::Frame::new()
+            .fill(p.surface)
+            .stroke(Stroke::new(1.0_f32, p.border))
+            .corner_radius(CornerRadius::same(12))
+            .shadow(p.shadow)
+            .inner_margin(16)
             .show(ui, |ui| {
-                let result = (|| {
-                    let (min, max) = (unit.display(bounds.0), unit.display(bounds.1));
-                    let start_key = format!("table.{key}.{}.start", unit.0);
-                    let end_key = format!("table.{key}.{}.end", unit.0);
-                    let step_key = format!("table.{key}.{}.step", unit.0);
-                    self.input(
-                        ui,
-                        tool,
-                        &start_key,
-                        &format!("起始温度 ({})", unit.symbol()),
-                        &min.to_string(),
-                        "位于所选分区内",
-                    );
-                    self.input(
-                        ui,
-                        tool,
-                        &end_key,
-                        &format!("终止温度 ({})", unit.symbol()),
-                        &max.to_string(),
-                        "位于所选分区内",
-                    );
-                    self.input(
-                        ui,
-                        tool,
-                        &step_key,
-                        &format!("温度步长 ({})", unit.symbol()),
-                        &unit.span().to_string(),
-                        "最多 50000 行",
-                    );
-                    let start = self.number(tool, &start_key, &min.to_string())?;
-                    let end = self.number(tool, &end_key, &max.to_string())?;
-                    if start < min || end > max {
-                        return Err("分度表范围超出所选曲线或校准分区".into());
-                    }
-                    let points = sample_points(
-                        start,
-                        end,
-                        self.number(tool, &step_key, &unit.span().to_string())?,
-                    )?;
-                    let values = |x: f64| -> Result<(f64, f64), String> {
-                        let t = unit.celsius(x);
-                        let delta = (t.abs() * f64::EPSILON * 8.0).max(0.01);
-                        // 曲线边界使用单侧差分；显示为 °F 时再按温差比例换算导数。
-                        let lo = (t - delta).max(bounds.0);
-                        let hi = (t + delta).min(bounds.1);
-                        Ok((
-                            curve(t)?,
-                            (curve(hi)? - curve(lo)?) / (hi - lo) / unit.span(),
-                        ))
-                    };
-                    if ui
-                        .add_sized([154.0, 36.0], egui::Button::new("导出完整 CSV"))
-                        .clicked()
-                    {
-                        if let Some(path) = rfd::FileDialog::new()
-                            .add_filter("CSV", &["csv"])
-                            .set_file_name(format!("{}_division.csv", tool.id))
-                            .save_file()
-                        {
-                            let output = (|| -> Result<(), String> {
-                                let parent = path.parent().ok_or("无效保存目录")?;
-                                // 与目标同目录写临时文件，全部成功后再替换目标。
-                                let mut file = tempfile::NamedTempFile::new_in(parent)
-                                    .map_err(|e| e.to_string())?;
-                                write_rows(&mut file, &points, unit.symbol(), signal_unit, values)?;
-                                file.persist(&path).map_err(|e| e.to_string())?;
-                                Ok(())
-                            })();
-                            match output {
-                                Ok(()) => {
-                                    ui.label(format!(
-                                        "已保存 {} 行：{}",
-                                        points.len(),
-                                        path.display()
-                                    ));
+                ui.set_width(ui.available_width());
+                egui::CollapsingHeader::new(
+                    RichText::new(format!("{} 分度表与特性曲线", icons::TABLE))
+                        .size(14.0)
+                        .strong()
+                        .color(p.ink),
+                )
+                .id_salt((tool.id, key))
+                .show(ui, |ui| {
+                    let result = (|| {
+                        let (min, max) = (unit.display(bounds.0), unit.display(bounds.1));
+                        let start_key = format!("table.{key}.{}.start", unit.0);
+                        let end_key = format!("table.{key}.{}.end", unit.0);
+                        let step_key = format!("table.{key}.{}.step", unit.0);
+                        ui.add_space(6.0);
+                        if ui.available_width() >= 680.0 {
+                            ui.columns(3, |cols| {
+                                self.input(
+                                    &mut cols[0],
+                                    tool,
+                                    &start_key,
+                                    &format!("起始温度 ({})", unit.symbol()),
+                                    &min.to_string(),
+                                    "分区内",
+                                );
+                                self.input(
+                                    &mut cols[1],
+                                    tool,
+                                    &end_key,
+                                    &format!("终止温度 ({})", unit.symbol()),
+                                    &max.to_string(),
+                                    "分区内",
+                                );
+                                self.input(
+                                    &mut cols[2],
+                                    tool,
+                                    &step_key,
+                                    &format!("温度步长 ({})", unit.symbol()),
+                                    &unit.span().to_string(),
+                                    "最多 50000 行",
+                                );
+                            });
+                        } else {
+                            self.input(
+                                ui,
+                                tool,
+                                &start_key,
+                                &format!("起始温度 ({})", unit.symbol()),
+                                &min.to_string(),
+                                "位于所选分区内",
+                            );
+                            self.input(
+                                ui,
+                                tool,
+                                &end_key,
+                                &format!("终止温度 ({})", unit.symbol()),
+                                &max.to_string(),
+                                "位于所选分区内",
+                            );
+                            self.input(
+                                ui,
+                                tool,
+                                &step_key,
+                                &format!("温度步长 ({})", unit.symbol()),
+                                &unit.span().to_string(),
+                                "最多 50000 行",
+                            );
+                        }
+                        let start = self.number(tool, &start_key, &min.to_string())?;
+                        let end = self.number(tool, &end_key, &max.to_string())?;
+                        if start < min || end > max {
+                            return Err("分度表范围超出所选曲线或校准分区".into());
+                        }
+                        let points = sample_points(
+                            start,
+                            end,
+                            self.number(tool, &step_key, &unit.span().to_string())?,
+                        )?;
+                        let values = |x: f64| -> Result<(f64, f64), String> {
+                            let t = unit.celsius(x);
+                            let delta = (t.abs() * f64::EPSILON * 8.0).max(0.01);
+                            let lo = (t - delta).max(bounds.0);
+                            let hi = (t + delta).min(bounds.1);
+                            Ok((
+                                curve(t)?,
+                                (curve(hi)? - curve(lo)?) / (hi - lo) / unit.span(),
+                            ))
+                        };
+
+                        ui.add_space(6.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(
+                                RichText::new(format!("共 {} 行 · 支持丝滑滚动浏览", points.len()))
+                                    .size(12.0)
+                                    .color(p.muted),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new(format!(
+                                                    "{} 导出完整 CSV",
+                                                    icons::DOWNLOAD_SIMPLE
+                                                ))
+                                                .size(12.5)
+                                                .color(Color32::WHITE),
+                                            )
+                                            .fill(p.accent)
+                                            .stroke(Stroke::NONE)
+                                            .corner_radius(CornerRadius::same(8))
+                                            .min_size(Vec2::new(132.0, 32.0)),
+                                        )
+                                        .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                        .clicked()
+                                        && let Some(path) = rfd::FileDialog::new()
+                                            .add_filter("CSV", &["csv"])
+                                            .set_file_name(format!("{}_division.csv", tool.id))
+                                            .save_file()
+                                    {
+                                        let output = (|| -> Result<(), String> {
+                                            let parent = path.parent().ok_or("无效保存目录")?;
+                                            let mut file = tempfile::NamedTempFile::new_in(parent)
+                                                .map_err(|e| e.to_string())?;
+                                            write_rows(
+                                                &mut file,
+                                                &points,
+                                                unit.symbol(),
+                                                signal_unit,
+                                                values,
+                                            )?;
+                                            file.persist(&path).map_err(|e| e.to_string())?;
+                                            Ok(())
+                                        })();
+                                        match output {
+                                            Ok(()) => theme::toast_success(
+                                                ui.ctx(),
+                                                format!(
+                                                    "已导出 {} 行至 {}",
+                                                    points.len(),
+                                                    path.display()
+                                                ),
+                                            ),
+                                            Err(e) => {
+                                                theme::toast_error(
+                                                    ui.ctx(),
+                                                    format!("导出失败：{e}"),
+                                                );
+                                            }
+                                        }
+                                    }
+
+                                if ui
+                                    .add(
+                                        egui::Button::new(
+                                            RichText::new(format!("{} 复制表格 (Excel)", icons::COPY))
+                                                .size(12.5)
+                                                .color(p.ink),
+                                        )
+                                        .fill(p.surface_subtle)
+                                        .stroke(Stroke::new(1.0_f32, p.border_strong))
+                                        .corner_radius(CornerRadius::same(8))
+                                        .min_size(Vec2::new(136.0, 32.0)),
+                                    )
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                                    .on_hover_text("以制表符分隔格式复制，可直接粘贴到 Excel")
+                                    .clicked()
+                                {
+                                    let limit = points.len().min(2000);
+                                    let mut tsv = format!(
+                                        "温度 ({})\t信号 ({signal_unit})\t变化率 ({signal_unit}/{})\n",
+                                        unit.symbol(),
+                                        unit.symbol()
+                                    );
+                                    let mut ok = true;
+                                    for &x in points.iter().take(limit) {
+                                        if let Ok((y, d)) = values(x) {
+                                            tsv.push_str(&format!(
+                                                "{}\t{}\t{}\n",
+                                                format_number(x),
+                                                format_number(y),
+                                                format_number(d)
+                                            ));
+                                        } else {
+                                            ok = false;
+                                            break;
+                                        }
+                                    }
+                                    if ok {
+                                        ui.ctx().copy_text(tsv);
+                                        if points.len() > limit {
+                                            theme::toast_info(
+                                                ui.ctx(),
+                                                format!(
+                                                    "已复制前 {limit} 行（全表 {} 行请使用 CSV 导出）",
+                                                    points.len()
+                                                ),
+                                            );
+                                        } else {
+                                            theme::toast_success(
+                                                ui.ctx(),
+                                                format!("已复制全部 {limit} 行分度表，可直接粘贴至 Excel"),
+                                            );
+                                        }
+                                    }
                                 }
-                                Err(e) => render_error_message(ui, &e),
-                            }
+                            });
+                        });
+
+                        ui.add_space(8.0);
+                        // 使用 egui_extras::TableBuilder 实现虚拟滚动与吸顶表头
+                        egui::Frame::new()
+                            .fill(p.surface_subtle)
+                            .stroke(Stroke::new(1.0_f32, p.border))
+                            .corner_radius(CornerRadius::same(10))
+                            .inner_margin(egui::Margin::symmetric(8, 6))
+                            .show(ui, |ui| {
+                                let table_height = (points.len() as f32 * 26.0 + 34.0).clamp(130.0, 300.0);
+                                let mut row_error: Option<String> = None;
+                                TableBuilder::new(ui)
+                                    .id_salt((tool.id, key, "virtual_table"))
+                                    .striped(true)
+                                    .max_scroll_height(table_height)
+                                    .column(Column::remainder().at_least(110.0))
+                                    .column(Column::remainder().at_least(120.0))
+                                    .column(Column::remainder().at_least(130.0))
+                                    .header(28.0, |mut header| {
+                                        header.col(|ui| {
+                                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                                ui.label(
+                                                    RichText::new(format!("温度 ({})", unit.symbol()))
+                                                        .size(12.5)
+                                                        .strong()
+                                                        .color(p.ink),
+                                                );
+                                            });
+                                        });
+                                        header.col(|ui| {
+                                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                                ui.label(
+                                                    RichText::new(format!("信号 ({signal_unit})"))
+                                                        .size(12.5)
+                                                        .strong()
+                                                        .color(p.ink),
+                                                );
+                                            });
+                                        });
+                                        header.col(|ui| {
+                                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                                ui.label(
+                                                    RichText::new(format!(
+                                                        "变化率 ({signal_unit}/{})",
+                                                        unit.symbol()
+                                                    ))
+                                                    .size(12.5)
+                                                    .strong()
+                                                    .color(p.ink),
+                                                );
+                                            });
+                                        });
+                                    })
+                                    .body(|body| {
+                                        body.rows(25.0, points.len(), |mut row| {
+                                            let x = points[row.index()];
+                                            match values(x) {
+                                                Ok((y, d)) => {
+                                                    row.col(|ui| {
+                                                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                                            ui.label(
+                                                                RichText::new(format_number(x))
+                                                                    .font(FontId::monospace(12.5))
+                                                                    .color(p.ink),
+                                                            );
+                                                        });
+                                                    });
+                                                    row.col(|ui| {
+                                                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                                            ui.label(
+                                                                RichText::new(format_number(y))
+                                                                    .font(FontId::monospace(12.5))
+                                                                    .color(p.accent),
+                                                            );
+                                                        });
+                                                    });
+                                                    row.col(|ui| {
+                                                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                                            ui.label(
+                                                                RichText::new(format_number(d))
+                                                                    .font(FontId::monospace(12.5))
+                                                                    .color(p.muted),
+                                                            );
+                                                        });
+                                                    });
+                                                }
+                                                Err(e) => {
+                                                    if row_error.is_none() {
+                                                        row_error = Some(e);
+                                                    }
+                                                }
+                                            }
+                                        });
+                                    });
+                                if let Some(err) = row_error {
+                                    render_error_message(ui, &err);
+                                }
+                            });
+
+                        ui.add_space(12.0);
+                        let mut plot_points = Vec::with_capacity(181);
+                        for i in 0..=180 {
+                            let x = start + (end - start) * i as f64 / 180.0;
+                            let y = curve(unit.celsius(x))?;
+                            super::numerics::finite(&[x, y])?;
+                            plot_points.push([x, y]);
                         }
+
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                RichText::new("特性曲线")
+                                    .size(13.0)
+                                    .strong()
+                                    .color(p.ink),
+                            );
+                            ui.label(
+                                RichText::new("悬停读数 · 拖拽平移 · 右键框选放大 · 双击复位")
+                                    .size(11.0)
+                                    .color(p.muted),
+                            );
+                        });
+                        ui.add_space(4.0);
+                        let x_sym = unit.symbol().to_owned();
+                        let y_sym = signal_unit.to_owned();
+                        egui::Frame::new()
+                            .fill(p.surface_subtle)
+                            .stroke(Stroke::new(1.0_f32, p.border))
+                            .corner_radius(CornerRadius::same(10))
+                            .inner_margin(8)
+                            .show(ui, |ui| {
+                                Plot::new((tool.id, key, "characteristic_plot"))
+                                    .height(250.0)
+                                    .allow_scroll(false)
+                                    .allow_zoom(false)
+                                    .allow_boxed_zoom(true)
+                                    .allow_drag(true)
+                                    .x_axis_label(format!("温度 ({x_sym})"))
+                                    .y_axis_label(format!("信号 ({y_sym})"))
+                                    .label_formatter(move |_name, value| {
+                                        format!(
+                                            "温度 = {} {x_sym}\n信号 = {} {y_sym}",
+                                            format_number(value.x),
+                                            format_number(value.y)
+                                        )
+                                    })
+                                    .show(ui, |plot_ui| {
+                                        plot_ui.line(
+                                            Line::new("特性曲线", PlotPoints::from(plot_points))
+                                                .color(p.accent)
+                                                .width(2.2_f32),
+                                        );
+                                    });
+                            });
+                        Ok::<_, String>(())
+                    })();
+                    if let Err(e) = result {
+                        render_error_message(ui, &e);
                     }
-                    let page_key = format!("table.{key}.page");
-                    let page_count = points.len().div_ceil(10);
-                    let mut page = self
-                        .value(tool, &page_key, "1")
-                        .parse::<usize>()
-                        .unwrap_or(1)
-                        .clamp(1, page_count);
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(page > 1, egui::Button::new("上一页"))
-                            .clicked()
-                        {
-                            page -= 1;
-                        }
-                        ui.label(format!("{page} / {page_count}"));
-                        if ui
-                            .add_enabled(page < page_count, egui::Button::new("下一页"))
-                            .clicked()
-                        {
-                            page += 1;
-                        }
-                    });
-                    self.set_value(tool, &page_key, page.to_string());
-                    let offset = (page - 1) * 10;
-                    ui.label(
-                        RichText::new(format!("共 {} 行 · 当前第 {} 页", points.len(), page))
-                            .color(MUTED),
-                    );
-                    egui::Grid::new((tool.id, key, "table-grid"))
-                        .striped(true)
-                        .spacing([24.0, 9.0])
-                        .show(ui, |ui| -> Result<(), String> {
-                            ui.strong(format!("温度 ({})", unit.symbol()));
-                            ui.strong(format!("信号 ({signal_unit})"));
-                            ui.strong(format!("变化率 ({signal_unit}/{})", unit.symbol()));
-                            ui.end_row();
-                            for &x in points.iter().skip(offset).take(10) {
-                                let (y, d) = values(x)?;
-                                ui.label(format_number(x));
-                                ui.label(format_number(y));
-                                ui.label(format_number(d));
-                                ui.end_row();
-                            }
-                            Ok(())
-                        })
-                        .inner?;
-                    let mut plot = Vec::new();
-                    for i in 0..=100 {
-                        let x = start + (end - start) * i as f64 / 100.;
-                        plot.push((x, curve(unit.celsius(x))?));
-                    }
-                    let y0 = plot.iter().map(|p| p.1).fold(f64::INFINITY, f64::min);
-                    let y1 = plot.iter().map(|p| p.1).fold(f64::NEG_INFINITY, f64::max);
-                    super::numerics::finite(&[y0, y1])?;
-                    let (rect, _) = ui.allocate_exact_size(
-                        egui::vec2(ui.available_width().max(150.), 250.),
-                        egui::Sense::hover(),
-                    );
-                    let area = egui::Rect::from_min_max(
-                        rect.min + egui::vec2(85., 22.),
-                        rect.max - egui::vec2(30., 36.),
-                    );
-                    let painter = ui.painter_at(rect);
-                    let font = egui::FontId::proportional(11.0);
-                    let x_axis = super::axis::Axis::new(
-                        unit.symbol(),
-                        start,
-                        end,
-                        (area.width() / 95.0).floor().max(2.0) as usize,
-                        false,
-                    );
-                    let y_axis = super::axis::Axis::new(signal_unit, y0, y1, 4, true);
-                    for tick in &x_axis.ticks {
-                        let x =
-                            area.left() + x_axis.tick_fraction(tick.value) as f32 * area.width();
-                        painter.text(
-                            egui::pos2(x, area.bottom() + 10.0),
-                            egui::Align2::CENTER_TOP,
-                            &tick.label,
-                            font.clone(),
-                            MUTED,
-                        );
-                    }
-                    for tick in &y_axis.ticks {
-                        let y =
-                            area.bottom() - y_axis.tick_fraction(tick.value) as f32 * area.height();
-                        painter.line_segment(
-                            [egui::pos2(area.left(), y), egui::pos2(area.right(), y)],
-                            egui::Stroke::new(0.5_f32, MUTED.gamma_multiply(0.3)),
-                        );
-                        painter.text(
-                            egui::pos2(area.left() - 8.0, y),
-                            egui::Align2::RIGHT_CENTER,
-                            &tick.label,
-                            font.clone(),
-                            MUTED,
-                        );
-                    }
-                    painter.text(
-                        rect.min,
-                        egui::Align2::LEFT_TOP,
-                        &y_axis.caption,
-                        font.clone(),
-                        INK,
-                    );
-                    painter.text(
-                        egui::pos2(area.right(), rect.bottom()),
-                        egui::Align2::RIGHT_BOTTOM,
-                        &x_axis.caption,
-                        font,
-                        INK,
-                    );
-                    let xy: Vec<_> = plot
-                        .iter()
-                        .map(|&(x, y)| {
-                            egui::pos2(
-                                area.left() + x_axis.fraction(x) as f32 * area.width(),
-                                area.bottom() - y_axis.fraction(y) as f32 * area.height(),
-                            )
-                        })
-                        .collect();
-                    painter.add(egui::Shape::line(xy, egui::Stroke::new(1.8_f32, BLUE)));
-                    Ok::<_, String>(())
-                })();
-                if let Err(e) = result {
-                    render_error_message(ui, &e);
-                }
+                });
             });
     }
 }

@@ -63,6 +63,7 @@ void renderSensors(Page &p) {
         break;
     }
     if (p.tool.kind == Kind::WorkingThermocouple) {
+        p.beginSplit(0.42f);
         p.heading(L"热电偶参数");
         const std::vector<std::string> codes{"B", "E", "J", "K", "N",  "R", "S", "T",
                                              "C", "D", "G", "L", "LR", "U", "A"};
@@ -80,6 +81,7 @@ void renderSensors(Page &p) {
                                 mode == 0 ? unit.display(100) : thermoEmf(kind, 100));
         double cold =
             unit.celsius(p.number("cold." + uk, L"参考端温度 (" + unit.symbol() + L")", unit.display(0)));
+        p.rightColumn();
         p.check();
         double ce = thermoEmf(kind, cold),
                t = mode == 0 ? unit.celsius(input) : thermoTemperature(kind, input + ce),
@@ -90,6 +92,7 @@ void renderSensors(Page &p) {
                                 {L"参考端电势", format(ce) + L" mV"},
                                 {L"微分热电势 dE/dt",
                                  format(thermoSlope(kind, t) / unit.span()) + L" mV/" + unit.symbol()}});
+        p.endSplit();
         p.processSteps.push_back(wide(kind) + L" 型参考函数；热端温度 " + p.processValue(t) + L" °C，参考端温度 " + p.processValue(cold) + L" °C。");
         thermoReferenceProcess(p, kind, t, L"热端");
         p.processSteps.push_back(L"");
@@ -107,6 +110,7 @@ void renderSensors(Page &p) {
                    [kind, ce](double t) { return thermoEmf(kind, t) - ce; });
         return;
     }
+    p.beginSplit(0.42f);
     p.heading(L"热电阻参数");
     std::vector<std::wstring> names;
     for (auto &d : rtdDefinitions()) {
@@ -135,6 +139,7 @@ void renderSensors(Page &p) {
     double input = p.number(mode == 0 ? "temperature." + std::to_string(u) : d.key + ".resistance",
                             mode == 0 ? L"温度 (" + unit.symbol() + L")" : L"电阻 (Ω)",
                             mode == 0 ? unit.display(100) : def);
+    p.rightColumn();
     p.check();
     double t = mode == 0 ? unit.celsius(input) : model.temperature(input);
     for (double endpoint : {d.minimum, d.maximum}) {
@@ -148,6 +153,7 @@ void renderSensors(Page &p) {
                {L"电阻", format(resistance) + L" Ω"},
                {L"电阻比 R / R₀", format(resistance / r0)},
                {L"电阻变化率 dR/dt", format(model.slope(t) / unit.span()) + L" Ω/" + unit.symbol()}});
+    p.endSplit();
     const auto ref = model.reference(t);
     const double variable = t + ref.shift;
     p.processSteps.push_back(L"分度号 " + d.name + L"；R₀ = " + inputNumber(r0) + L" Ω；当前温度 t = " + p.processValue(t) + L" °C，电阻 R = " + p.processValue(resistance) + L" Ω。");
@@ -175,10 +181,12 @@ void renderSensors(Page &p) {
     p.division(d.key, {d.minimum, d.maximum}, unit, L"Ω", [model](double t) { return model.resistance(t); });
 }
 void cvdPage(Page &p) {
+    p.beginSplit(0.45f);
     p.heading(L"标准铂电阻系数拟合");
     p.note(L"输入 R₀ 与三个校准温度点的实测电阻，拟合 CVD 系数。至少一个点需低于 0 °C。");
     double r0 = p.number("cvd.r0", L"R₀ (Ω)", 100);
     auto points = p.pairs("cvd.point", L"点", 3, {{-100, 60.25584}, {100, 138.5055}, {200, 175.856}});
+    p.rightColumn();
     p.check();
     std::array<std::pair<double, double>, 3> a{{points[0], points[1], points[2]}};
     auto c = fitCvd(r0, a);
@@ -190,6 +198,7 @@ void cvdPage(Page &p) {
                             {L"系数 B", format(c[1])},
                             {L"系数 C", format(c[2])},
                             {L"最大残差", format(residual) + L" Ω"}});
+    p.endSplit();
     p.processSteps.push_back(L"按 R/R₀ − 1 = At + Bt² + C(t−100)t³ 建立三元方程；t ≥ 0 时 C 项为零。采用列缩放和选主元消元求解。");
     for (std::size_t i = 0; i < points.size(); ++i) {
         auto point = points[i];

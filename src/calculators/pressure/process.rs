@@ -1,4 +1,5 @@
 //! 将选型模型的实际结果整理为可复核的计算步骤。
+#![allow(clippy::items_after_test_module)]
 use super::{
     model::{Range, Selection},
     selection_model::ElectricalSelection,
@@ -57,6 +58,7 @@ pub(crate) fn atmosphere_layer(
     [values, formula]
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn selection(
     dut: Range,
     reference: Range,
@@ -234,6 +236,7 @@ mod tests {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn electrical(
     dut: Range,
     signal: Range,

@@ -33,8 +33,8 @@ inline sptr<T> sptrOf(Args&& ... args) {
 template<class T>
 inline int indexOf(const std::vector<T>& v, const T& x) {
   auto it = find(v.begin(), v.end(), x);
-  int i = std::distance(v.begin(), it);
-  return (i >= v.size() ? -1 : i);
+  if (it == v.end()) return -1;
+  return static_cast<int>(std::distance(v.begin(), it));
 }
 
 /** 

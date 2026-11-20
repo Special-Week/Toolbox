@@ -6,6 +6,7 @@ use super::{
 };
 use crate::calculators::common::format_process_computed as c;
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn plugs(
     out: &mut Report,
     gauges: &[Gauge],
@@ -71,6 +72,7 @@ pub(super) fn plugs(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn rings(
     out: &mut Report,
     work: &[Gauge],
@@ -219,6 +221,7 @@ fn ring_limits(out: &mut Report, gauge: &Gauge, tolerance: f64, wear: f64) {
     out.trace(format!("中径下限/上限 = 名义 ± TR/2 = {} ± {}/2 = {}～{} mm；磨损极限 = 名义 + 磨损储备 = {} + {} = {} mm。", c(gauge.center), c(tolerance), c(gauge.pd[0]), c(gauge.pd[1]), c(gauge.center), c(wear), c(gauge.wear)));
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn unified_plugs(
     out: &mut Report,
     go: &Gauge,
@@ -256,6 +259,7 @@ pub(super) fn unified_plugs(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(super) fn unified_rings(
     out: &mut Report,
     go: &Gauge,

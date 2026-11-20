@@ -156,6 +156,7 @@ pub(crate) fn effective_error(
     lines
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn planck(
     spectrum: &Spectrum,
     response: usize,

@@ -378,7 +378,7 @@ defineExpose({ reset, busy });
   line-height: 1.6;
 }
 .pdf-old-status {
-  color: #a36022;
+  color: var(--warning);
 }
 .pdf-pagination {
   display: flex;
@@ -395,18 +395,18 @@ defineExpose({ reset, busy });
 .pdf-link-input {
   display: block;
   width: 100%;
-  min-height: 44px;
+  min-height: 42px;
   margin: 12px 0;
   padding: 0 12px;
-  border: 1px solid #a9bddb;
-  border-radius: 6px;
-  background: white;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--ink);
   font-size: 14px;
 }
 .pdf-link-input:focus {
   border-color: var(--blue);
-  outline: 2px solid #2769dc20;
-  outline-offset: 1px;
+  background: var(--surface);
 }
 .pdf-actions {
   display: flex;
@@ -416,21 +416,21 @@ defineExpose({ reset, busy });
 }
 .pdf-button {
   min-width: 112px;
-  min-height: 40px;
-  font-size: 14px;
-  padding: 10px 16px;
-  border-radius: 6px;
+  min-height: 38px;
+  font-size: 13.5px;
+  padding: 8px 16px;
+  border-radius: 8px;
 }
 .pdf-button.secondary {
-  background: white;
-  border-color: #cfd9e8;
-  color: #233043;
+  background: var(--surface-subtle);
+  border-color: var(--border);
+  color: var(--ink);
 }
 .pdf-explanation {
   background: var(--soft);
-  border: 0;
-  border-radius: 8px;
-  padding: 18px;
+  border: 1px solid var(--soft-border);
+  border-radius: 10px;
+  padding: 16px 18px;
   margin-top: 16px;
   font-size: 13px;
   line-height: 1.8;
@@ -441,7 +441,8 @@ defineExpose({ reset, busy });
 .pdf-explanation code {
   display: block;
   overflow-wrap: anywhere;
-  color: #61728b;
+  color: var(--muted);
+  font-family: var(--mono);
   font-size: 12px;
 }
 .pdf-results h2 {
@@ -458,7 +459,7 @@ defineExpose({ reset, busy });
 .pdf-metrics .panel {
   margin: 0;
   padding: 14px;
-  border-radius: 6px;
+  border-radius: 8px;
 }
 .pdf-metrics span,
 .pdf-metrics strong {
@@ -470,13 +471,13 @@ defineExpose({ reset, busy });
 }
 .pdf-metrics strong {
   font-size: 15px;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--blue);
   margin-top: 6px;
   overflow-wrap: anywhere;
 }
 .pdf-error {
-  color: #b74846;
+  color: var(--danger);
   margin: 12px 0;
   font-size: 13px;
 }
@@ -486,14 +487,14 @@ defineExpose({ reset, busy });
   overflow: auto;
   margin: auto;
   padding: 24px;
-  border: 1px solid #dce3ed;
-  border-radius: 10px;
-  background: white;
-  color: #233043;
-  box-shadow: 0 12px 35px #142d4b2e;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-md);
 }
 .pdf-dialog::backdrop {
-  background: #0006;
+  background: var(--backdrop);
 }
 .pdf-dialog h2 {
   font-size: 19px;

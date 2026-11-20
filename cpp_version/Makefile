@@ -35,9 +35,11 @@ CPP_OBJECTS := $(addprefix $(BUILD)/,$(addsuffix .o,$(CPP_SOURCES)))
 C_OBJECTS := $(addprefix $(BUILD)/,$(addsuffix .o,$(C_SOURCES)))
 OBJECTS := $(CPP_OBJECTS) $(C_OBJECTS)
 RESOURCE := $(BUILD)/Toolbox.res.o
-INCLUDES := -Iinclude -Ithird_party -Ithird_party/pdfio -Ithird_party/pdfio/ttf -Ithird_party/zlib -Ithird_party/microtex/src -Ithird_party/tinyxml2
+INCLUDES := -Iinclude -isystem third_party -isystem third_party/pdfio -isystem third_party/pdfio/ttf -isystem third_party/zlib -isystem third_party/microtex/src -isystem third_party/tinyxml2
 DEFINES := -DUNICODE -D_UNICODE -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 -DBUILD_WIN32 -DNDEBUG
 CXXFLAGS := -std=c++17 -O2 -Wall -Wextra -Wpedantic -finput-charset=UTF-8 -fexec-charset=UTF-8 -fno-fast-math -ffp-contract=off $(DEFINES) $(INCLUDES) $(CPU_FLAGS)
+# Keep strict diagnostics for the application; the bundled MicroTeX snapshot has legacy warnings.
+MICROTEX_CXXFLAGS := $(CXXFLAGS) -w
 CFLAGS := -std=c11 -O2 -w -D_WIN32_WINNT=0x0601 -DWINVER=0x0601 $(INCLUDES)
 LIBS := -lstdc++ -ld2d1 -ldwrite -lwindowscodecs -lcomctl32 -lcomdlg32 -lole32 -lgdi32 -luuid -lwinhttp -lbcrypt -ladvapi32 -lwinpthread -lshell32 -lgdiplus
 LINKFLAGS := -O2 -s $(CPU_FLAGS) -municode -mwindows -static -static-libgcc -Wl,--major-subsystem-version,6,--minor-subsystem-version,1
@@ -51,6 +53,10 @@ all: $(TARGET)
 define ensure_dir
 @if not exist "$(subst /,\,$(1))" mkdir "$(subst /,\,$(1))" 2>nul || if not exist "$(subst /,\,$(1))" exit /b 1
 endef
+
+$(BUILD)/third_party/microtex/%.cpp.o: third_party/microtex/%.cpp Makefile microtex.rsp
+	$(call ensure_dir,$(@D))
+	$(CXX) $(MICROTEX_CXXFLAGS) -MMD -MP -c "$<" -o "$@"
 
 $(BUILD)/%.cpp.o: %.cpp Makefile build.rsp microtex.rsp
 	$(call ensure_dir,$(@D))

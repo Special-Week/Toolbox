@@ -55,7 +55,7 @@ pub(crate) fn calculate(t: f64, p: f64, known: usize, value: f64) -> Result<Resu
     };
     let raw_rh = raw_vapor * 100.0 / saturated;
     // 仅修正反算时越过边界的微小数值误差，并让后续计算使用同一分压。
-    let vapor = if raw_rh < 0.0 && raw_rh >= -1e-10 {
+    let vapor = if (-1e-10..0.0).contains(&raw_rh) {
         0.0
     } else if raw_rh > 100.0 && raw_rh <= 100.0 + 1e-8 {
         saturated

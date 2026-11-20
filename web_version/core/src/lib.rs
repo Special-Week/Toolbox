@@ -220,8 +220,10 @@ pub(crate) fn calculate_inner(id: &str, input: &str) -> Result<Output, String> {
             let source = input.index("source", 0, units.len())?;
             let value = input.number("value", 1.0)?;
             units::convert_unit(d, value, source, source)?;
-            let mut out = Output::default();
-            out.headings = vec!["换算结果".into(), "单位名称".into(), "单位符号".into()];
+            let mut out = Output {
+                headings: vec!["换算结果".into(), "单位名称".into(), "单位符号".into()],
+                ..Output::default()
+            };
             for (i, u) in units.iter().enumerate() {
                 let converted = units::convert_unit(d, value, source, i);
                 if i > 0 {

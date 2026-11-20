@@ -40,79 +40,98 @@ fn style_gauge_menu(ui: &mut egui::Ui) {
 
 impl ToolboxApp {
     pub(crate) fn render_gauge(&mut self, ui: &mut egui::Ui, tool: &ToolDef, kind: GaugeKind) {
-        egui::Frame::new()
-            .inner_margin(egui::Margin::symmetric(0, 6))
-            .show(ui, |ui| {
-                let response = egui::Frame::new()
-                    .fill(egui::Color32::WHITE)
-                    .corner_radius(8.)
-                    .stroke(egui::Stroke::new(
-                        1.0_f32,
-                        egui::Color32::from_rgb(220, 229, 241),
-                    ))
-                    .inner_margin(16.)
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-                        ui.label(RichText::new("计算参数").size(15.).strong().color(INK));
-                        ui.add_space(4.);
-                        match kind {
-                            GaugeKind::Metric | GaugeKind::Trapezoidal => {
-                                self.gauge_thread_form(ui, tool, kind == GaugeKind::Trapezoidal)
-                            }
-                            GaugeKind::Unified => self.gauge_unified_form(ui, tool),
-                            GaugeKind::Pipe => self.gauge_pipe_form(ui, tool),
-                            GaugeKind::Rebar => self.gauge_rebar_form(ui, tool),
-                            GaugeKind::Smooth => self.gauge_smooth_form(ui, tool),
+        let p = crate::theme::palette(ui.ctx());
+        let mut process_report: Option<Report> = None;
+
+        split_workspace(
+            ui,
+            0.38,
+            self,
+            |ui, app| {
+                panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    ui.label(RichText::new("计算参数").size(14.5).strong().color(p.ink));
+                    ui.add_space(6.0);
+                    match kind {
+                        GaugeKind::Metric | GaugeKind::Trapezoidal => {
+                            app.gauge_thread_form(ui, tool, kind == GaugeKind::Trapezoidal)
                         }
-                    });
-                match response.inner {
-                    Ok(report) => {
-                        render_report(ui, tool, &report);
-                        calculation_process_lazy(ui, "gauge_process", || {
-                            let mut steps = report.process.clone();
-                            for note in &report.notes {
-                                steps.push(format!("取值说明：{note}"));
-                            }
-                            for table in report.tables.iter().filter(|_| matches!(kind, GaugeKind::Pipe)) {
-                                steps.push(String::new());
-                                steps.push(format!(
-                                    "{}：按所选规格查内置表，以下数值为表中数据；结果表按五位小数显示。",
-                                    table.title
-                                ));
-                                for row in &table.rows {
-                                    steps.push(String::new());
-                                    steps.push(
-                                        table
-                                            .headings
-                                            .iter()
-                                            .zip(row)
-                                            .map(|(heading, cell)| {
-                                                format!(
-                                                    "{} = {}",
-                                                    heading,
-                                                    cell.raw
-                                                        .split_whitespace()
-                                                        .map(|part| part
-                                                            .parse::<f64>()
-                                                            .ok()
-                                                            .map(format_process_computed)
-                                                            .unwrap_or_else(|| part.to_owned()))
-                                                        .collect::<Vec<_>>()
-                                                        .join(" ")
-                                                )
-                                            })
-                                            .collect::<Vec<_>>()
-                                            .join("；"),
-                                    );
-                                }
-                            }
-                            steps
-                        });
+                        GaugeKind::Unified => app.gauge_unified_form(ui, tool),
+                        GaugeKind::Pipe => app.gauge_pipe_form(ui, tool),
+                        GaugeKind::Rebar => app.gauge_rebar_form(ui, tool),
+                        GaugeKind::Smooth => app.gauge_smooth_form(ui, tool),
                     }
-                    Err(message) => render_error_message(ui, &message),
+                })
+                .inner
+            },
+            |ui, _app, response| {
+                panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    match response {
+                        Ok(report) => {
+                            render_report_summary(ui, tool, &report);
+                            process_report = Some(report);
+                        }
+                        Err(message) => render_error_message(ui, &message),
+                    }
+                });
+            },
+        );
+
+        if let Some(report) = process_report {
+            if !report.tables.is_empty() {
+                ui.add_space(12.0);
+                panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    render_report_tables(ui, tool, &report);
+                });
+            }
+            calculation_process_lazy(ui, "gauge_process", || {
+                let mut steps = report.process.clone();
+                for note in &report.notes {
+                    steps.push(format!("取值说明：{note}"));
                 }
-                info_note(ui, tool.kind);
+                for table in report
+                    .tables
+                    .iter()
+                    .filter(|_| matches!(kind, GaugeKind::Pipe))
+                {
+                    steps.push(String::new());
+                    steps.push(format!(
+                        "{}：按所选规格查内置表，以下数值为表中数据；结果表按五位小数显示。",
+                        table.title
+                    ));
+                    for row in &table.rows {
+                        steps.push(String::new());
+                        steps.push(
+                            table
+                                .headings
+                                .iter()
+                                .zip(row)
+                                .map(|(heading, cell)| {
+                                    format!(
+                                        "{} = {}",
+                                        heading,
+                                        cell.raw
+                                            .split_whitespace()
+                                            .map(|part| part
+                                                .parse::<f64>()
+                                                .ok()
+                                                .map(format_process_computed)
+                                                .unwrap_or_else(|| part.to_owned()))
+                                            .collect::<Vec<_>>()
+                                            .join(" ")
+                                    )
+                                })
+                                .collect::<Vec<_>>()
+                                .join("；"),
+                        );
+                    }
+                }
+                steps
             });
+        }
+        info_note(ui, tool.kind);
     }
 
     /// 推荐值与手填共用一个字符串，改变下拉不会丢失单位或额外触发滚轮选项切换。
@@ -448,11 +467,11 @@ impl ToolboxApp {
         }
         self.set_value(tool, "series", detected.into());
         let selected = self.gauge_choice(ui, tool, "series", "螺纹系列", &series_options, detected);
-        if selected != detected {
-            if let Some((_, tpi)) = variants.iter().find(|(series, _)| *series == selected) {
-                self.set_value(tool, "tpi", tpi.to_string());
-                ui.ctx().request_repaint();
-            }
+        if selected != detected
+            && let Some((_, tpi)) = variants.iter().find(|(series, _)| *series == selected)
+        {
+            self.set_value(tool, "tpi", tpi.to_string());
+            ui.ctx().request_repaint();
         }
         let class = self.gauge_options(
             ui,
@@ -576,32 +595,35 @@ impl ToolboxApp {
     }
 }
 
-fn render_report(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
-    ui.add_space(12.);
+fn render_report_summary(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
+    let p = crate::theme::palette(ui.ctx());
     ui.horizontal_wrapped(|ui| {
-        ui.label(RichText::new(&report.title).size(16.).strong().color(INK));
+        ui.label(RichText::new(&report.title).size(15.5).strong().color(p.ink));
         if ui
-            .add(egui::Button::new("复制完整结果").min_size(Vec2::new(116., 34.)))
+            .add(egui::Button::new("复制完整结果").min_size(Vec2::new(116., 32.)))
+            .on_hover_cursor(egui::CursorIcon::PointingHand)
             .clicked()
         {
             ui.ctx().copy_text(report.text(
                 crate::calculators::explanations::for_tool(tool.kind),
                 &super::conventions::text(tool.kind),
             ));
+            crate::theme::toast_success(ui.ctx(), "已复制完整量规计算报告");
         }
     });
     if !report.notes.is_empty() {
+        ui.add_space(6.);
         collapsible_note(
             ui,
             (tool.id, "result_notes"),
             &format!("⚠ 取值说明与适用限制 · {} 项", report.notes.len()),
             |ui| {
                 for note in &report.notes {
-                    ui.add(egui::Label::new(RichText::new(note).size(12.).color(INK)).wrap());
+                    ui.add(egui::Label::new(RichText::new(note).size(12.).color(p.ink)).wrap());
                 }
             },
         );
-        ui.add_space(3.);
+        ui.add_space(4.);
     }
     let summary: Vec<_> = report
         .metrics
@@ -619,28 +641,45 @@ fn render_report(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
         &summary,
     );
     if report.metrics.len() > 6 {
+        ui.add_space(4.);
         egui::CollapsingHeader::new(format!(
             "几何与公差取值详情 · {} 项",
             report.metrics.len() - 6
         ))
         .id_salt((tool.id, "factors"))
         .show(ui, |ui| {
-            egui::Grid::new((tool.id, "factor_grid"))
-                .num_columns(2)
-                .striped(true)
-                .spacing([18., 9.])
+            ScrollArea::horizontal()
+                .id_salt((tool.id, "factor_grid_scroll"))
+                .max_width(ui.available_width())
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    for (name, value) in report.metrics.iter().skip(6) {
-                        ui.label(RichText::new(name).color(MUTED));
-                        ui.label(&value.display);
-                        ui.end_row();
-                    }
+                    egui::Grid::new((tool.id, "factor_grid"))
+                        .num_columns(2)
+                        .striped(true)
+                        .spacing([18., 8.])
+                        .show(ui, |ui| {
+                            for (name, value) in report.metrics.iter().skip(6) {
+                                ui.label(RichText::new(name).color(p.muted));
+                                ui.label(
+                                    RichText::new(&value.display)
+                                        .font(egui::FontId::monospace(12.5))
+                                        .color(p.ink),
+                                );
+                                ui.end_row();
+                            }
+                        });
                 });
         });
     }
+}
+
+fn render_report_tables(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
+    let p = crate::theme::palette(ui.ctx());
+    let available = ui.available_width();
     for (index, table) in report.tables.iter().enumerate() {
-        ui.add_space(14.);
-        ui.label(RichText::new(&table.title).size(14.).strong().color(BLUE));
+        if index > 0 {
+            ui.add_space(14.);
+        }
         // 按表头和实际内容确定列宽；列结构相同的工作规、校对规共用宽度，保持上下对齐。
         let text_width = |text: RichText| {
             egui::WidgetText::from(text)
@@ -666,14 +705,43 @@ fn render_report(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
                     .filter(|other| other.headings == table.headings)
                     .flat_map(|other| &other.rows)
                     .filter_map(|row| row.get(column))
-                    .map(|cell| text_width(RichText::new(&cell.display).size(12.5)))
+                    .map(|cell| {
+                        text_width(
+                            RichText::new(&cell.display)
+                                .font(egui::FontId::monospace(12.5)),
+                        )
+                    })
                     .fold(heading_width.max(48.), f32::max)
-                    + 2.
+                    + 6.
             })
             .collect();
+        let total_w: f32 = widths.iter().sum::<f32>()
+            + 16.0 * widths.len().saturating_sub(1) as f32;
+        ui.horizontal_wrapped(|ui| {
+            ui.label(
+                RichText::new(&table.title)
+                    .size(14.)
+                    .strong()
+                    .color(p.accent),
+            );
+            if total_w > available {
+                ui.label(
+                    RichText::new("← 左右滑动查看全部列 →")
+                        .size(11.)
+                        .color(p.muted),
+                );
+            }
+        });
+        ui.add_space(4.);
         ScrollArea::horizontal()
             .id_salt((tool.id, index, "table_scroll"))
+            .max_width(available)
             .auto_shrink([false, true])
+            .scroll_bar_visibility(if total_w > available {
+                egui::scroll_area::ScrollBarVisibility::AlwaysVisible
+            } else {
+                egui::scroll_area::ScrollBarVisibility::VisibleWhenNeeded
+            })
             .show(ui, |ui| {
                 egui::Grid::new((tool.id, index, "table"))
                     .num_columns(table.headings.len())
@@ -685,7 +753,7 @@ fn render_report(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
                             ui.add_sized(
                                 [*width, 34.],
                                 egui::Label::new(
-                                    RichText::new(title).size(12.).strong().color(MUTED),
+                                    RichText::new(title).size(12.).strong().color(p.muted),
                                 )
                                 .extend()
                                 .halign(egui::Align::Center),
@@ -696,13 +764,13 @@ fn render_report(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
                             for (i, cell) in row.iter().enumerate() {
                                 ui.add_sized(
                                     [widths[i], 34.],
-                                    egui::Label::new(
-                                        RichText::new(&cell.display).size(12.5).color(if i == 0 {
-                                            INK
-                                        } else {
-                                            BLUE
-                                        }),
-                                    )
+                                    egui::Label::new(if i == 0 {
+                                        RichText::new(&cell.display).size(12.5).color(p.ink)
+                                    } else {
+                                        RichText::new(&cell.display)
+                                            .font(egui::FontId::monospace(12.5))
+                                            .color(p.accent)
+                                    })
                                     .extend()
                                     .halign(egui::Align::Center),
                                 );
@@ -738,7 +806,7 @@ mod tests {
             let mut sum = 0.0;
             let mut term = parts[0].parse::<f64>().unwrap();
             let mut scale = term.abs().max(1.0);
-            for pair in parts[1..].chunks_exact(2) {
+            for pair in parts[1..].as_chunks::<2>().0 {
                 let value = pair[1].parse::<f64>().unwrap();
                 scale = scale.max(value.abs());
                 match pair[0] {
@@ -1196,7 +1264,10 @@ mod tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    egui::CentralPanel::default().show(ctx, |ui| render_report(ui, tool, &report));
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        render_report_summary(ui, tool, &report);
+                        render_report_tables(ui, tool, &report);
+                    });
                 },
             )
         };

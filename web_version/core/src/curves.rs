@@ -127,35 +127,9 @@ pub(crate) fn curve_value(id: &str, i: &Input, x: f64) -> Result<f64, String> {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+type SplineModelData = (Vec<Point>, UniformCubicSpline, f64, f64, f64, usize);
 
-    #[test]
-    fn curve_hover_uses_the_same_fit_and_spline_models() {
-        let input = Input::new("{}").unwrap();
-        let fit = CurveFit::calculate(FIT_POINTS, FitKind::Linear).unwrap();
-        assert!(
-            (curve_value("calibration_curve_fit", &input, 12.345).unwrap()
-                - fit.predict(12.345).unwrap())
-            .abs()
-                < 1e-12
-        );
-        let (_, spline, _, _, _, _) = spline_model(&input).unwrap();
-        assert!(
-            (curve_value("bspline_interpolation", &input, 1234.5).unwrap()
-                - spline.y_at_x(1234.5).unwrap())
-            .abs()
-                < 1e-9
-        );
-        assert!(curve_value("other", &input, 1.0).is_err());
-        assert!(curve_value("calibration_curve_fit", &input, f64::NAN).is_err());
-    }
-}
-
-fn spline_model(
-    i: &Input,
-) -> Result<(Vec<Point>, UniformCubicSpline, f64, f64, f64, usize), String> {
+fn spline_model(i: &Input) -> Result<SplineModelData, String> {
     let points = i
         .points(SPLINE_POINTS, 2, 500)?
         .into_iter()
@@ -184,4 +158,30 @@ pub(crate) fn spline_csv(i: &Input, offset: usize, limit: usize) -> Result<Strin
         writeln!(text, "{x},{}", m.y_at_x(x)?).map_err(|_| "CSV 文本生成失败")?;
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn curve_hover_uses_the_same_fit_and_spline_models() {
+        let input = Input::new("{}").unwrap();
+        let fit = CurveFit::calculate(FIT_POINTS, FitKind::Linear).unwrap();
+        assert!(
+            (curve_value("calibration_curve_fit", &input, 12.345).unwrap()
+                - fit.predict(12.345).unwrap())
+            .abs()
+                < 1e-12
+        );
+        let (_, spline, _, _, _, _) = spline_model(&input).unwrap();
+        assert!(
+            (curve_value("bspline_interpolation", &input, 1234.5).unwrap()
+                - spline.y_at_x(1234.5).unwrap())
+            .abs()
+                < 1e-9
+        );
+        assert!(curve_value("other", &input, 1.0).is_err());
+        assert!(curve_value("calibration_curve_fit", &input, f64::NAN).is_err());
+    }
 }

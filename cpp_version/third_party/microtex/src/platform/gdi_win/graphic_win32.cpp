@@ -240,7 +240,7 @@ color Graphics2D_win32::getColor() const {
 void Graphics2D_win32::setStroke(const Stroke& s) {
   _stroke = s;
   _pen->SetWidth(s.lineWidth);
-  Gdiplus::LineCap c;
+  Gdiplus::LineCap c = Gdiplus::LineCapFlat;
   switch (s.cap) {
     case CAP_BUTT:
       c = Gdiplus::LineCapFlat;
@@ -253,7 +253,7 @@ void Graphics2D_win32::setStroke(const Stroke& s) {
       break;
   }
   _pen->SetLineCap(c, c, Gdiplus::DashCapRound);
-  Gdiplus::LineJoin j;
+  Gdiplus::LineJoin j = Gdiplus::LineJoinMiter;
   switch (s.join) {
     case JOIN_BEVEL:
       j = Gdiplus::LineJoinBevel;

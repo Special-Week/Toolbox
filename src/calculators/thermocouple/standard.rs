@@ -1,4 +1,5 @@
 //! S/B 标准热电偶：固定点偏差叠加参考曲线，或使用限定温区的直接多项式。
+#![allow(clippy::items_after_test_module)]
 use super::thermocouple_emf;
 use crate::calculators::{
     calibration::{inverse, polynomial},

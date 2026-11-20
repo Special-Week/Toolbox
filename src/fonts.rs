@@ -1,10 +1,13 @@
-//! 保留 egui 默认拉丁字体，并依次追加系统中文、符号与数学字体作为回退。
+//! 字体配置：组合系统无衬线中文字体、等宽数字字体、符号数学字体与 Phosphor 矢量图标字体。
 //! 字体文件缺失时跳过该项，不让特定系统字体成为启动的硬性依赖。
-use eframe::egui::{self, FontData, FontDefinitions};
+use eframe::egui::{self, FontData, FontDefinitions, FontFamily};
 use std::path::Path;
 
 pub(crate) fn configure_fonts(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
+
+    // 注入现代线性矢量图标字体（Phosphor Icons），高 DPI 下锐利清晰。
+    egui_phosphor::add_to_fonts(&mut fonts, egui_phosphor::Variant::Regular);
 
     #[cfg(target_os = "windows")]
     {
@@ -12,6 +15,12 @@ pub(crate) fn configure_fonts(ctx: &egui::Context) {
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| r"C:\Windows".into())
             .join("Fonts");
+        // 为数值卡片与分度表优先配置清晰的现代等宽字体。
+        for filename in ["CascadiaMono.ttf", "consola.ttf"] {
+            if prepend_to_family(&mut fonts, FontFamily::Monospace, "system-mono", &directory.join(filename), 0) {
+                break;
+            }
+        }
         for filename in ["msyh.ttc", "Deng.ttf", "simhei.ttf"] {
             if append_font(&mut fonts, "system-cjk", &directory.join(filename), 0) {
                 break;
@@ -36,6 +45,14 @@ pub(crate) fn configure_fonts(ctx: &egui::Context) {
     #[cfg(target_os = "linux")]
     {
         for path in [
+            "/usr/share/fonts/truetype/jetbrains-mono/JetBrainsMono-Regular.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        ] {
+            if prepend_to_family(&mut fonts, FontFamily::Monospace, "system-mono", Path::new(path), 0) {
+                break;
+            }
+        }
+        for path in [
             "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
             "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
         ] {
@@ -54,6 +71,14 @@ pub(crate) fn configure_fonts(ctx: &egui::Context) {
     #[cfg(target_os = "macos")]
     {
         for path in [
+            "/System/Library/Fonts/SFNSMono.ttf",
+            "/System/Library/Fonts/Menlo.ttc",
+        ] {
+            if prepend_to_family(&mut fonts, FontFamily::Monospace, "system-mono", Path::new(path), 0) {
+                break;
+            }
+        }
+        for path in [
             "/System/Library/Fonts/PingFang.ttc",
             "/System/Library/Fonts/STHeiti Light.ttc",
         ] {
@@ -70,6 +95,27 @@ pub(crate) fn configure_fonts(ctx: &egui::Context) {
     }
 
     ctx.set_fonts(fonts);
+}
+
+fn prepend_to_family(
+    fonts: &mut FontDefinitions,
+    family: FontFamily,
+    name: &str,
+    path: &Path,
+    index: u32,
+) -> bool {
+    let Ok(bytes) = std::fs::read(path) else {
+        return false;
+    };
+    let mut data = FontData::from_owned(bytes);
+    data.index = index;
+    fonts.font_data.insert(name.to_owned(), data.into());
+    fonts
+        .families
+        .entry(family)
+        .or_default()
+        .insert(0, name.to_owned());
+    true
 }
 
 fn append_font(fonts: &mut FontDefinitions, name: &str, path: &Path, index: u32) -> bool {

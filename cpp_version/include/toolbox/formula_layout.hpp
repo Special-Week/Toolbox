@@ -61,23 +61,6 @@ struct FormulaPart {
     std::wstring text, denominator;
     bool fraction = false;
 };
-struct WireFormula {
-    std::wstring before, numerator, source, after;
-    int angle = 0;
-};
-inline bool parseWireFormula(const std::wstring &line, WireFormula &out) {
-    static const std::wregex pattern(LR"((-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)\s*/\s*\[2cos\((30|55|60|70|75)°/2\)\])");
-    std::wsmatch match;
-    if (!std::regex_search(line, match, pattern)) return false;
-    const auto start = static_cast<std::size_t>(match.position());
-    if (start && (std::iswalnum(line[start - 1]) || line[start - 1] == L'_' || line[start - 1] == L'.')) return false;
-    out.before = line.substr(0, start);
-    out.numerator = match[1].str();
-    out.source = match[0].str();
-    out.after = line.substr(start + static_cast<std::size_t>(match.length()));
-    out.angle = std::stoi(match[2].str());
-    return true;
-}
 inline std::vector<FormulaPart> formulaParts(const std::wstring &line) {
     static const std::wregex pattern(
         LR"((\([^()；。，/\r\n]{1,80}\)|\[[^\[\]；。，/\r\n]{1,80}\]|-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|源系数|输入值|Σxᵢ|xᵢ|Δ|R|s)\s*/\s*(\([^()；。，/\r\n]{1,80}\)|\[[^\[\]；。，/\r\n]{1,80}\]|√(?:n|[0-9]+(?:\.[0-9]+)?)|-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?|目标系数|引用值|真值|跨度|Rtp|R₀|T₀|d₂|sₓ|sᵧ|T|d|n))");
@@ -225,7 +208,8 @@ inline std::vector<MathToken> mathTokens(const std::wstring &line) {
         for (const auto &entry : patterns) {
             if (!std::regex_search(remaining, match, entry.first)) continue;
             const auto at = cursor + static_cast<std::size_t>(match.position());
-            if (!validStart(at) || (at > best) || (at == best && match.length() <= dynamicSource.size())) continue;
+            if (!validStart(at) || (at > best) ||
+                (at == best && static_cast<std::size_t>(match.length()) <= dynamicSource.size())) continue;
             best = at;
             dynamicSource = match[0].str();
             dynamicLatex = entry.second;

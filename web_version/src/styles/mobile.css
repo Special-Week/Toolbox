@@ -1,6 +1,5 @@
 /* 移动输入与主屏幕应用样式最后加载，避免窄屏规则将表单字号再次缩小。 */
-.mobile-actions,
-.mobile-unit-results {
+.mobile-actions {
   display: none;
 }
 .input-panels,
@@ -17,7 +16,7 @@
   cursor: pointer;
   min-height: 44px;
   list-style: none;
-  color: #3a4e6c;
+  color: var(--ink-secondary);
 }
 .budget-summary::-webkit-details-marker {
   display: none;
@@ -66,8 +65,8 @@
   padding: 4px 8px;
 }
 .pwa-status {
-  margin-bottom: 18px;
-  color: #6b7e98;
+  margin-bottom: 14px;
+  color: var(--muted);
   font-size: 12px;
 }
 .pwa-toolbar,
@@ -82,13 +81,13 @@
   justify-content: space-between;
   padding: 12px 14px;
   margin-top: 10px;
-  background: #edf3ff;
-  border: 1px solid #dce8fd;
+  background: var(--soft);
+  border: 1px solid var(--soft-border);
   border-radius: 8px;
 }
 .install-guide {
   padding: 16px;
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 10px;
   margin-top: 12px;
@@ -277,8 +276,8 @@
       calc(10px + env(safe-area-inset-bottom, 0px))
       max(14px, env(safe-area-inset-left, 0px));
     border-top: 1px solid var(--border);
-    background: #fffffffa;
-    box-shadow: 0 -4px 18px #1b35550a;
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
   }
   .mobile-actions .button {
     min-height: 44px;
@@ -363,42 +362,6 @@
   }
   .tolerance-card > strong {
     margin-bottom: 9px;
-  }
-  .desktop-unit-table {
-    display: none;
-  }
-  .mobile-unit-results {
-    display: block;
-  }
-  .mobile-unit-row {
-    display: grid;
-    grid-template-columns: minmax(90px, 1fr) minmax(0, 1.2fr);
-    align-items: center;
-    gap: 12px;
-    padding: 12px 6px;
-    border-bottom: 1px solid var(--border);
-  }
-  .mobile-unit-row:nth-child(even) {
-    background: #e1ebfa;
-  }
-  .mobile-unit-row strong {
-    display: block;
-    font-size: 13px;
-    font-weight: 500;
-    color: #566b89;
-    line-height: 1.6;
-  }
-  .mobile-unit-row span {
-    display: block;
-    color: var(--blue);
-    font-size: 12px;
-    line-height: 1.6;
-  }
-  .mobile-unit-row output {
-    font-size: 16px;
-    color: var(--blue);
-    text-align: right;
-    overflow-wrap: anywhere;
   }
   .metric > span {
     font-size: 12px;

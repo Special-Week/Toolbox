@@ -9,6 +9,8 @@ void sprtPage(Page &p) {
         p.app.captureCalibration(p, calibrationStart);
         return;
     }
+    p.beginSplit(0.46f);
+    p.heading(L"分区与证书参数");
     int hr = p.select("hr", L"高温分段",
                       {L"A6 / B6 / C6：至 961.78 °C", L"A7 / B7 / C7：至 660.323 °C",
                        L"A8 / B8：至 419.527 °C", L"A9 / B9：至 231.928 °C", L"A10：至 156.599 °C",
@@ -119,6 +121,7 @@ void sprtPage(Page &p) {
     double input = p.number(direction == 0 ? k + ".t." + std::to_string(unit.index) : k + ".r",
                             direction == 0 ? L"温度 (" + unit.symbol() + L")" : L"电阻 (Ω)",
                             direction == 0 ? unit.display(dt) : m.resistance(dt));
+    p.rightColumn();
     p.check();
     auto highForTemperature = [hr, lr](double temperature) { return hr != 6 && (lr == 2 || temperature >= .01); };
     double t = direction == 0 ? unit.celsius(input)
@@ -135,6 +138,7 @@ void sprtPage(Page &p) {
                             {L"电阻比 W = R / Rtp", format(r / m.rtp)},
                             {L"电阻变化率 dR/dt", format(slope / unit.span()) + L" Ω/" + unit.symbol()},
                             {L"电阻比变化率 dW/dt", format(slope / m.rtp / unit.span())}});
+    p.endSplit();
     bool high = direction == 0 ? highForTemperature(t) : (hr != 6 && (lr == 2 || input >= m.rtp));
     double w = r / m.rtp, x = w - 1, z = std::max(w - m.w660, 0.0);
     double wr = high ? w - m.a * x - m.b * x * x - m.c * x * x * x - m.d * z * z

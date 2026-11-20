@@ -1,11 +1,12 @@
 //! 分析与测量数据的通用校准曲线页面；不绑定仪器类型、测量对象或单位。
 use crate::app::ToolboxApp;
 use crate::calculators::common::{
-    calculation_process_lazy, format_number, info_note, panel, render_error_message, render_metrics,
+    calculation_process_lazy, format_number, info_note, panel, render_error_message,
+    render_metrics, split_workspace,
 };
 use crate::catalog::ToolDef;
-use crate::{BLUE, BLUE_SOFT, INK, MUTED, TABLE_STRIPE};
-use eframe::egui::{self, RichText, Vec2};
+use crate::theme;
+use eframe::egui::{self, CornerRadius, FontId, RichText, Stroke, Vec2};
 use std::ops::Range;
 
 mod chart;
@@ -75,7 +76,7 @@ fn page_range(ui: &mut egui::Ui, key: &str, count: usize) -> Range<usize> {
         ui.label(
             RichText::new(format!("第 {} / {pages} 页 · 共 {count} 组", page + 1))
                 .size(12.0)
-                .color(MUTED),
+                .color(theme::palette(ui.ctx()).muted),
         );
     });
     ui.ctx().data_mut(|data| data.insert_temp(id, page));
@@ -148,24 +149,25 @@ fn copy_report(fit: &CurveFit, points: &[(f64, f64)], x_label: &str, y_label: &s
 }
 
 fn result_table(ui: &mut egui::Ui, fit: &CurveFit, points: &[(f64, f64)]) {
+    let p = theme::palette(ui.ctx());
     ui.add_space(12.0);
     ui.label(
         RichText::new("各点拟合结果与残差")
             .size(14.0)
             .strong()
-            .color(INK),
+            .color(p.ink),
     );
     let range = page_range(ui, "curve_fit_result_page", points.len());
     // 窄窗拆成两行展示，避免五列挤压或产生横向滚动区域。
-    let compact = ui.available_width() < 600.0;
+    let compact = ui.available_width() < 560.0;
     for index in range {
         egui::Frame::new()
             .fill(if index % 2 == 0 {
-                TABLE_STRIPE
+                p.table_stripe
             } else {
-                egui::Color32::WHITE
+                p.surface_subtle
             })
-            .corner_radius(4.0)
+            .corner_radius(CornerRadius::same(6))
             .inner_margin(8.0)
             .show(ui, |ui| {
                 let labels = [
@@ -178,7 +180,12 @@ fn result_table(ui: &mut egui::Ui, fit: &CurveFit, points: &[(f64, f64)]) {
                     ui.columns(row.len(), |columns| {
                         for (column, label) in columns.iter_mut().zip(row) {
                             column.add(
-                                egui::Label::new(RichText::new(label).size(12.5).color(INK)).wrap(),
+                                egui::Label::new(
+                                    RichText::new(label)
+                                        .font(FontId::monospace(12.0))
+                                        .color(p.ink),
+                                )
+                                .wrap(),
                             );
                         }
                     });
@@ -194,28 +201,32 @@ fn render_results(
     x_label: &str,
     y_label: &str,
 ) {
-    ui.add_space(12.0);
+    let p = theme::palette(ui.ctx());
     egui::Frame::new()
-        .fill(BLUE_SOFT)
-        .corner_radius(7.0)
+        .fill(p.accent_soft)
+        .stroke(Stroke::new(1.0_f32, p.accent_border))
+        .corner_radius(CornerRadius::same(10))
         .inner_margin(14.0)
         .show(ui, |ui| {
+            ui.set_width(ui.available_width());
             ui.horizontal_wrapped(|ui| {
-                ui.label(RichText::new("拟合方程").size(14.0).strong().color(INK));
+                ui.label(RichText::new("拟合方程").size(14.0).strong().color(p.ink));
                 if ui
-                    .add(egui::Button::new("复制拟合结果").min_size(Vec2::new(124.0, 34.0)))
+                    .add(egui::Button::new("复制拟合结果").min_size(Vec2::new(124.0, 32.0)))
                     .clicked()
                 {
                     ui.ctx()
                         .copy_text(copy_report(fit, points, x_label, y_label));
+                    theme::toast_success(ui.ctx(), "已复制完整拟合报告");
                 }
             });
+            ui.add_space(4.0);
             ui.add(
                 egui::Label::new(
                     RichText::new(equation(fit, false))
-                        .size(17.0)
+                        .font(FontId::monospace(16.0))
                         .strong()
-                        .color(BLUE),
+                        .color(p.accent),
                 )
                 .wrap(),
             );
@@ -256,11 +267,11 @@ fn render_results(
         ui.label(
             RichText::new("无剩余自由度，残差标准差不计算。")
                 .size(12.0)
-                .color(MUTED),
+                .color(p.muted),
         );
     }
     ui.add_space(14.0);
-    ui.label(RichText::new("校准曲线").size(14.0).strong().color(INK));
+    ui.label(RichText::new("校准曲线").size(14.0).strong().color(p.ink));
     if let Err(error) = chart::draw(ui, fit, points, x_label, y_label, false) {
         render_error_message(ui, &error);
     }
@@ -285,12 +296,14 @@ struct CurveInput {
 }
 
 fn render_input(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) -> CurveInput {
+    let p = theme::palette(ui.ctx());
     ui.label(
         RichText::new("拟合设置与校准数据")
-            .size(15.0)
+            .size(14.5)
             .strong()
-            .color(INK),
+            .color(p.ink),
     );
+    ui.add_space(8.0);
     let kind = FitKind::from_index(app.select_index(
         ui,
         tool,
@@ -357,7 +370,7 @@ fn render_input(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) -> Curv
         egui::Label::new(
             RichText::new("每行一组 x、y，各列单位保持一致。")
                 .size(12.0)
-                .color(MUTED),
+                .color(p.muted),
         )
         .wrap(),
     );
@@ -380,7 +393,7 @@ fn render_input(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) -> Curv
         ui.horizontal(|ui| {
             ui.add_sized(
                 [44.0, 36.0],
-                egui::Label::new(RichText::new((index + 1).to_string()).color(BLUE)),
+                egui::Label::new(RichText::new((index + 1).to_string()).color(p.accent)),
             );
             app.inline_input(
                 ui,
@@ -423,20 +436,37 @@ fn render_input(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) -> Curv
 
 impl ToolboxApp {
     pub(crate) fn render_curve_fit(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {
-        ui.vertical(|ui| {
-            ui.set_max_width(ui.available_width().min(960.0));
-            let input = panel(ui, |ui| render_input(self, ui, tool)).inner;
-            match input.points.and_then(|points| {
-                CurveFit::calculate(&points, input.kind).map(|fit| (points, fit))
-            }) {
-                Ok((points, fit)) => {
-                    render_results(ui, &fit, &points, &input.x_label, &input.y_label);
-                    calculation_process_lazy(ui, "curve_fit_process", || fit.process(&points));
-                }
-                Err(error) => render_error_message(ui, &error),
-            }
-            info_note(ui, tool.kind);
-        });
+        let mut fit_for_process: Option<(Vec<(f64, f64)>, CurveFit)> = None;
+        split_workspace(
+            ui,
+            0.40,
+            self,
+            |ui, app| {
+                panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    render_input(app, ui, tool)
+                })
+                .inner
+            },
+            |ui, _app, input| {
+                panel(ui, |ui| {
+                    ui.set_width(ui.available_width());
+                    match input.points.and_then(|points| {
+                        CurveFit::calculate(&points, input.kind).map(|fit| (points, fit))
+                    }) {
+                        Ok((points, fit)) => {
+                            render_results(ui, &fit, &points, &input.x_label, &input.y_label);
+                            fit_for_process = Some((points, fit));
+                        }
+                        Err(error) => render_error_message(ui, &error),
+                    }
+                });
+            },
+        );
+        if let Some((points, fit)) = fit_for_process {
+            calculation_process_lazy(ui, "curve_fit_process", || fit.process(&points));
+        }
+        info_note(ui, tool.kind);
     }
 }
 

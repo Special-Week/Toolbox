@@ -1,11 +1,19 @@
 <script setup lang="ts">
-// 应用入口负责工具导航、输入状态、计算结果及导出。
+// 应用入口负责现代导航外壳（双主题、Ctrl+K 快搜、多标签栏、收藏/最近）、输入状态、计算结果及导出。
 import GaugeTool from "./components/GaugeTool.vue";
 import PdfDownload from "./components/PdfDownload.vue";
 import NumericInput from "./components/NumericInput.vue";
 import MobileActions from "./components/MobileActions.vue";
 import PwaStatus from "./components/PwaStatus.vue";
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
+import {
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  reactive,
+  ref,
+  watch,
+} from "vue";
 import type { Catalog, Result, State, Tool } from "./types";
 import { Engine } from "./engine";
 import { schema, initialize, adjust } from "./schema";
@@ -27,6 +35,15 @@ import {
 import CurveChart from "./components/CurveChart.vue";
 import ResultTable from "./components/ResultTable.vue";
 import BudgetResult, { type Detail } from "./components/BudgetResult.vue";
+import {
+  applyTheme,
+  groupIconPath,
+  groupKey,
+  groupShortName,
+  loadUiPrefs,
+  saveUiPrefs,
+  type ThemeMode,
+} from "./ui-prefs";
 
 const engine = new Engine();
 const catalog = ref<Catalog>();
@@ -37,6 +54,137 @@ const pdfDownloader = ref<InstanceType<typeof PdfDownload>>();
 const inputPanel = ref<HTMLElement>();
 const resultPanel = ref<HTMLElement>();
 let inputScroll: number | null = null;
+
+// 界面偏好（深浅主题、收藏、最近使用）与多工具标签栏
+const initialPrefs = loadUiPrefs();
+const theme = ref<ThemeMode>(initialPrefs.theme);
+const favorites = ref<string[]>([...initialPrefs.favorites]);
+const recentIds = ref<string[]>([...initialPrefs.recent]);
+const openTabIds = ref<string[]>([]);
+const sidebarFilter = ref("");
+
+// Ctrl+K 全局命令面板
+const paletteOpen = ref(false);
+const paletteQuery = ref("");
+const paletteIndex = ref(0);
+const paletteInput = ref<HTMLInputElement>();
+
+// 右下角 Toast 队列
+interface ToastItem {
+  id: number;
+  text: string;
+}
+const toasts = ref<ToastItem[]>([]);
+let toastSeq = 0;
+function showToast(text: string) {
+  const id = ++toastSeq;
+  toasts.value.push({ id, text });
+  if (toasts.value.length > 3) toasts.value.shift();
+  setTimeout(() => {
+    toasts.value = toasts.value.filter((t) => t.id !== id);
+  }, 2400);
+}
+
+function persistPrefs() {
+  saveUiPrefs({
+    theme: theme.value,
+    favorites: favorites.value,
+    recent: recentIds.value,
+  });
+}
+
+function toggleTheme() {
+  theme.value = theme.value === "light" ? "dark" : "light";
+  applyTheme(theme.value);
+  persistPrefs();
+}
+
+function isFavorite(id: string): boolean {
+  return favorites.value.includes(id);
+}
+
+function toggleFavorite(tool: Tool) {
+  const idx = favorites.value.indexOf(tool.id);
+  if (idx >= 0) {
+    favorites.value.splice(idx, 1);
+    showToast(`已取消收藏：${tool.name}`);
+  } else {
+    favorites.value.unshift(tool.id);
+    showToast(`已收藏：${tool.name}`);
+  }
+  persistPrefs();
+}
+
+function recordRecent(id: string) {
+  recentIds.value = [id, ...recentIds.value.filter((x) => x !== id)].slice(0, 8);
+  persistPrefs();
+}
+
+function openPalette() {
+  paletteOpen.value = true;
+  paletteQuery.value = "";
+  paletteIndex.value = 0;
+  nextTick(() => paletteInput.value?.focus());
+}
+
+function closePalette() {
+  paletteOpen.value = false;
+}
+
+const paletteMatches = computed(() => {
+  const q = paletteQuery.value.trim().toLocaleLowerCase("zh-CN");
+  const all = catalog.value?.tools ?? [];
+  if (!q) {
+    // 优先展示收藏与最近使用，再补齐其余工具
+    const priorityIds = [...new Set([...favorites.value, ...recentIds.value])];
+    const priority = priorityIds
+      .map((id) => all.find((t) => t.id === id))
+      .filter((t): t is Tool => !!t);
+    const rest = all.filter((t) => !priorityIds.includes(t.id));
+    return [...priority, ...rest].slice(0, 12);
+  }
+  return all
+    .filter((t) =>
+      [t.name, t.group, t.description, t.id].some((s) =>
+        s.toLocaleLowerCase("zh-CN").includes(q),
+      ),
+    )
+    .slice(0, 14);
+});
+
+watch(paletteQuery, () => {
+  paletteIndex.value = 0;
+});
+
+function onPaletteKey(e: KeyboardEvent) {
+  const list = paletteMatches.value;
+  if (e.key === "Escape") {
+    e.preventDefault();
+    closePalette();
+  } else if (e.key === "ArrowDown" && list.length) {
+    e.preventDefault();
+    paletteIndex.value = (paletteIndex.value + 1) % list.length;
+  } else if (e.key === "ArrowUp" && list.length) {
+    e.preventDefault();
+    paletteIndex.value = (paletteIndex.value - 1 + list.length) % list.length;
+  } else if (e.key === "Enter" && list.length) {
+    e.preventDefault();
+    const target = list[paletteIndex.value] ?? list[0];
+    if (target) {
+      closePalette();
+      open(target);
+    }
+  }
+}
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+    e.preventDefault();
+    if (paletteOpen.value) closePalette();
+    else openPalette();
+  }
+}
+
 function jumpResults() {
   inputScroll = window.scrollY;
   (
@@ -63,6 +211,7 @@ function jumpInputs() {
       behavior: navigationBehavior(),
     });
 }
+
 // 简要说明与公式共用当前模型的文案，复制和导出沿用同一口径。
 const activeNote = computed(() =>
   selected.value
@@ -76,6 +225,7 @@ const explanationParagraphs = computed(() =>
     .filter(Boolean),
 );
 const filter = ref("全部工具");
+const toolSearch = ref("");
 const mobileNav = ref(false);
 const collapsed = ref(false);
 const expanded = reactive(new Set<string>());
@@ -88,9 +238,40 @@ const message = ref("");
 const exporting = ref(false);
 const progress = ref(0);
 let cancelled = false;
+
 const groups = computed(() => [
   ...new Set(catalog.value?.tools.map((t) => t.group) ?? []),
 ]);
+const favoriteTools = computed(() =>
+  favorites.value
+    .map((id) => catalog.value?.tools.find((t) => t.id === id))
+    .filter((t): t is Tool => !!t),
+);
+const quickAccessTools = computed(() => {
+  const ids = [...new Set([...favorites.value, ...recentIds.value])].slice(0, 8);
+  return ids
+    .map((id) => catalog.value?.tools.find((t) => t.id === id))
+    .filter((t): t is Tool => !!t);
+});
+const openTabs = computed(() =>
+  openTabIds.value
+    .map((id) => catalog.value?.tools.find((t) => t.id === id))
+    .filter((t): t is Tool => !!t),
+);
+
+function sidebarToolsInGroup(group: string): Tool[] {
+  const q = sidebarFilter.value.trim().toLocaleLowerCase("zh-CN");
+  return (
+    catalog.value?.tools.filter(
+      (t) =>
+        t.group === group &&
+        (!q ||
+          t.name.toLocaleLowerCase("zh-CN").includes(q) ||
+          t.description.toLocaleLowerCase("zh-CN").includes(q)),
+    ) ?? []
+  );
+}
+
 const current = computed<State>(() =>
   selected.value ? (states[selected.value.id] ?? {}) : {},
 );
@@ -99,12 +280,19 @@ const sections = computed(() =>
     ? schema(selected.value, current.value, catalog.value)
     : [],
 );
-const filtered = computed(
-  () =>
+const filtered = computed(() => {
+  const query = toolSearch.value.trim().toLocaleLowerCase("zh-CN");
+  return (
     catalog.value?.tools.filter(
-      (t) => filter.value === "全部工具" || t.group === filter.value,
-    ) ?? [],
-);
+      (t) =>
+        (filter.value === "全部工具" || t.group === filter.value) &&
+        (!query ||
+          [t.name, t.group, t.description].some((text) =>
+            text.toLocaleLowerCase("zh-CN").includes(query),
+          )),
+    ) ?? []
+  );
+});
 const totalUnits = computed(
   () =>
     catalog.value?.tools.reduce((n, t) => n + (t.units?.length ?? 0), 0) ?? 0,
@@ -182,6 +370,11 @@ function open(tool: Tool | null, hash = true) {
     if (!tool.rememberInputs) states[tool.id] = {};
     else states[tool.id] ??= {};
     initialize(tool, states[tool.id], catalog.value);
+    expanded.add(tool.group);
+    if (!openTabIds.value.includes(tool.id)) {
+      openTabIds.value.push(tool.id);
+    }
+    recordRecent(tool.id);
     document.title = `${tool.name} · 工具箱`;
   } else document.title = "工具箱 · 计量与工程计算";
   if (hash)
@@ -194,6 +387,20 @@ function open(tool: Tool | null, hash = true) {
     );
   window.scrollTo({ top: 0, behavior: "instant" });
 }
+
+function closeTab(id: string) {
+  const idx = openTabIds.value.indexOf(id);
+  if (idx < 0) return;
+  openTabIds.value.splice(idx, 1);
+  if (selected.value?.id === id) {
+    const nextId = openTabIds.value[idx] ?? openTabIds.value[idx - 1];
+    const nextTool = nextId
+      ? (catalog.value?.tools.find((t) => t.id === nextId) ?? null)
+      : null;
+    open(nextTool);
+  }
+}
+
 function route() {
   const id = decodeURIComponent(location.hash.replace(/^#tool\//, ""));
   open(catalog.value?.tools.find((t) => t.id === id) ?? null, false);
@@ -266,7 +473,6 @@ function saveNow() {
   }
 }
 watch(
-  // 工具切换和恢复示例均触发重算，即使恢复前后的输入文本完全相同。
   () =>
     selected.value
       ? selected.value.id +
@@ -334,6 +540,7 @@ function reset() {
     initialize(selected.value, states[selected.value.id], catalog.value);
     saveNow();
     message.value = "已恢复示例输入。";
+    showToast("已恢复示例输入");
   }
 }
 function useCalibration(archive: CalibrationArchive) {
@@ -396,6 +603,7 @@ async function copy() {
   try {
     await navigator.clipboard.writeText(report());
     message.value = "已复制结果。";
+    showToast("已复制完整计算结果");
   } catch {
     download(
       new Blob([report()], { type: "text/plain;charset=utf-8" }),
@@ -404,6 +612,21 @@ async function copy() {
     message.value = "无法复制，已下载结果文本。";
   }
 }
+async function copySingleValue(text: string, label: string) {
+  try {
+    await navigator.clipboard.writeText(text);
+    showToast(`已复制 ${label}：${text}`);
+  } catch {
+    /* 剪贴板不可用时静默忽略 */
+  }
+}
+function swapUnitSource(index: number) {
+  if (!selected.value || selected.value.kind !== "unit") return;
+  void change("source", String(index));
+  const unitName = selected.value.units?.[index]?.name ?? "";
+  if (unitName) showToast(`输入源单位已切换为：${unitName}`);
+}
+
 interface WritableFile {
   write(chunk: string): Promise<void>;
   close(): Promise<void>;
@@ -433,9 +656,9 @@ async function exportCsv() {
         tool.id + ".csv",
       );
       message.value = "完整结果 CSV 已下载。";
+      showToast("已导出 CSV 文件");
       return;
     }
-    // 支持文件流的浏览器逐块写入，其余浏览器使用有界内存下载。
     const picker = (window as PickerWindow).showSaveFilePicker;
     if (picker) {
       const handle = await picker.call(window, {
@@ -473,6 +696,7 @@ async function exportCsv() {
         "bspline-results.csv",
       );
     message.value = `已导出全部 ${r.total} 行采样结果。`;
+    showToast(`已导出 ${r.total} 行采样 CSV`);
   } catch (e) {
     if (writer) await writer.abort().catch(() => {});
     message.value =
@@ -485,8 +709,11 @@ async function exportCsv() {
     exporting.value = false;
   }
 }
+
 onMounted(async () => {
+  applyTheme(theme.value);
   window.addEventListener("pagehide", saveNow);
+  window.addEventListener("keydown", onGlobalKeydown);
   try {
     const c = await engine.request<Catalog>("catalog");
     catalog.value = c;
@@ -508,6 +735,7 @@ onMounted(async () => {
 onUnmounted(() => {
   saveNow();
   window.removeEventListener("pagehide", saveNow);
+  window.removeEventListener("keydown", onGlobalKeydown);
   cancelled = true;
   clearTimeout(timer);
   clearTimeout(saveTimer);
@@ -527,23 +755,59 @@ onUnmounted(() => {
       >
         <svg viewBox="0 0 24 24">
           <path d="M4 6h16M4 12h16M4 18h16" />
-        </svg></button
-      ><a href="#" class="brand-link" @click.prevent="open(null)"
-        ><img :src="logo" width="42" height="42" alt="工具箱图标" /><span
-          >工具箱</span
-        ></a
-      >
+        </svg>
+      </button>
+      <a href="#" class="brand-link" @click.prevent="open(null)">
+        <img :src="logo" width="32" height="32" alt="工具箱图标" />
+        <div class="brand-text">
+          <strong>工具箱</strong>
+          <small>计量工程工作台 · v{{ version }}</small>
+        </div>
+      </a>
     </div>
-    <div class="header-status">
-      <span>v{{ version }}</span><span v-if="catalog" class="header-tool-count">{{ catalog.tools.length }} 项工具</span
-      ><span class="privacy-dot">浏览器内计算</span>
+
+    <button
+      type="button"
+      class="header-search-trigger"
+      aria-label="快速搜索工具"
+      @click="openPalette"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="6.5" />
+        <path d="m16 16 4 4" />
+      </svg>
+      <span>快速搜索任意工具…</span>
+      <kbd class="kbd-hint">Ctrl K</kbd>
+    </button>
+
+    <div class="header-actions">
+      <div class="header-status">
+        <span v-if="catalog" class="header-tool-count">{{ catalog.tools.length }} 项工具</span>
+        <span class="privacy-dot">本地计算</span>
+      </div>
+      <button
+        type="button"
+        class="icon-button theme-toggle"
+        :title="theme === 'light' ? '切换到深色主题' : '切换到浅色主题'"
+        :aria-label="theme === 'light' ? '切换到深色主题' : '切换到浅色主题'"
+        @click="toggleTheme"
+      >
+        <svg v-if="theme === 'light'" viewBox="0 0 24 24">
+          <path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.8 6.8 0 0 0 9.8 9.8Z" />
+        </svg>
+        <svg v-else viewBox="0 0 24 24">
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4" />
+        </svg>
+      </button>
     </div>
   </header>
+
   <div v-if="mobileNav" class="nav-backdrop" @click="mobileNav = false"></div>
   <aside :class="['sidebar', { collapsed, 'mobile-open': mobileNav }]">
     <div class="sidebar-heading">
-      <strong>{{ collapsed ? "分类" : "工具导航" }}</strong
-      ><button
+      <strong>{{ collapsed ? "分类" : "工具导航" }}</strong>
+      <button
         class="icon-button sidebar-toggle"
         :aria-label="collapsed ? '展开导航' : '折叠导航'"
         @click="collapsed = !collapsed"
@@ -553,8 +817,51 @@ onUnmounted(() => {
         </svg>
       </button>
     </div>
+
+    <div v-if="!collapsed" class="sidebar-filter">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <circle cx="11" cy="11" r="6.5" />
+        <path d="m16 16 4 4" />
+      </svg>
+      <input
+        v-model="sidebarFilter"
+        type="search"
+        placeholder="筛选导航…"
+        aria-label="筛选侧栏工具"
+      />
+    </div>
+
+    <div v-if="!collapsed && favoriteTools.length && !sidebarFilter.trim()" class="sidebar-favorites">
+      <div class="sidebar-section-label">
+        <svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3Z" /></svg>
+        <span>我的收藏</span>
+      </div>
+      <div
+        v-for="tool in favoriteTools"
+        :key="'fav-' + tool.id"
+        :data-group="groupKey(tool.group)"
+        :class="['nav-tool-row', { selected: selected?.id === tool.id }]"
+      >
+        <button class="nav-tool-btn" @click="open(tool)">{{ tool.name }}</button>
+        <button
+          type="button"
+          class="nav-star-btn starred"
+          aria-label="取消收藏"
+          @click.stop="toggleFavorite(tool)"
+        >
+          <svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3Z" /></svg>
+        </button>
+      </div>
+    </div>
+
     <nav aria-label="工具分类">
-      <div v-for="group in groups" :key="group" class="nav-group">
+      <div
+        v-for="group in groups"
+        :key="group"
+        :data-group="groupKey(group)"
+        class="nav-group"
+        v-show="!sidebarFilter.trim() || sidebarToolsInGroup(group).length > 0"
+      >
         <button
           :class="[
             'group-button',
@@ -569,48 +876,80 @@ onUnmounted(() => {
                 : expanded.add(group)
           "
         >
-          <span>{{
-            collapsed
-              ? ({
-                  单位换算: "单位",
-                  "ITS90 温标换算": "温标",
-                  压力工具: "压力",
-                  温湿度工具: "温湿度",
-                  误差工具: "误差",
-                  量规计算: "量规",
-                  其他工具: "其他",
-                }[group] ?? group)
-              : group
-          }}</span
-          ><template v-if="!collapsed"
-            ><span class="group-count">{{
-              catalog?.tools.filter((t) => t.group === group).length
-            }}</span
-            ><svg
-              :class="{ expanded: expanded.has(group) }"
+          <span class="group-icon-badge" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path :d="groupIconPath(group)" /></svg>
+          </span>
+          <span class="group-label">{{
+            collapsed ? groupShortName(group) : group
+          }}</span>
+          <template v-if="!collapsed">
+            <span class="group-count">{{ sidebarToolsInGroup(group).length }}</span>
+            <svg
+              :class="['group-chevron', { expanded: expanded.has(group) || !!sidebarFilter.trim() }]"
               viewBox="0 0 24 24"
             >
-              <path d="m9 5 7 7-7 7" /></svg
-          ></template>
+              <path d="m9 5 7 7-7 7" />
+            </svg>
+          </template>
         </button>
-        <div v-if="!collapsed && expanded.has(group)" class="nav-tools">
-          <button
-            v-for="tool in catalog?.tools.filter(
-              (t) => t.group === group,
-            )"
+        <div v-if="!collapsed && (expanded.has(group) || !!sidebarFilter.trim())" class="nav-tools">
+          <div
+            v-for="tool in sidebarToolsInGroup(group)"
             :key="tool.id"
-            :class="{ selected: selected?.id === tool.id }"
-            @click="open(tool)"
+            :class="['nav-tool-row', { selected: selected?.id === tool.id }]"
           >
-            {{ tool.name }}
-          </button>
+            <button class="nav-tool-btn" @click="open(tool)">
+              {{ tool.name }}
+            </button>
+            <button
+              type="button"
+              :class="['nav-star-btn', { starred: isFavorite(tool.id) }]"
+              :aria-label="isFavorite(tool.id) ? '取消收藏' : '收藏工具'"
+              @click.stop="toggleFavorite(tool)"
+            >
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3Z" /></svg>
+            </button>
+          </div>
         </div>
       </div>
     </nav>
   </aside>
+
   <main
     :class="['main', { wide: collapsed, 'has-mobile-actions': !!selected && selected.kind !== 'pdf' }]"
   >
+    <!-- 多工具标签栏 -->
+    <div v-if="catalog && (openTabs.length > 0 || selected)" class="workspace-tabs" role="tablist" aria-label="已打开的工具">
+      <button
+        type="button"
+        role="tab"
+        :aria-selected="!selected"
+        :class="['tab-pill', { active: !selected }]"
+        @click="open(null)"
+      >
+        首页
+      </button>
+      <div
+        v-for="tab in openTabs"
+        :key="'tab-' + tab.id"
+        :data-group="groupKey(tab.group)"
+        role="tab"
+        :aria-selected="selected?.id === tab.id"
+        :class="['tab-pill', { active: selected?.id === tab.id }]"
+        @click="open(tab)"
+        @auxclick.middle.prevent="closeTab(tab.id)"
+      >
+        <span class="tab-pill-dot" aria-hidden="true"></span>
+        <span>{{ tab.name }}</span>
+        <span
+          class="tab-close"
+          role="button"
+          :aria-label="`关闭 ${tab.name}`"
+          @click.stop="closeTab(tab.id)"
+        >×</span>
+      </div>
+    </div>
+
     <PwaStatus :busy="busy || exporting" @before-update="saveNow" />
     <div v-if="loading" class="loading-state">
       <div class="loader"></div>
@@ -622,46 +961,90 @@ onUnmounted(() => {
       <p>{{ loadError }}</p>
       <button class="button primary" @click="reload">重新加载</button>
     </section>
+
     <template v-else-if="catalog">
       <template v-if="!selected">
         <section class="hero">
-          <div class="eyebrow">MEASUREMENT & ENGINEERING</div>
+          <div class="eyebrow">MEASUREMENT &amp; ENGINEERING WORKSPACE</div>
           <h1>计量与工程计算，一处完成</h1>
-          <p>常用换算、误差评定与校准计算，打开即用。</p>
+          <p>常用换算、温标校准、误差评定与量规计算，打开即用。</p>
           <div class="hero-facts">
-            <span>{{ groups.length }} 大分类</span><i></i
-            ><span>{{ catalog.tools.length }} 项工具</span><i></i
-            ><span>{{ totalUnits }} 项换算单位</span>
+            <span>{{ groups.length }} 大分类</span><i></i>
+            <span>{{ catalog.tools.length }} 项工具</span><i></i>
+            <span>{{ totalUnits }} 项换算单位</span>
           </div>
         </section>
+
+        <section v-if="quickAccessTools.length" class="quick-access" aria-label="常用快捷访问">
+          <span class="quick-access-label">快捷访问</span>
+          <button
+            v-for="tool in quickAccessTools"
+            :key="'qa-' + tool.id"
+            :data-group="groupKey(tool.group)"
+            class="quick-chip"
+            @click="open(tool)"
+          >
+            <span class="quick-chip-dot" aria-hidden="true"></span>
+            <span>{{ tool.name }}</span>
+          </button>
+        </section>
+
         <div class="dashboard-toolbar">
           <div class="category-tabs" aria-label="筛选工具分类">
             <button
               v-for="group in ['全部工具', ...groups]"
               :key="group"
+              :data-group="group === '全部工具' ? undefined : groupKey(group)"
               :class="{ active: filter === group }"
               @click="filter = group"
             >
-              {{ group === "ITS90 温标换算" ? "温标换算" : group
-              }}<span>{{
+              {{ group === "ITS90 温标换算" ? "温标换算" : group }}
+              <span>{{
                 group === "全部工具"
                   ? catalog.tools.length
                   : catalog.tools.filter((t) => t.group === group).length
               }}</span>
             </button>
           </div>
+          <label class="catalog-search">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="10.8" cy="10.8" r="6.3" />
+              <path d="m15.5 15.5 4.2 4.2" />
+            </svg>
+            <input
+              v-model="toolSearch"
+              type="search"
+              aria-label="搜索工具名称、分类或说明"
+              placeholder="搜索工具名称、分类或说明…"
+            />
+          </label>
         </div>
+
         <div class="catalog-heading">
-          <h2>{{ filter }}</h2>
+          <h2>{{ toolSearch.trim() ? "搜索结果" : filter }}</h2>
           <span>{{ filtered.length }} 项</span>
         </div>
-        <div class="tool-grid">
-          <button
+
+        <div v-if="filtered.length" class="tool-grid">
+          <div
             v-for="tool in filtered"
             :key="tool.id"
+            :data-group="groupKey(tool.group)"
             class="tool-card"
+            role="button"
+            tabindex="0"
             @click="open(tool)"
+            @keydown.enter.prevent="open(tool)"
           >
+            <button
+              type="button"
+              :class="['tool-card-star', { starred: isFavorite(tool.id) }]"
+              :title="isFavorite(tool.id) ? '取消收藏' : '收藏此工具'"
+              :aria-label="isFavorite(tool.id) ? '取消收藏' : '收藏此工具'"
+              @click.stop="toggleFavorite(tool)"
+            >
+              <svg viewBox="0 0 24 24"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3Z" /></svg>
+            </button>
             <div class="tool-card-top">
               <span class="tool-icon">{{ tool.icon || "工" }}</span>
               <div>
@@ -670,31 +1053,57 @@ onUnmounted(() => {
               </div>
             </div>
             <p>{{ tool.description }}</p>
-            <span class="open-tool">打开工具 <span>→</span></span>
-          </button>
+          </div>
         </div>
+        <section v-else class="catalog-empty" role="status">
+          <strong>没有找到匹配的工具</strong>
+          <p>试试更短的关键词，或切换到“全部工具”。</p>
+          <button
+            v-if="toolSearch"
+            class="button secondary"
+            @click="toolSearch = ''; filter = '全部工具'"
+          >
+            清除筛选
+          </button>
+        </section>
       </template>
+
       <template v-else>
         <nav class="breadcrumb" aria-label="当前位置">
-          <button @click="open(null)">← 工具箱</button><span>/</span
-          ><span>{{ selected.group }}</span
-          ><span>/</span><span>{{ selected.name }}</span>
+          <button @click="open(null)">← 工具箱</button><span>/</span>
+          <span>{{ selected.group }}</span>
+          <span>/</span><span>{{ selected.name }}</span>
         </nav>
-        <div class="tool-heading">
+
+        <div class="tool-heading" :data-group="groupKey(selected.group)">
           <span class="tool-icon large">{{ selected.icon || "工" }}</span>
           <div>
             <h1>{{ selected.name }}</h1>
             <p>{{ selected.description }}</p>
           </div>
-          <button
-            type="button"
-            class="button reset-button"
-            :disabled="exporting || (selected.kind === 'pdf' && pdfDownloader?.busy)"
-            @click="reset"
-          >
-            {{ selected.kind === "pdf" ? "清空" : "恢复示例" }}
-          </button>
+          <div class="tool-heading-actions">
+            <button
+              type="button"
+              class="icon-button theme-toggle"
+              :title="isFavorite(selected.id) ? '取消收藏' : '收藏工具'"
+              :aria-label="isFavorite(selected.id) ? '取消收藏' : '收藏工具'"
+              @click="toggleFavorite(selected)"
+            >
+              <svg viewBox="0 0 24 24" :style="isFavorite(selected.id) ? 'fill:#f59e0b;stroke:#f59e0b' : ''">
+                <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1 6.2L12 17.3 6.5 20.2l1-6.2L3 9.6l6.2-.9L12 3Z" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              class="button reset-button"
+              :disabled="exporting || (selected.kind === 'pdf' && pdfDownloader?.busy)"
+              @click="reset"
+            >
+              {{ selected.kind === "pdf" ? "清空" : "恢复示例" }}
+            </button>
+          </div>
         </div>
+
         <CalibrationArchives
           v-if="selected.kind === 'standard_couple' || selected.kind === 'sprt'"
           :key="`${selected.id}:${inputGeneration}`"
@@ -704,6 +1113,7 @@ onUnmounted(() => {
           :engine="engine"
           @apply="useCalibration"
         />
+
         <GaugeTool
           v-if="selected.kind === 'gauge'"
           :key="selected.id + ':' + inputGeneration"
@@ -711,7 +1121,9 @@ onUnmounted(() => {
           :tool="selected"
           :state="current"
           @state="states[selected!.id] = $event"
+          @toast="showToast"
         />
+
         <template v-else-if="selected.kind !== 'pdf'">
           <div class="tool-workspace">
             <div ref="inputPanel" class="input-panels">
@@ -765,8 +1177,8 @@ onUnmounted(() => {
                   <summary>
                     <span>{{ section.advanced.title }}</span>
                     <span class="advanced-toggle" aria-hidden="true">
-                      <span class="advanced-expand">展开</span
-                      ><span class="advanced-collapse">收起</span>
+                      <span class="advanced-expand">展开</span>
+                      <span class="advanced-collapse">收起</span>
                       <svg viewBox="0 0 20 20"><path d="m5 7 5 5 5-5" /></svg>
                     </span>
                   </summary>
@@ -784,8 +1196,8 @@ onUnmounted(() => {
               </section>
               <section v-if="divisions" class="panel division-settings">
                 <button class="disclosure" @click="divisionToggle">
-                  <span>分度表与特性曲线</span
-                  ><span>{{ current.division ? "收起 −" : "展开 ＋" }}</span>
+                  <span>分度表与特性曲线</span>
+                  <span>{{ current.division ? "收起 −" : "展开 ＋" }}</span>
                 </button>
                 <div v-if="current.division" class="form-grid">
                   <label
@@ -796,8 +1208,9 @@ onUnmounted(() => {
                     }"
                     :key="key"
                     class="field"
-                    ><span class="field-label">{{ label }}</span
-                    ><NumericInput
+                  >
+                    <span class="field-label">{{ label }}</span>
+                    <NumericInput
                       :model-value="current[key] ?? ''"
                       :placeholder="
                         key === 'tableStep' ? '1' : '留空使用有效温区边界'
@@ -807,17 +1220,22 @@ onUnmounted(() => {
                           ? change(key, $event)
                           : delete current[key]
                       "
-                  /></label>
+                    />
+                  </label>
                 </div>
               </section>
             </div>
+
             <div ref="resultPanel" class="output-panels" aria-live="polite">
               <section class="panel result-panel">
                 <div class="section-heading">
-                  <h2>计算结果</h2>
-                  <span v-if="!busy && !error && result" class="result-ready"
-                    ><i></i> 已更新</span
-                  >
+                  <div>
+                    <h2>计算结果</h2>
+                    <p v-if="result?.metrics.length" class="metric-hint">点击结果卡片可一键复制数值</p>
+                  </div>
+                  <span v-if="!busy && !error && result" class="result-ready">
+                    <i></i> 已更新
+                  </span>
                 </div>
                 <div v-if="error" class="calculation-error">
                   <strong>请检查输入</strong>
@@ -826,24 +1244,27 @@ onUnmounted(() => {
                 <div v-else-if="!result" class="result-placeholder">
                   {{ busy ? "正在计算…" : "填写参数后显示结果" }}
                 </div>
-                <template v-else
-                  ><div v-if="result.equation" class="equation">
+                <template v-else>
+                  <div v-if="result.equation" class="equation">
                     <span>拟合方程</span>
                     <p>y = {{ equation }}</p>
                   </div>
-                  <div :class="['metric-grid', { 'is-updating': busy }]">
+                  <div v-if="result.metrics.length" :class="['metric-grid', { 'is-updating': busy }]">
                     <div
                       v-for="(metric, j) in result.metrics"
                       :key="j"
-                      class="metric"
+                      class="metric copyable"
+                      role="button"
+                      tabindex="0"
+                      :title="`点击复制 ${metric.label}`"
+                      @click="copySingleValue(display(metric.value), metric.label)"
+                      @keydown.enter.prevent="copySingleValue(display(metric.value), metric.label)"
                     >
-                      <span>{{ metric.label }}</span
-                      ><strong
-                        >{{ display(metric.value)
-                        }}<small v-if="metric.unit">
-                          {{ metric.unit }}</small
-                        ></strong
-                      >
+                      <span>{{ metric.label }}</span>
+                      <strong>
+                        {{ display(metric.value) }}
+                        <small v-if="metric.unit"> {{ metric.unit }}</small>
+                      </strong>
                     </div>
                   </div>
                   <div
@@ -859,20 +1280,21 @@ onUnmounted(() => {
                       :disabled="busy || exporting"
                       @click="exportCsv"
                     >
-                      {{ exporting ? "正在导出…" : "导出 CSV" }}</button
-                    ><button
+                      {{ exporting ? "正在导出…" : "导出 CSV" }}
+                    </button>
+                    <button
                       class="button secondary"
                       :disabled="busy || exporting"
                       @click="copy"
                     >
                       复制完整结果
                     </button>
-                  </div></template
-                >
+                  </div>
+                </template>
                 <div v-if="exporting" class="export-progress">
-                  <progress :value="progress" max="1"></progress
-                  ><span>{{ Math.round(progress * 100) }}%</span
-                  ><button class="button subtle" @click="cancelled = true">
+                  <progress :value="progress" max="1"></progress>
+                  <span>{{ Math.round(progress * 100) }}%</span>
+                  <button class="button subtle" @click="cancelled = true">
                     取消导出
                   </button>
                 </div>
@@ -880,6 +1302,19 @@ onUnmounted(() => {
                   {{ message }}
                 </p>
               </section>
+
+              <ResultTable
+                v-if="selected.kind === 'unit' && result?.rows.length"
+                :key="selected.id + '-unit'"
+                :headings="result.headings"
+                :rows="result.rows"
+                :unit-table="true"
+                :source-index="Number(current.source ?? 0)"
+                :total="result.total"
+                @copy="copySingleValue"
+                @swap-unit="swapUnitSource"
+              />
+
               <section v-if="budget.length" class="panel">
                 <h2>分量贡献</h2>
                 <BudgetResult :nodes="budget" />
@@ -891,8 +1326,8 @@ onUnmounted(() => {
                   :key="key"
                   class="coefficient-row"
                 >
-                  <span>{{ key }}</span
-                  ><span>{{
+                  <span>{{ key }}</span>
+                  <span>{{
                     Array.isArray(value)
                       ? value.map(display).join("，")
                       : display(value)
@@ -901,6 +1336,7 @@ onUnmounted(() => {
               </section>
             </div>
           </div>
+
           <section v-if="result?.tolerances.length" class="panel">
             <div class="section-heading">
               <h2>等级允差</h2>
@@ -913,26 +1349,20 @@ onUnmounted(() => {
                 class="tolerance-card"
               >
                 <h3>{{ t.name }}</h3>
-                <strong v-if="t.delta !== null"
-                  >±{{ display(t.delta) }} {{ t.unit }}</strong
-                ><span v-else class="muted">当前温度超出适用范围</span>
+                <strong v-if="t.delta !== null">±{{ display(t.delta) }} {{ t.unit }}</strong>
+                <span v-else class="muted">当前温度超出适用范围</span>
                 <p v-if="t.temperature">
-                  温度界限：{{ display(t.temperature[0]) }}～{{
-                    display(t.temperature[1])
-                  }}
-                  {{ t.unit }}
+                  温度界限：{{ display(t.temperature[0]) }}～{{ display(t.temperature[1]) }} {{ t.unit }}
                 </p>
                 <p v-if="t.signal">
-                  信号界限：{{ display(t.signal[0]) }}～{{
-                    display(t.signal[1])
-                  }}
-                  {{ t.signalUnit }}
+                  信号界限：{{ display(t.signal[0]) }}～{{ display(t.signal[1]) }} {{ t.signalUnit }}
                 </p>
-                <small>{{ t.formula }}</small
-                ><small>适用范围：{{ t.min }}～{{ t.max }} °C</small>
+                <small>{{ t.formula }}</small>
+                <small>适用范围：{{ t.min }}～{{ t.max }} °C</small>
               </div>
             </div>
           </section>
+
           <section v-if="result?.curve.length" class="panel chart-panel">
             <div class="section-heading">
               <h2>
@@ -945,8 +1375,8 @@ onUnmounted(() => {
                 }}
               </h2>
               <div class="chart-legend">
-                <span>— 曲线</span
-                ><span v-if="result.points.length">● 数据点</span>
+                <span>— 曲线</span>
+                <span v-if="result.points.length">● 数据点</span>
               </div>
             </div>
             <CurveChart
@@ -957,6 +1387,7 @@ onUnmounted(() => {
               :evaluate="selected.kind === 'fit' || selected.kind === 'spline' ? curveValue : undefined"
             />
           </section>
+
           <section v-if="result?.residuals.length" class="panel chart-panel">
             <div class="section-heading">
               <h2>残差分布</h2>
@@ -970,14 +1401,17 @@ onUnmounted(() => {
               y-label="残差"
             />
           </section>
+
           <ResultTable
-            v-if="result?.rows.length"
+            v-if="selected.kind !== 'unit' && result?.rows.length"
             :key="selected.id"
             :headings="result.headings"
             :rows="result.rows"
-            :unit-table="selected.kind === 'unit'"
+            :unit-table="false"
             :total="result.total"
+            @copy="copySingleValue"
           />
+
           <ResultTable
             v-if="calibrationRows.length"
             :key="selected.id + '-calibration'"
@@ -988,8 +1422,10 @@ onUnmounted(() => {
                 : '热电势残差 (mV)',
             ]"
             :rows="calibrationRows"
+            @copy="copySingleValue"
           />
         </template>
+
         <CalculationProcess v-if="selected.kind !== 'gauge' && result?.process.length" :key="selected.id + '-process'" :lines="result.process" />
         <details v-if="activeNote.note || activeNote.formula" :key="selected.id" class="collapsible-note explanation">
           <summary>计算说明</summary>
@@ -1003,12 +1439,61 @@ onUnmounted(() => {
         </details>
       </template>
     </template>
+
     <PdfDownload ref="pdfDownloader" v-show="selected?.kind === 'pdf'" :active="selected?.kind === 'pdf'" />
   </main>
+
   <MobileActions
     :selected="!!selected && selected.kind !== 'pdf'"
     :hidden="mobileNav"
     @inputs="jumpInputs"
     @results="jumpResults"
   />
+
+  <!-- Ctrl+K 全局快速搜索命令面板 -->
+  <div v-if="paletteOpen" class="palette-backdrop" @click.self="closePalette">
+    <div class="palette-dialog" role="dialog" aria-modal="true" aria-label="快速搜索工具">
+      <div class="palette-input-row">
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="11" cy="11" r="6.5" />
+          <path d="m16 16 4 4" />
+        </svg>
+        <input
+          ref="paletteInput"
+          v-model="paletteQuery"
+          type="search"
+          placeholder="输入工具名称、分类或关键词，回车直达…"
+          aria-label="搜索工具"
+          @keydown="onPaletteKey"
+        />
+        <kbd class="kbd-hint">ESC</kbd>
+      </div>
+      <div class="palette-list">
+        <button
+          v-for="(tool, idx) in paletteMatches"
+          :key="'pal-' + tool.id"
+          type="button"
+          :data-group="groupKey(tool.group)"
+          :class="['palette-item', { highlighted: idx === paletteIndex }]"
+          @pointerenter="($event as PointerEvent).pointerType === 'mouse' && (paletteIndex = idx)"
+          @click="closePalette(); open(tool)"
+        >
+          <span class="tool-icon">{{ tool.icon || "工" }}</span>
+          <div class="palette-item-info">
+            <strong>{{ tool.name }}</strong>
+            <small>{{ tool.description }}</small>
+          </div>
+          <span class="palette-item-group">{{ groupShortName(tool.group) }}</span>
+        </button>
+        <p v-if="!paletteMatches.length" class="palette-empty">未找到匹配的工具</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右下角 Toast 轻提示 -->
+  <div class="toast-stack" aria-live="polite">
+    <div v-for="t in toasts" :key="t.id" class="toast-item success">
+      {{ t.text }}
+    </div>
+  </div>
 </template>

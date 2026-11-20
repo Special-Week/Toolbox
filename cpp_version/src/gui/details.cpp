@@ -23,7 +23,8 @@ void Page::details(const std::string &field, const std::wstring &title,
             row = Row{};
         };
         const auto displayed = mathDetails ? parenthesizeNegativeSubtrahends(line) : line;
-        const auto tokens = mathDetails ? mathTokens(displayed) : std::vector<MathToken>{{displayed, L""}};
+        auto tokens = mathDetails ? mathTokens(displayed) : std::vector<MathToken>{};
+        if (!mathDetails) tokens.push_back({displayed, L""});
         for (const auto &token : tokens) {
             Run run;
             run.text = token.text;
@@ -60,7 +61,8 @@ void Page::details(const std::string &field, const std::wstring &title,
         }
         if (!row.runs.empty() || tokens.empty()) finish();
     }
-    ui.fill({x, y, w, height}, Soft, 8);
+    ui.fill({x, y, w, height}, Soft, 10);
+    ui.border({x, y, w, height}, Border, 10);
     ui.text({x + padding, y + 12, inner, 36}, (open ? L"▾  " : L"▸  ") + title, 14, Blue, true);
     ui.hits.push_back({{x, y, w, calculation ? 44.f : 60.f}, ui.clip, [owner = &app, k] {
         if (owner->openDetails.count(k)) owner->openDetails.erase(k);

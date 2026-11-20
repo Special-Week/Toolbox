@@ -1,11 +1,11 @@
-/* 工具参数、输入框与动态数据编辑器。 */
+/* 工具参数、输入框、双栏工作台与动态数据编辑器（适配浅色/深色双主题）。 */
 .breadcrumb {
   display: flex;
   align-items: center;
-  gap: 10px;
-  color: #8a98af;
-  font-size: 11px;
-  margin-bottom: 27px;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  margin-bottom: 14px;
   flex-wrap: wrap;
 }
 .breadcrumb button {
@@ -18,25 +18,32 @@
 .tool-heading {
   display: flex;
   align-items: center;
-  gap: 15px;
-  margin-bottom: 28px;
+  gap: 14px;
+  margin-bottom: 18px;
 }
 .tool-heading h1 {
-  font-size: 27px;
-  line-height: 1.4;
+  font-size: 22px;
+  line-height: 1.35;
 }
 .tool-heading p {
-  font-size: 12px;
+  font-size: 12.5px;
   color: var(--muted);
-  line-height: 1.7;
-  margin-top: 6px;
+  line-height: 1.6;
+  margin-top: 4px;
+}
+.tool-heading-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 .panel {
-  background: white;
+  background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 24px;
-  margin-bottom: 20px;
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 16px;
   min-width: 0;
 }
 .section-heading {
@@ -45,67 +52,80 @@
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  margin-bottom: 22px;
+  margin-bottom: 16px;
 }
 .section-heading .muted {
-  font-size: 11px;
-  margin-top: 7px;
-  line-height: 1.6;
+  font-size: 11.5px;
+  margin-top: 4px;
+  line-height: 1.5;
 }
+
+/* 全站统一双栏工作台：宽屏 >=1024px 左输右显，窄屏自动上下单栏；严格 min-width: 0 防溢出 */
 .tool-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  gap: 20px;
+  gap: 16px;
   align-items: start;
 }
+.input-panels,
+.output-panels {
+  min-width: 0;
+}
+@media (min-width: 1024px) {
+  .tool-workspace {
+    grid-template-columns: minmax(340px, 0.44fr) minmax(0, 0.56fr);
+  }
+}
+
 .form-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 18px 16px;
+  gap: 14px;
   align-items: start;
 }
 .field {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  gap: 9px;
+  gap: 6px;
 }
 .field-label {
   font-size: 12px;
-  color: #718099;
-  line-height: 1.5;
+  color: var(--muted);
+  line-height: 1.45;
+  font-weight: 500;
 }
 .field small {
   font-size: 11px;
-  color: #9aa7bb;
+  color: var(--muted-light);
 }
 input,
 select,
 textarea {
   min-width: 0;
   width: 100%;
-  border: 1px solid #96a8c0;
-  background: #fafcff;
-  border-radius: 6px;
-  padding: 0 12px;
-  height: 42px;
-  color: #31425d;
-  transition: border-color 0.12s;
-  box-shadow: 0 1px 2px #19396503;
+  border: 1px solid var(--border-strong);
+  background: var(--input-bg);
+  border-radius: 8px;
+  padding: 0 11px;
+  height: 38px;
+  color: var(--ink);
+  transition: border-color 0.12s, background-color 0.12s;
 }
 input:hover,
 select:hover,
 textarea:hover {
-  border-color: #b5c8e4;
+  border-color: var(--blue);
 }
 input:focus,
 select:focus,
 textarea:focus {
   border-color: var(--blue);
+  background: var(--surface);
 }
 input:disabled {
-  background: #f3f6fa;
-  color: #9aa7b9;
+  background: var(--input-disabled);
+  color: var(--muted-light);
 }
 input {
   cursor: text;
@@ -113,8 +133,8 @@ input {
 }
 input::placeholder,
 textarea::placeholder {
-  color: #b1bbc9;
-  font-size: 11px;
+  color: var(--muted-light);
+  font-size: 12px;
 }
 select {
   cursor: pointer;
@@ -123,75 +143,68 @@ select {
 textarea {
   height: auto;
   padding: 10px 12px;
-  line-height: 1.7;
+  line-height: 1.65;
   resize: vertical;
 }
 .button {
   border: 1px solid transparent;
-  border-radius: 6px;
+  border-radius: 8px;
   min-height: 36px;
-  padding: 8px 14px;
+  padding: 7px 14px;
   line-height: 1.4;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 500;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
+  gap: 6px;
   white-space: nowrap;
+  transition: background-color 0.12s, border-color 0.12s, color 0.12s;
 }
 .button.primary {
   background: var(--blue);
-  color: white;
+  color: #ffffff;
 }
 .button.primary:hover:not(:disabled) {
-  background: #1f5fcf;
+  background: var(--blue-hover);
 }
 .button.secondary {
-  background: #edf3ff;
+  background: var(--soft);
   color: var(--blue);
-  border-color: #e7effc;
+  border-color: var(--soft-border);
 }
 .button.secondary:hover:not(:disabled) {
-  background: #e0ebfe;
+  border-color: var(--blue);
 }
 .button.subtle {
-  background: #f5f7fb;
-  color: #7988a0;
+  background: var(--surface-subtle);
+  color: var(--ink-secondary);
+  border-color: var(--border);
 }
 .button.subtle:hover:not(:disabled) {
-  background: #edf1f8;
-  color: #47638a;
+  background: var(--surface-hover);
+  color: var(--ink);
 }
 .button.danger-text {
-  color: #ad6970;
+  color: var(--danger);
   background: transparent;
   min-height: 30px;
   padding-left: 0;
-  font-size: 11px;
+  font-size: 11.5px;
 }
 .reset-button {
-  margin-left: auto;
   align-self: center;
   flex-shrink: 0;
-  min-width: 104px;
-  min-height: 40px;
-  padding: 10px 16px;
-  font-size: 14px;
+  min-width: 96px;
+  min-height: 36px;
+  padding: 7px 14px;
+  font-size: 13px;
   color: var(--blue);
   background: var(--soft);
-  border-color: #b8cff3;
-  transition:
-    background-color 0.15s,
-    border-color 0.15s;
+  border-color: var(--soft-border);
 }
 .reset-button:hover:not(:disabled) {
-  background: #e0ebfe;
-  border-color: #82acee;
-}
-.reset-button:active:not(:disabled) {
-  background: #d2e2fb;
-  border-color: #6999e4;
+  border-color: var(--blue);
 }
 .full-width,
 .array-editor,
@@ -202,17 +215,17 @@ textarea {
 }
 .array-editor + .array-editor {
   border-top: 1px solid var(--border);
-  padding-top: 20px;
+  padding-top: 16px;
 }
 .array-toolbar {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  margin-bottom: 15px;
+  margin-bottom: 12px;
 }
 .array-toolbar strong {
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 600;
 }
 .array-toolbar .muted {
@@ -225,109 +238,109 @@ textarea {
   flex-wrap: wrap;
 }
 .toolbar-actions .button {
-  font-size: 11px;
+  font-size: 11.5px;
   min-height: 30px;
-  padding: 6px 9px;
+  padding: 5px 9px;
 }
 .point-header,
 .point-row {
   display: grid;
-  grid-template-columns: 38px minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 36px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
 }
 .point-header {
   font-size: 11px;
-  color: #92a0b5;
-  margin-bottom: 7px;
+  color: var(--muted);
+  margin-bottom: 6px;
 }
 .point-header span:not(:first-child) {
-  padding-left: 12px;
+  padding-left: 10px;
 }
 .point-row,
 .vector-row {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .vector-row {
   display: grid;
-  grid-template-columns: minmax(38px, 100px) minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: minmax(38px, 92px) minmax(0, 1fr);
+  gap: 8px;
   align-items: center;
 }
 .row-index {
   font-size: 11px;
-  color: #91a0b7;
+  color: var(--muted);
   overflow-wrap: anywhere;
 }
 .pagination {
   display: flex;
   justify-content: center;
   align-items: center;
-  gap: 18px;
-  margin-top: 19px;
-  font-size: 11px;
-  color: #8a98ad;
+  gap: 16px;
+  margin-top: 16px;
+  font-size: 12px;
+  color: var(--muted);
 }
 .pagination .button {
-  font-size: 11px;
+  font-size: 11.5px;
   min-height: 30px;
-  padding: 6px 10px;
+  padding: 5px 10px;
 }
 .paste-panel {
-  background: #f7f9fd;
+  background: var(--surface-subtle);
   border: 1px solid var(--border);
-  border-radius: 7px;
-  padding: 14px;
-  margin-bottom: 18px;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
 }
 .paste-panel p {
-  font-size: 11px;
+  font-size: 11.5px;
   color: var(--muted);
-  line-height: 1.7;
-  margin-bottom: 10px;
+  line-height: 1.6;
+  margin-bottom: 8px;
 }
 .paste-panel textarea {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 .error-text {
-  color: #c65e61 !important;
+  color: var(--danger) !important;
 }
 .budget-root {
   border: 1px solid var(--border);
-  padding: 16px;
-  border-radius: 8px;
-  margin-bottom: 14px;
-  background: #fcfdff;
+  padding: 14px;
+  border-radius: 10px;
+  margin-bottom: 12px;
+  background: var(--surface-subtle);
 }
 .budget-child {
-  border-left: 2px solid #dbe7fb;
-  padding-left: 14px;
-  margin: 18px 0;
+  border-left: 2px solid var(--soft-border);
+  padding-left: 12px;
+  margin: 14px 0;
 }
 .budget-node .form-grid {
-  gap: 13px;
+  gap: 12px;
 }
 .budget-node .array-toolbar {
-  margin-top: 16px;
+  margin-top: 14px;
 }
 .measurement-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
+  gap: 8px;
 }
 .measurement-grid input {
-  height: 36px;
+  height: 34px;
 }
 .measurement-grid .field-label {
-  font-size: 10px;
+  font-size: 10.5px;
 }
 .measurement-grid .field {
-  gap: 5px;
+  gap: 4px;
 }
 /* 辅助设置使用原生折叠，收起时保留字段与已填写值。 */
 .advanced-settings {
-  margin-top: 18px;
-  padding-top: 12px;
+  margin-top: 14px;
+  padding-top: 10px;
   border-top: 1px solid var(--border);
 }
 .advanced-settings > summary {
@@ -335,11 +348,12 @@ textarea {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: 44px;
+  min-height: 38px;
   cursor: pointer;
   list-style: none;
   font-size: 13px;
-  color: #637795;
+  color: var(--ink-secondary);
+  font-weight: 500;
 }
 .advanced-settings > summary::-webkit-details-marker {
   display: none;
@@ -347,16 +361,17 @@ textarea {
 .advanced-toggle {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   font-size: 12px;
+  color: var(--muted);
   flex-shrink: 0;
 }
 .advanced-toggle svg {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: 1.7;
 }
 .advanced-collapse {
   display: none;
@@ -371,5 +386,5 @@ textarea {
   transform: rotate(180deg);
 }
 .advanced-settings > .form-grid {
-  margin-top: 14px;
+  margin-top: 12px;
 }

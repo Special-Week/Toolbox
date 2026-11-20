@@ -2,6 +2,8 @@
 #include "sensors.hpp"
 namespace toolbox {
 void thermistorPage(Page &p) {
+    p.beginSplit(0.46f);
+    p.heading(L"热敏电阻参数");
     int family = p.select("family", L"计算模型", {L"多项式 / Steinhart–Hart", L"β 模型"});
     if (family == 1) {
         int mode = p.select("beta.direction", L"计算方式", {L"电阻 → 温度", L"温度 → 电阻"});
@@ -10,11 +12,13 @@ void thermistorPage(Page &p) {
                beta = p.number("beta.value", L"β 值 (K)", 3950),
                input = p.number(mode == 0 ? "beta.r" : "beta.t",
                                 mode == 0 ? L"实测电阻 (Ω)" : L"目标温度 (°C)", mode == 0 ? 10000 : 25);
+        p.rightColumn();
         p.check();
         BetaThermistor model(r0, t0, beta);
         double t = mode == 0 ? model.temperature(input) : input,
                r = mode == 0 ? input : model.resistance(input);
         p.metrics(L"计算结果", {{L"温度", format(t) + L" °C"}, {L"电阻", format(r) + L" Ω"}});
+        p.endSplit();
         double t0k = t0 + 273.15;
         if (mode == 0) {
             double inverse = 1 / t0k + (std::log(r) - std::log(r0)) / beta;
@@ -94,6 +98,7 @@ void thermistorPage(Page &p) {
                             direction == 0 ? 10000 : unit.display(25));
     double lo = p.number("range.min", L"校准温区下限 (°C)", -20),
            hi = p.number("range.max", L"校准温区上限 (°C)", 100);
+    p.rightColumn();
     p.check();
     double t = direction == 0 ? model.temperature(input) : unit.celsius(input),
            r = direction == 0 ? input : model.resistance(t);
@@ -103,6 +108,7 @@ void thermistorPage(Page &p) {
     p.metrics(L"换算结果", {{L"温度", format(unit.display(t)) + L" " + unit.symbol()},
                             {L"电阻", format(r) + L" Ω"},
                             {L"电阻变化率", format(slope / unit.span()) + L" Ω/" + unit.symbol()}});
+    p.endSplit();
     p.processSteps.push_back(L"热敏电阻 " + std::to_wstring(order) + L" 阶" + (sh ? L" Steinhart–Hart（二次项固定为零）" : L"完整多项式") + L"；温度使用 K、电阻使用 Ω。");
     if (source == 1)
         p.processSteps.push_back(L"校准点分别拟合 A：x=ln(R)、y=1/T 和 B：x=1/T、y=ln(R)；分别用列缩放 QR 求最小二乘解。");

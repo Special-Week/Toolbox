@@ -1,4 +1,5 @@
 //! 规范目录查询与 PDF 下载界面；耗时任务通过通道返回结果，避免阻塞界面。
+#![allow(clippy::items_after_test_module)]
 use crate::calculators::common::{collapsible_note, render_error_message, render_metrics};
 use crate::pdf_download::{self, Download};
 use crate::{BLUE, BLUE_SOFT, INK, MUTED};
@@ -378,13 +379,15 @@ mod tests {
 
     #[test]
     fn invalid_link_does_not_start_a_worker_or_discard_downloaded_data() {
-        let mut page = PdfDownloadPage::default();
-        page.result = Some(Download {
-            code: "JJF 1".into(),
-            name: "测试".into(),
-            data: vec![1],
-            pages: 1,
-        });
+        let mut page = PdfDownloadPage {
+            result: Some(Download {
+                code: "JJF 1".into(),
+                name: "测试".into(),
+                data: vec![1],
+                pages: 1,
+            }),
+            ..PdfDownloadPage::default()
+        };
         page.start();
         assert!(!page.busy());
         assert!(page.error.is_some());
@@ -461,8 +464,10 @@ mod tests {
 
     #[test]
     fn warning_can_be_cancelled_without_starting_network_requests() {
-        let mut page = PdfDownloadPage::default();
-        page.url = "https://jjg.spc.org.cn/resmea/standard/detail.html?standno=JJF+1".into();
+        let mut page = PdfDownloadPage {
+            url: "https://jjg.spc.org.cn/resmea/standard/detail.html?standno=JJF+1".into(),
+            ..PdfDownloadPage::default()
+        };
         page.request_download();
         assert!(page.confirm_download);
         assert!(!page.busy());
@@ -491,12 +496,13 @@ mod tests {
         for warning in [true, false] {
             let ctx = egui::Context::default();
             crate::fonts::configure_fonts(&ctx);
-            let mut page = PdfDownloadPage::default();
-            page.confirm_download = warning;
-            if !warning {
-                page.completion =
-                    Some("JJF 1 测试规范\nPDF 页数：2 页\n\n已保存至：C:\\规范.pdf".into());
-            }
+            let mut page = PdfDownloadPage {
+                confirm_download: warning,
+                completion: (!warning).then(|| {
+                    "JJF 1 测试规范\nPDF 页数：2 页\n\n已保存至：C:\\规范.pdf".into()
+                }),
+                ..PdfDownloadPage::default()
+            };
             let _ = dialog_frame(&mut page, &ctx, vec![]);
             let output = dialog_frame(&mut page, &ctx, vec![]);
             let mut rects = Vec::new();
@@ -524,13 +530,15 @@ mod tests {
     #[test]
     fn success_dialog_appears_only_after_the_file_is_saved() {
         let directory = tempfile::tempdir().unwrap();
-        let mut page = PdfDownloadPage::default();
-        page.result = Some(Download {
-            code: "JJF 1".into(),
-            name: "测试规范".into(),
-            data: b"downloaded bytes".to_vec(),
-            pages: 1,
-        });
+        let mut page = PdfDownloadPage {
+            result: Some(Download {
+                code: "JJF 1".into(),
+                name: "测试规范".into(),
+                data: b"downloaded bytes".to_vec(),
+                pages: 1,
+            }),
+            ..PdfDownloadPage::default()
+        };
         page.save_to(directory.path());
         assert!(page.error.is_some());
         assert!(page.completion.is_none());
@@ -585,61 +593,59 @@ impl PdfDownloadPage {
     }
 
     pub(super) fn render(&mut self, ui: &mut egui::Ui) {
-        ui.set_max_width(ui.available_width().min(960.0));
+        let p = crate::theme::palette(ui.ctx());
         egui::Frame::new()
-            .fill(egui::Color32::WHITE)
-            .stroke(egui::Stroke::new(1.0_f32, BLUE_SOFT))
-            .corner_radius(8)
-            .inner_margin(18)
+            .fill(p.surface)
+            .stroke(egui::Stroke::new(1.0_f32, p.accent_soft))
+            .corner_radius(egui::CornerRadius::same(12))
+            .inner_margin(16)
             .show(ui, |ui| {
-                ui.spacing_mut().item_spacing = Vec2::new(12.0, 10.0);
-                ui.label(
-                    RichText::new("规范名称或编号")
-                        .size(15.0)
-                        .strong()
-                        .color(INK),
+            ui.set_width(ui.available_width());
+            ui.spacing_mut().item_spacing = Vec2::new(12.0, 10.0);
+            ui.label(
+                RichText::new("规范名称或编号")
+                    .size(14.5)
+                    .strong()
+                    .color(p.ink),
+            );
+            ui.label(
+                RichText::new("输入名称关键词或规范编号筛选，在结果中选择需要下载的规范。")
+                    .size(12.0)
+                    .color(p.muted),
+            );
+            ui.add_enabled_ui(!self.busy(), |ui| {
+                let mut field = egui::Frame::new()
+                    .fill(p.input_bg)
+                    .stroke(egui::Stroke::new(1.0_f32, p.border_strong))
+                    .corner_radius(egui::CornerRadius::same(8))
+                    .inner_margin(egui::Margin::symmetric(12, 10))
+                    .begin(ui);
+                let response = field.content_ui.add_sized(
+                    [field.content_ui.available_width(), 20.0],
+                    TextEdit::singleline(&mut self.query)
+                        .frame(false)
+                        .margin(0)
+                        .vertical_align(egui::Align::Center)
+                        .font(egui::FontId::proportional(14.0)),
                 );
-                ui.label(
-                    RichText::new("输入名称关键词或规范编号筛选，在结果中选择需要下载的规范。")
-                        .size(12.0)
-                        .color(MUTED),
-                );
-                ui.add_enabled_ui(!self.busy(), |ui| {
-                    let mut field = egui::Frame::new()
-                        .fill(egui::Color32::WHITE)
-                        .stroke(egui::Stroke::new(
-                            1.0_f32,
-                            egui::Color32::from_rgb(169, 189, 219),
-                        ))
-                        .corner_radius(6)
-                        .inner_margin(egui::Margin::symmetric(12, 10))
-                        .begin(ui);
-                    let response = field.content_ui.add_sized(
-                        [field.content_ui.available_width(), 20.0],
-                        TextEdit::singleline(&mut self.query)
-                            .frame(false)
-                            .margin(0)
-                            .vertical_align(egui::Align::Center)
-                            .font(egui::FontId::proportional(14.0)),
-                    );
-                    if response.has_focus() {
-                        field.frame.stroke.color = BLUE;
-                    }
-                    field.end(ui);
-                });
-                ui.label(
-                    RichText::new("数据来源：https://jjg.spc.org.cn/（截至 2026-11 的规范目录）")
-                        .size(12.0)
-                        .color(MUTED),
-                );
-                ui.horizontal_wrapped(|ui| {
-                    ui.hyperlink_to("打开规范网站", "https://jjg.spc.org.cn/resmea/");
-                    if self.busy() {
-                        ui.spinner();
-                        ui.label("正在获取规范名称并检查 PDF…");
-                    }
-                });
+                if response.has_focus() {
+                    field.frame.stroke.color = p.accent;
+                }
+                field.end(ui);
             });
+            ui.label(
+                RichText::new("数据来源：https://jjg.spc.org.cn/（截至 2026-11 的规范目录）")
+                    .size(12.0)
+                    .color(p.muted),
+            );
+            ui.horizontal_wrapped(|ui| {
+                ui.hyperlink_to("打开规范网站", "https://jjg.spc.org.cn/resmea/");
+                if self.busy() {
+                    ui.spinner();
+                    ui.label("正在获取规范名称并检查 PDF…");
+                }
+            });
+        });
         self.render_search_results(ui);
         if let Some(download) = &self.result {
             render_metrics(

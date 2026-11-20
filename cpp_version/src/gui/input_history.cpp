@@ -378,6 +378,12 @@ std::wstring calibrationPath() {
         base = environment(L"APPDATA");
     return base.empty() ? L"" : base + L"\\Toolbox\\cpp\\calibrations-v1.json";
 }
+std::wstring uiPrefsPath() {
+    auto base = environment(L"LOCALAPPDATA");
+    if (base.empty())
+        base = environment(L"APPDATA");
+    return base.empty() ? L"" : base + L"\\Toolbox\\cpp\\ui-prefs-v1.json";
+}
 bool readCalibrationJson(const std::wstring &path, State &state) {
     if (path.empty())
         return false;

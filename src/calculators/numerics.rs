@@ -62,27 +62,30 @@ pub(crate) fn statistics(values: &[f64]) -> Result<Statistics, String> {
     // 符号相反的极端值需要缩放，避免 x - origin 溢出。
     let origin = values[0];
     let differences: Vec<_> = values.iter().map(|x| x - origin).collect();
-    let (mean, residuals, center) = if differences.iter().all(|x| x.is_finite()) {
+    let (mean, residuals, center, sd) = if differences.iter().all(|x| x.is_finite()) {
         let delta_mean = compensated_sum(differences.iter().map(|x| x / count));
-        (
-            origin + delta_mean,
-            differences
-                .iter()
-                .map(|x| x - delta_mean)
-                .collect::<Vec<_>>(),
-            Some((origin, delta_mean)),
-        )
+        let residuals = differences
+            .iter()
+            .map(|x| x - delta_mean)
+            .collect::<Vec<_>>();
+        let sd = rss(residuals.iter().map(|x| x / (count - 1.0).sqrt()))?;
+        (origin + delta_mean, residuals, Some((origin, delta_mean)), sd)
     } else {
         let scale = min.abs().max(max.abs());
         let normalized_mean = compensated_sum(values.iter().map(|x| (x / scale) / count));
         let mean = normalized_mean * scale;
+        let factor = (count - 1.0).sqrt();
+        let sd = rss(values
+            .iter()
+            .map(|x| ((x / scale) - normalized_mean) / factor))?
+            * scale;
         (
             mean,
             values.iter().map(|x| x - mean).collect::<Vec<_>>(),
             None,
+            sd,
         )
     };
-    let sd = rss(residuals.iter().map(|x| x / (count - 1.0).sqrt()))?;
     finite(&[mean, sd, min, max])?;
     Ok(Statistics {
         mean,
@@ -93,4 +96,19 @@ pub(crate) fn statistics(values: &[f64]) -> Result<Statistics, String> {
         residuals,
         center,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn statistics_scales_residuals_when_unscaled_difference_from_mean_would_overflow() {
+        let values = [1.5e308, -1.5e308, -1.5e308];
+        let stats = statistics(&values).unwrap();
+        assert!(stats.center.is_none());
+        assert!((stats.mean - (-0.5e308)).abs() < 1e293);
+        let expected_sd = 3.0_f64.sqrt() * 1.0e308;
+        assert!((stats.sd - expected_sd).abs() <= expected_sd * 1e-14);
+    }
 }

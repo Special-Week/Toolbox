@@ -1,6 +1,6 @@
 //! S/B 标准热电偶：固定点偏差叠加参考曲线，或使用限定温区的直接多项式。
 #![allow(clippy::items_after_test_module)]
-use super::thermocouple_emf;
+use super::{reference, thermocouple_emf};
 use crate::calculators::{
     calibration::{inverse, polynomial},
     numerics::finite,
@@ -27,7 +27,109 @@ pub(crate) struct FixedAdjustment {
     pub method: FixedMethod,
 }
 
+fn derivative(coefficients: &[f64]) -> Vec<f64> {
+    coefficients
+        .iter()
+        .enumerate()
+        .skip(1)
+        .map(|(power, coefficient)| *coefficient * power as f64)
+        .collect()
+}
+
+// 导数零点划分单调区间，再在各区间内二分寻找穿零点。
+fn polynomial_zeros(coefficients: &[f64], low: f64, high: f64) -> Result<Vec<f64>, String> {
+    if coefficients.len() <= 1 {
+        return Ok(Vec::new());
+    }
+    let mut bounds = vec![low];
+    bounds.extend(polynomial_zeros(&derivative(coefficients), low, high)?);
+    bounds.push(high);
+    let mut zeros = Vec::new();
+    for interval in bounds.windows(2) {
+        let (mut a, mut b) = (interval[0], interval[1]);
+        let (left, right) = (polynomial(coefficients, a), polynomial(coefficients, b));
+        finite(&[left, right])?;
+        if left == 0.0 && a > low && a < high {
+            zeros.push(a);
+        }
+        if left != 0.0 && right != 0.0 && left.is_sign_positive() != right.is_sign_positive() {
+            for _ in 0..80 {
+                let middle = a + (b - a) * 0.5;
+                let value = polynomial(coefficients, middle);
+                finite(&[value])?;
+                if value == 0.0 {
+                    a = middle;
+                    b = middle;
+                    break;
+                }
+                if value.is_sign_positive() == left.is_sign_positive() {
+                    a = middle;
+                } else {
+                    b = middle;
+                }
+            }
+            let root = a + (b - a) * 0.5;
+            if root > low && root < high && zeros.last() != Some(&root) {
+                zeros.push(root);
+            }
+        }
+    }
+    Ok(zeros)
+}
+
 impl StandardCouple {
+    pub(crate) fn bounds(&self) -> (f64, f64) {
+        self.zone.as_ref().map(|(lo, hi, _)| (*lo, *hi)).unwrap_or(
+            if self.kind == "S" {
+                (-50.0, 1768.1)
+            } else {
+                (0.0, 1820.0)
+            },
+        )
+    }
+
+    fn fixed_split(&self) -> Result<f64, String> {
+        if self.kind == "S" {
+            Ok(400.0)
+        } else {
+            Ok(self.points.first().ok_or("B 型需要校准点")?.0 - 300.0)
+        }
+    }
+
+    /// 返回同一曲线分段内的差分点及变化率；分段交界保留温度和电势，但不给出变化率。
+    pub(crate) fn slope(&self, t: f64) -> Result<Option<(f64, f64, f64)>, String> {
+        let (low, high) = self.bounds();
+        let mut a = (t - 0.01).max(low);
+        let mut b = (t + 0.01).min(high);
+        if self.zone.is_none() {
+            let reference = reference(self.kind)?;
+            let mut joins = vec![self.fixed_split()?];
+            joins.extend(reference.segments.iter().map(|segment| segment.max));
+            if self.kind == "B" {
+                joins.push(23.0);
+                for &(point, _) in self.points.iter().take(4) {
+                    joins.extend([point + 30.0, point + 70.0]);
+                }
+            }
+            for join in joins.into_iter().filter(|join| *join > low && *join < high) {
+                if t == join {
+                    return Ok(None);
+                }
+                if t < join {
+                    b = b.min(join.next_down());
+                } else {
+                    a = a.max(join.next_up());
+                }
+            }
+        }
+        if a >= b {
+            return Ok(None);
+        }
+        let slope = (self.emf(b)? - self.emf(a)?) / (b - a);
+        finite(&[slope])?;
+        Ok(Some((a, b, slope)))
+    }
+
     /// 校准值是实际热电势，不是修正量；仅修正基准多项式的一次与二次系数。
     pub fn fit_zone_coefficients(
         zone: &mut (f64, f64, Vec<f64>),
@@ -50,6 +152,9 @@ impl StandardCouple {
     }
     pub fn emf(&self, t: f64) -> Result<f64, String> {
         if let Some((lo, hi, c)) = &self.zone {
+            if *lo <= 0.0 && *hi >= 0.0 && c.first().is_some_and(|value| *value != 0.0) {
+                return Err("含 0 °C 的系数温区要求常数项 C0 为零".into());
+            }
             if t == 0.0 {
                 return Ok(0.0);
             }
@@ -141,19 +246,55 @@ impl StandardCouple {
     }
     /// B 型只选 ≥50 °C 的分支，避免其低温转折带来的多值反算。
     pub fn temperature(&self, e: f64) -> Result<f64, String> {
-        let (mut lo, hi) =
-            self.zone
-                .as_ref()
-                .map(|(l, h, _)| (*l, *h))
-                .unwrap_or(if self.kind == "S" {
-                    (-50.0, 1768.1)
-                } else {
-                    (50.0, 1820.0)
-                });
+        let (mut lo, hi) = self.bounds();
         if self.kind == "B" {
             lo = lo.max(50.0);
         }
-        inverse(|t| self.emf(t), e, lo, hi)
+        if let Some((_, _, coefficients)) = &self.zone {
+            let left = self.emf(lo)?;
+            let right = self.emf(hi)?;
+            let slope = derivative(coefficients);
+            let extrema = polynomial_zeros(&derivative(&slope), lo, hi)?;
+            for t in [lo, hi].into_iter().chain(extrema) {
+                let value = polynomial(&slope, t);
+                finite(&[value])?;
+                if left == right || (right > left && value < 0.0) || (right < left && value > 0.0) {
+                    return Err("所选系数在反算温区内不是严格单调曲线，请检查系数".into());
+                }
+            }
+            return inverse(|t| self.emf(t), e, lo, hi);
+        }
+        finite(&[e])?;
+        // 固定点修正可能在此跳变，产生无解区间或重叠解。
+        let split = self.fixed_split()?;
+        if !(lo < split && split <= hi) {
+            return inverse(|t| self.emf(t), e, lo, hi);
+        }
+        let mut solution: Option<f64> = None;
+        for (start, end) in [(lo, split.next_down()), (split, hi)] {
+            let (a, b) = (self.emf(start)?, self.emf(end)?);
+            let target = if (a.min(b)..=a.max(b)).contains(&e) {
+                e
+            } else if start == lo && (e - a).abs() <= 1e-10 {
+                a
+            } else if end == hi && (e - b).abs() <= 1e-10 {
+                b
+            } else {
+                continue;
+            };
+            let root = if target == a {
+                start
+            } else if target == b {
+                end
+            } else {
+                inverse(|t| self.emf(t), e, start, end)?
+            };
+            if solution.is_some_and(|previous| (previous - root).abs() > 1e-9) {
+                return Err("该热电势对应多个温度，请核对校准点或使用限定温区的系数换算".into());
+            }
+            solution = Some(root);
+        }
+        solution.ok_or_else(|| "热电势超出有效范围或落在固定点分段间隙内".into())
     }
 }
 
@@ -176,6 +317,56 @@ mod tests {
                 .collect(),
             zone: None,
         }
+    }
+
+    #[test]
+    fn slope_does_not_cross_fixed_point_joins() {
+        let mut b = model("B", &[1100.0, 1200.0, 1300.0, 1400.0, 1500.0]);
+        b.points[0].1 = 5.8029;
+        assert!(b.slope(800.0).unwrap().is_none());
+        for t in [799.995, 800.005] {
+            let (a, b, slope) = b.slope(t).unwrap().unwrap();
+            assert!((a < 800.0 && b < 800.0) || (a > 800.0 && b > 800.0));
+            assert!((0.007..0.008).contains(&slope));
+        }
+    }
+
+    #[test]
+    fn manual_inversion_checks_zero_reference_and_monotonicity() {
+        let mut model = StandardCouple {
+            kind: "S", points: Vec::new(), zone: Some((-50.0, 1064.18, vec![0.01, 0.01])),
+        };
+        assert!(model.emf(-1.0).unwrap_err().contains("C0"));
+        assert!(model.temperature(0.0).unwrap_err().contains("C0"));
+        // The derivative is positive at both endpoints but negative near 100 °C.
+        model.zone = Some((-50.0, 1064.18, vec![0.0, 29_999.0, -300.0, 1.0]));
+        assert!(model.temperature(0.0).unwrap_err().contains("单调"));
+        model.zone = Some((-50.0, 1064.18, vec![0.0, 30_000.0, -300.0, 1.0]));
+        assert!((model.temperature(model.emf(101.0).unwrap()).unwrap() - 101.0).abs() < 1e-8);
+        let (lo, hi, coefficients) = zones("S")[1].clone();
+        model.zone = Some((lo, hi, coefficients));
+        assert_eq!(model.emf(0.0).unwrap(), 0.0);
+        assert!((model.temperature(model.emf(1400.0).unwrap()).unwrap() - 1400.0).abs() < 1e-8);
+    }
+
+    #[test]
+    fn fixed_point_inverse_handles_overlaps_and_gaps() {
+        let mut b = model("B", &[1100.0, 1200.0, 1300.0, 1400.0, 1500.0]);
+        let reference = thermocouple_emf("B", 1100.0).unwrap();
+        let left = b.emf(800.0_f64.next_down()).unwrap();
+        let right = b.emf(800.0).unwrap();
+        assert!(b.temperature((left + right) / 2.0).is_err());
+        assert_eq!(b.temperature(right).unwrap(), 800.0);
+        b.points[0].1 = reference - 0.01;
+        let error = b.temperature(b.emf(800.0).unwrap()).unwrap_err();
+        assert!(error.contains("多个温度"), "{error}");
+        for t in [799.0, 801.0] {
+            assert!((b.temperature(b.emf(t).unwrap()).unwrap() - t).abs() < 1e-8);
+        }
+        let mut s = model("S", &[419.527, 660.323, 1084.62]);
+        s.points[0].1 = thermocouple_emf("S", 419.527).unwrap() - 0.01;
+        let error = s.temperature(s.emf(400.0).unwrap()).unwrap_err();
+        assert!(error.contains("多个温度"), "{error}");
     }
 
     #[test]

@@ -15,7 +15,8 @@ Selection selectStandard(Range dut, Range reference, double da, double ra, doubl
     double ratio = dt / rt;
     finite({dt, rt, ratio});
     bool coverage = reference.covers(dut);
-    return {dt, rt, ratio, coverage, coverage && ratio >= required};
+    bool meetsRatio = ratio >= required || required - ratio <= required * (4 * std::numeric_limits<double>::epsilon());
+    return {dt, rt, ratio, coverage, coverage && meetsRatio};
 }
 ElectricalSelection selectTransmitter(Range dut, Range reference, Range output, double da, double ra,
                                       double reading, double fixed, double required) {
@@ -51,7 +52,8 @@ std::pair<double, double> transmitterForward(Range process, Range output, bool r
     require(value >= process.low && value <= process.high, "输入值超出所选量程");
     double fraction = (value - process.low) / process.span;
     require(!root || fraction >= 0, "开方输入不能低于量程下限");
-    double signal = std::fma(root ? std::sqrt(fraction) : fraction, output.span, output.low);
+    double outputFraction = root ? std::sqrt(fraction) : fraction;
+    double signal = outputFraction == 1 ? output.high : std::fma(outputFraction, output.span, output.low);
     finite({signal, fraction});
     return {signal, fraction};
 }
@@ -63,7 +65,7 @@ std::pair<double, double> transmitterInverse(Range process, Range output, bool r
     if (root) {
         fraction *= fraction;
     }
-    double processValue = std::fma(fraction, process.span, process.low);
+    double processValue = fraction == 1 ? process.high : std::fma(fraction, process.span, process.low);
     finite({processValue, fraction});
     return {processValue, fraction};
 }

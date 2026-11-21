@@ -1,6 +1,7 @@
 // 各分度号采用独立特性，CVD 自定义系数在反算前检查整段单调性。
 #include "toolbox/models.hpp"
 namespace toolbox {
+static constexpr double ni672Upper[] = {-60, -30, 0, 30, 60, 90, 120, 150, 180, 210, 240, 260};
 RtdModel::RtdModel(std::size_t index, double zero, const Values &custom)
     : definition(rtdDefinitions().at(index)), r0(zero),
       coefficients(custom.empty() ? definition.coefficients : custom) {
@@ -56,7 +57,6 @@ RtdReference RtdModel::reference(double t) const {
     case RtdCurve::Ni1000:
         return {{1, .004427, 5.172e-6, 5.585e-9}, 0, 1};
     case RtdCurve::Ni672: {
-        static const double upper[] = {-60, -30, 0, 30, 60, 90, 120, 150, 180, 210, 240, 260};
         static const Values c[] = {{.9980384367, .005779005438, 4.519218356e-6, 1.883007648e-8},
                                    {.9995545058, .005854808892, 5.782609262e-6, 2.584891485e-8},
                                    {1, .005899358312, 7.267589932e-6, 4.234870007e-8},
@@ -70,7 +70,7 @@ RtdReference RtdModel::reference(double t) const {
                                    {1.103473241, .004975250849, 8.527329303e-6, 1.114941068e-8},
                                    {1.437355995, .0008017164189, 2.59170561e-5, -1.300325764e-8}};
         for (int i = 0; i < 12; ++i) {
-            if (t <= upper[i] || i == 11) {
+            if (t <= ni672Upper[i] || i == 11) {
                 return {c[i], 0, 1};
             }
         }
@@ -95,21 +95,41 @@ double RtdModel::temperature(double r) const {
     double lo = definition.minimum, hi = definition.maximum;
     double lowR = resistance(lo), highR = resistance(hi);
     require(r >= lowR && r <= highR, "电阻超出当前 R₀ 与分度号的有效范围");
-    if (r == lowR) {
-        return lo;
+    std::vector<std::pair<double, double>> intervals;
+    if (definition.curve == RtdCurve::Cu427) {
+        intervals = {{lo, std::nextafter(-50., lo)}, {-50., 150.}, {std::nextafter(150., hi), hi}};
+    } else if (definition.curve == RtdCurve::Ni672) {
+        double start = lo;
+        for (double end : ni672Upper) {
+            intervals.push_back({start, end});
+            start = std::nextafter(end, std::numeric_limits<double>::infinity());
+        }
+    } else {
+        intervals.push_back({lo, hi});
     }
-    if (r == highR) {
-        return hi;
+    std::optional<double> solution;
+    for (auto [start, end] : intervals) {
+        double a = resistance(start), b = resistance(end);
+        if (r < a || r > b) {
+            continue;
+        }
+        double t = r == a ? start : end;
+        if (r != a && r != b) {
+            for (int i = 0; i < 80; ++i) {
+                double mid = start + (end - start) * .5;
+                (resistance(mid) < r ? start : end) = mid;
+            }
+            t = start + (end - start) * .5;
+        }
+        if (std::abs(resistance(t) - r) > 1e-9 * std::max(r, 1.)) {
+            continue;
+        }
+        require(!solution || std::abs(*solution - t) <= 1e-9,
+                "该电阻在分段曲线中对应多个温度，无法唯一反算");
+        solution = t;
     }
-    for (int i = 0; i < 80; ++i) {
-        double mid = lo + (hi - lo) * .5;
-        (resistance(mid) < r ? lo : hi) = mid;
-    }
-    double t = lo + (hi - lo) * .5;
-    // 分段表的舍入可能留下微小间隙；二分结束不代表一定找到了连续曲线上的解。
-    require(std::abs(resistance(t) - r) <= 1e-9 * std::max(r, 1.),
-            "该电阻位于分段曲线间隙，无法可靠反算温度");
-    return t;
+    require(solution.has_value(), "该电阻位于分段曲线间隙，无法可靠反算温度");
+    return *solution;
 }
 double RtdModel::slope(double t) const {
     resistance(t);

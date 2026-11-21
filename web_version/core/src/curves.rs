@@ -73,7 +73,8 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
             "残差 y−拟合 y".into(),
         ];
         for j in 0..=240 {
-            let x = fit.minimum_x + (fit.maximum_x - fit.minimum_x) * j as f64 / 240.;
+            let fraction = j as f64 / 240.0;
+            let x = (1.0 - fraction).mul_add(fit.minimum_x, fraction * fit.maximum_x);
             o.curve.push([x, fit.predict(x)?]);
         }
         for (j, &v) in fit.coefficients.iter().enumerate() {

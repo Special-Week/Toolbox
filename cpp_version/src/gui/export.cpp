@@ -96,7 +96,8 @@ void App::exportCsv(const std::wstring &name, const std::string &header, std::si
     refresh();
 }
 void Page::division(const std::string &field, std::pair<double, double> bounds, TemperatureUnit unit,
-                    const std::wstring &signal, Curve curve) {
+                    const std::wstring &signal, Curve curve,
+                    std::function<std::optional<double>(double)> slope) {
     if (!collapse("table." + field, L"分度表与特性曲线")) {
         return;
     }
@@ -108,14 +109,24 @@ void Page::division(const std::string &field, std::pair<double, double> bounds, 
     check();
     require(start >= lo && end <= hi, "分度表范围超出所选曲线或校准分区");
     auto samples = divisionPoints(start, end, step);
-    auto value = [curve, bounds, unit](double x) {
+    auto value = [curve, slope, bounds, unit](double x) {
         // 分度表已核验显示温区；温标往返的末位舍入不能让端点落到有效区间之外。
-        double t = std::clamp(unit.celsius(x), bounds.first, bounds.second),
-               delta = std::max(std::abs(t) * std::numeric_limits<double>::epsilon() * 8, .01),
-               lo = std::max(t - delta, bounds.first), hi = std::min(t + delta, bounds.second);
-        double signal = curve(t), slope = (curve(hi) - curve(lo)) / (hi - lo) / unit.span();
-        finite({signal, slope});
-        return std::make_pair(signal, slope);
+        double t = std::clamp(unit.celsius(x), bounds.first, bounds.second);
+        std::optional<double> rate;
+        if (slope) {
+            rate = slope(t);
+        } else {
+            double delta = std::max(std::abs(t) * std::numeric_limits<double>::epsilon() * 8, .01),
+                   lo = std::max(t - delta, bounds.first), hi = std::min(t + delta, bounds.second);
+            rate = (curve(hi) - curve(lo)) / (hi - lo);
+        }
+        double signal = curve(t);
+        finite({signal});
+        if (rate) {
+            *rate /= unit.span();
+            finite({*rate});
+        }
+        return std::make_pair(signal, rate);
     };
     button(L"导出完整 CSV", [owner = &app, samples, value, unit, signal, name = tool.id] {
         owner->exportCsv(wide(name) + L"_division.csv",
@@ -124,7 +135,7 @@ void Page::division(const std::string &field, std::pair<double, double> bounds, 
                          samples.size(), [samples, value](std::size_t i) {
                              auto v = value(samples[i]);
                              return rawNumber(samples[i]) + "," + rawNumber(v.first) + "," +
-                                    rawNumber(v.second) + "\r\n";
+                                    (v.second ? rawNumber(*v.second) : "") + "\r\n";
                          });
     });
     // 预览仅在本次页面构建内读取；导出闭包已按值持有快照，无需额外共享所有权。
@@ -147,7 +158,7 @@ void Page::division(const std::string &field, std::pair<double, double> bounds, 
     std::vector<std::vector<std::wstring>> rows;
     for (std::size_t i = page * 10; i < std::min(samples.size(), std::size_t(page * 10 + 10)); ++i) {
         auto v = value(samples[i]);
-        rows.push_back({format(samples[i]), format(v.first), format(v.second)});
+        rows.push_back({format(samples[i]), format(v.first), v.second ? format(*v.second) : L"—"});
     }
     table({L"温度 (" + unit.symbol() + L")", L"信号 (" + signal + L")", L"变化率"}, rows);
     std::vector<Point> plot;

@@ -97,7 +97,9 @@ std::optional<double> trapezoidalMinorTolerance(double d, double p, const std::s
     const auto &table = database()["DATA"]["trap"]["tdo"];
     std::vector<double> pitches;
     for (const auto &r : table.array) {
-        pitches.push_back(pitch(r));
+        if (valid(pitch(r))) {
+            pitches.push_back(pitch(r));
+        }
     }
     std::sort(pitches.begin(), pitches.end());
     double used = nearest(pitches, p);
@@ -158,7 +160,7 @@ std::pair<double, double> lengths(bool trap, bool ring, double d, double p, std:
             diameters.push_back(n(r, "公称直径"));
         }
         double chosen = nearest(diameters, d);
-        if (!same(chosen, d)) {
+        if (valid(chosen) && !same(chosen, d)) {
             notes.push_back("量规长度采用最近标准直径 Tr" + rawNumber(chosen) + " 档。");
         }
         for (const auto &r : table.array) {

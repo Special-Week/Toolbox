@@ -1,6 +1,51 @@
 // 证书校准模型：固定点偏差、标准铂电阻及热敏电阻双向拟合。
 #include "toolbox/models.hpp"
 namespace toolbox {
+static Values derivative(const Values &coefficients) {
+    Values result;
+    for (std::size_t i = 1; i < coefficients.size(); ++i) {
+        result.push_back(coefficients[i] * double(i));
+    }
+    return result;
+}
+
+// 利用导数的零点划分单调区间，再对各次穿零分别二分。
+static Values polynomialZeros(const Values &coefficients, double low, double high) {
+    if (coefficients.size() <= 1) {
+        return {};
+    }
+    Values bounds = polynomialZeros(derivative(coefficients), low, high);
+    bounds.insert(bounds.begin(), low);
+    bounds.push_back(high);
+    Values zeros;
+    for (std::size_t i = 1; i < bounds.size(); ++i) {
+        double a = bounds[i - 1], b = bounds[i];
+        double left = polynomial(coefficients, a), right = polynomial(coefficients, b);
+        finite({left, right});
+        if (left == 0 && a > low && a < high) {
+            zeros.push_back(a);
+        }
+        if (left == 0 || right == 0 || std::signbit(left) == std::signbit(right)) {
+            continue;
+        }
+        for (int iteration = 0; iteration < 80; ++iteration) {
+            double midpoint = a + (b - a) * .5;
+            double value = polynomial(coefficients, midpoint);
+            finite({value});
+            if (value == 0) {
+                a = b = midpoint;
+                break;
+            }
+            (std::signbit(value) == std::signbit(left) ? a : b) = midpoint;
+        }
+        double root = a + (b - a) * .5;
+        if (root > low && root < high && (zeros.empty() || zeros.back() != root)) {
+            zeros.push_back(root);
+        }
+    }
+    return zeros;
+}
+
 std::vector<ThermoZone> standardZones(const std::string &kind) {
     if (kind == "S") {
         return {{-50,
@@ -36,9 +81,57 @@ void StandardCouple::fit(ThermoZone &z, const std::vector<std::pair<double, doub
     z.coefficients.at(1) += c[0];
     z.coefficients.at(2) += c[1];
 }
+std::pair<double, double> StandardCouple::bounds() const {
+    if (zone) {
+        return {zone->minimum, zone->maximum};
+    }
+    return kind == "S" ? std::make_pair(-50., 1768.1) : std::make_pair(0., 1820.);
+}
+double StandardCouple::fixedSplit() const {
+    require(kind == "S" || !points.empty(), "B 型需要校准点");
+    return kind == "S" ? 400. : points.front().first - 300;
+}
+std::optional<std::array<double, 3>> StandardCouple::slope(double t) const {
+    auto [low, high] = bounds();
+    double a = std::max(t - .01, low), b = std::min(t + .01, high);
+    if (!zone) {
+        Values joins{fixedSplit()};
+        for (const auto &segment : thermoSegments(kind)) {
+            joins.push_back(segment.maximum);
+        }
+        if (kind == "B") {
+            joins.push_back(23.);
+            for (std::size_t i = 0; i < std::min<std::size_t>(4, points.size()); ++i) {
+                joins.push_back(points[i].first + 30);
+                joins.push_back(points[i].first + 70);
+            }
+        }
+        for (double join : joins) {
+            if (join <= low || join >= high) {
+                continue;
+            }
+            if (t == join) {
+                return std::nullopt;
+            }
+            if (t < join) {
+                b = std::min(b, std::nextafter(join, low));
+            } else {
+                a = std::max(a, std::nextafter(join, high));
+            }
+        }
+    }
+    if (a >= b) {
+        return std::nullopt;
+    }
+    double value = (emf(b) - emf(a)) / (b - a);
+    finite({value});
+    return std::array<double, 3>{a, b, value};
+}
 double StandardCouple::emf(double t) const {
     finite({t});
     if (zone) {
+        require(zone->minimum > 0 || zone->maximum < 0 || zone->coefficients.empty() || zone->coefficients.front() == 0,
+                "含 0 °C 的系数温区要求常数项 C0 为零");
         if (t == 0) {
             return 0;
         }
@@ -89,12 +182,52 @@ double StandardCouple::emf(double t) const {
     return e;
 }
 double StandardCouple::temperature(double e) const {
-    double lo = zone ? zone->minimum : (kind == "S" ? -50. : 50.);
-    double hi = zone ? zone->maximum : (kind == "S" ? 1768.1 : 1820.);
+    auto [lo, hi] = bounds();
     if (kind == "B") {
         lo = std::max(lo, 50.);
     }
-    return inverse([&](double t) { return emf(t); }, e, lo, hi);
+    auto curve = [&](double t) { return emf(t); };
+    if (zone) {
+        double left = emf(lo), right = emf(hi);
+        auto slope = derivative(zone->coefficients);
+        auto extrema = polynomialZeros(derivative(slope), lo, hi);
+        extrema.push_back(lo);
+        extrema.push_back(hi);
+        for (double t : extrema) {
+            double value = polynomial(slope, t);
+            finite({value});
+            require((right > left && value >= 0) || (right < left && value <= 0),
+                    "所选系数在反算温区内不是严格单调曲线，请检查系数");
+        }
+        return inverse(curve, e, lo, hi);
+    }
+    finite({e});
+    double split = fixedSplit();
+    if (!(lo < split && split <= hi)) {
+        return inverse(curve, e, lo, hi);
+    }
+    // 两段校准偏差在切换点可能有跳变，分别检查它们能否反算。
+    std::optional<double> solution;
+    const std::pair<double, double> intervals[]{{lo, std::nextafter(split, lo)}, {split, hi}};
+    for (auto [start, end] : intervals) {
+        double a = emf(start), b = emf(end);
+        double target = e;
+        if (e < std::min(a, b) || e > std::max(a, b)) {
+            if (start == lo && std::abs(e - a) <= 1e-10) {
+                target = a;
+            } else if (end == hi && std::abs(e - b) <= 1e-10) {
+                target = b;
+            } else {
+                continue;
+            }
+        }
+        double root = target == a ? start : target == b ? end : inverse(curve, e, start, end);
+        require(!solution || std::abs(*solution - root) <= 1e-9,
+                "该热电势对应多个温度，请核对校准点或使用限定温区的系数换算");
+        solution = root;
+    }
+    require(solution.has_value(), "热电势超出有效范围或落在固定点分段间隙内");
+    return *solution;
 }
 double sprtReference(double t) {
     require(std::isfinite(t) && t >= -259.3467 && t <= 961.78, "温度超出参考电阻比范围");

@@ -24,7 +24,11 @@ impl Transmitter {
         } else {
             fraction
         };
-        let signal = output_fraction.mul_add(self.signal.span, self.signal.low);
+        let signal = if output_fraction == 1.0 {
+            self.signal.high
+        } else {
+            output_fraction.mul_add(self.signal.span, self.signal.low)
+        };
         finite(&[signal])?;
         Ok((signal, fraction))
     }
@@ -36,7 +40,11 @@ impl Transmitter {
         } else {
             fraction
         };
-        let value = process_fraction.mul_add(self.process.span, self.process.low);
+        let value = if fraction == 1.0 {
+            self.process.high
+        } else {
+            process_fraction.mul_add(self.process.span, self.process.low)
+        };
         finite(&[value])?;
         Ok((value, process_fraction))
     }
@@ -46,5 +54,24 @@ impl Transmitter {
             return Err("输入值超出所选量程".to_owned());
         }
         Ok((value - range.low) / range.span)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn endpoints_round_trip_for_both_transmitter_modes() {
+        let process = Range::new(-10.0, 0.4).unwrap();
+        let signal = Range::new(-5.0, 0.2).unwrap();
+        for square_root in [false, true] {
+            let model = Transmitter::new(process, signal, square_root);
+            for (input, output) in [(process.low, signal.low), (process.high, signal.high)] {
+                assert_eq!(model.forward(input).unwrap().0, output);
+                assert_eq!(model.inverse(output).unwrap().0, input);
+            }
+            assert!(model.inverse(signal.high.next_up()).is_err());
+        }
     }
 }

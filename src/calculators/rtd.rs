@@ -357,6 +357,7 @@ impl ToolboxApp {
                 table_unit,
                 "Ω",
                 |t| model.resistance(t),
+                None,
             );
         }
         if let Some(lines) = &process {

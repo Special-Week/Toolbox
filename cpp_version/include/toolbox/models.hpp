@@ -22,7 +22,7 @@ const std::vector<ThermoSegment> &thermoSegments(const std::string &kind);
 std::pair<double, double> thermoBounds(const std::string &kind);
 double thermoEmf(const std::string &kind, double t);
 double thermoSlope(const std::string &kind, double t);
-double thermoTemperature(const std::string &kind, double emf);
+double thermoTemperature(const std::string &kind, double emf, double roundoff = 0);
 struct Tolerance {
     std::wstring name, formula;
     double minimum, maximum;
@@ -67,8 +67,12 @@ struct StandardCouple {
     std::string kind = "S";
     std::vector<std::pair<double, double>> points;
     std::optional<ThermoZone> zone;
+    std::pair<double, double> bounds() const;
+    double fixedSplit() const;
     double emf(double temperature) const;
     double temperature(double emf) const;
+    // 返回差分的两个温度和变化率，分段交界处为空。
+    std::optional<std::array<double, 3>> slope(double temperature) const;
     static void fit(ThermoZone &zone, const std::vector<std::pair<double, double>> &points);
 };
 const Values &sprtA();
@@ -136,6 +140,7 @@ struct Humidity {
     std::optional<double> dew, frost, wet;
 };
 double saturation(double t);
+double humidityLowWaterCoefficient();
 Humidity humidity(double t, double p, int known, double value);
 double effectiveWavelength(int response, double wavelength, double t);
 double radiationError(double emissivity, double wavelength, double t, double background);

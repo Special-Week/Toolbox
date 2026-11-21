@@ -307,8 +307,8 @@ impl RtdModel {
     }
 
     pub(crate) fn temperature(&self, resistance: f64) -> Result<f64, String> {
-        let mut low = self.graduation.min;
-        let mut high = self.graduation.max;
+        let low = self.graduation.min;
+        let high = self.graduation.max;
         let low_r = self.resistance(low)?;
         let high_r = self.resistance(high)?;
         if !resistance.is_finite() || !(low_r..=high_r).contains(&resistance) {
@@ -320,23 +320,36 @@ impl RtdModel {
                 format_number(high),
             ));
         }
-        if resistance == low_r {
-            return Ok(low);
-        }
-        if resistance == high_r {
-            return Ok(high);
-        }
-        // 有界二分法也能处理 B=0 的 CVD 曲线、负温度及
-        // 原始铜镍分段曲线，避免牛顿迭代溢出。
-        for _ in 0..80 {
-            let mid = low + (high - low) * 0.5;
-            if self.resistance(mid)? < resistance {
-                low = mid;
-            } else {
-                high = mid;
+        let mut solution: Option<f64> = None;
+        for (mut start, mut end) in self.curve.inverse_intervals(low, high) {
+            let (a, b) = (self.resistance(start)?, self.resistance(end)?);
+            if !(a..=b).contains(&resistance) {
+                continue;
             }
+            let temperature = if resistance == a {
+                start
+            } else if resistance == b {
+                end
+            } else {
+                for _ in 0..80 {
+                    let mid = start + (end - start) * 0.5;
+                    if self.resistance(mid)? < resistance {
+                        start = mid;
+                    } else {
+                        end = mid;
+                    }
+                }
+                start + (end - start) * 0.5
+            };
+            if (self.resistance(temperature)? - resistance).abs() > 1e-9 * resistance.max(1.0) {
+                continue;
+            }
+            if solution.is_some_and(|previous| (previous - temperature).abs() > 1e-9) {
+                return Err("该电阻在分段曲线中对应多个温度，无法唯一反算".to_owned());
+            }
+            solution = Some(temperature);
         }
-        Ok(low + (high - low) * 0.5)
+        solution.ok_or_else(|| "该电阻位于分段曲线间隙，无法可靠反算温度".to_owned())
     }
 
     pub(crate) fn slope(&self, temperature: f64) -> Result<f64, String> {
@@ -346,6 +359,32 @@ impl RtdModel {
             return Err("当前温度处的电阻变化率无效".to_owned());
         }
         Ok(slope)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overlapping_copper_and_nickel_segments_report_multiple_temperatures() {
+        for (key, temperature) in [("cu10_427", -50.0), ("ni120_672", 240.0)] {
+            let graduation = GRADUATIONS.iter().find(|g| g.key == key).unwrap();
+            let model = RtdModel::new(graduation, graduation.r0, None).unwrap();
+            let resistance = model.resistance(temperature).unwrap();
+            assert!(model.temperature(resistance).unwrap_err().contains("多个温度"));
+        }
+    }
+
+    #[test]
+    fn nickel_inverse_rejects_a_gap_between_segments() {
+        let graduation = GRADUATIONS.iter().find(|g| g.key == "ni120_672").unwrap();
+        let model = RtdModel::new(graduation, graduation.r0, None).unwrap();
+        assert!(model.temperature(219.289424).is_err());
+        for temperature in [119.999, 120.0, 120.001] {
+            let resistance = model.resistance(temperature).unwrap();
+            assert!((model.temperature(resistance).unwrap() - temperature).abs() < 1e-8);
+        }
     }
 }
 

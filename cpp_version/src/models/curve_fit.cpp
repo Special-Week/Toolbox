@@ -87,9 +87,8 @@ CurveFit::CurveFit(const std::vector<std::pair<double, double>> &points, CurveFi
     finite(responses);
     minimumX = *std::min_element(inputs.begin(), inputs.end());
     maximumX = *std::max_element(inputs.begin(), inputs.end());
-    require(minimumX != maximumX, "所有输入量 x 相同，无法建立有效的校准曲线");
-
     bool centered = kind != CurveFitKind::ThroughOrigin;
+    require(!centered || minimumX != maximumX, "所有输入量 x 相同，无法建立有效的校准曲线");
     x_ = normalization(inputs, centered);
     y_ = normalization(responses, centered);
     Values normalizedX, normalizedY;
@@ -139,16 +138,23 @@ CurveFit::CurveFit(const std::vector<std::pair<double, double>> &points, CurveFi
         dy.push_back(sy[index] - meanY);
     }
     double xNorm = rss(dx), yNorm = rss(dy);
-    if (yNorm != 0) {
-        Values covariance, scaledResiduals;
+    if (xNorm != 0 && yNorm != 0) {
+        Values covariance;
         for (std::size_t index = 0; index < points.size(); ++index) {
             covariance.push_back((dx[index] / xNorm) * (dy[index] / yNorm));
-            scaledResiduals.push_back(residuals[index] / centeredY.scale);
         }
-        double r = compensatedSum(covariance), ratio = rss(scaledResiduals) / yNorm;
-        double determination = 1 - ratio * ratio;
-        finite({r, determination});
+        double r = compensatedSum(covariance);
+        finite({r});
         correlation = std::clamp(r, -1.0, 1.0);
+    }
+    if (yNorm != 0) {
+        Values scaledResiduals;
+        for (double residual : residuals) {
+            scaledResiduals.push_back(residual / centeredY.scale);
+        }
+        double ratio = rss(scaledResiduals) / yNorm;
+        double determination = 1 - ratio * ratio;
+        finite({determination});
         // 所有模型统一采用中心化 R²；过原点模型允许出现负值，不强行截断。
         rSquared = determination;
     }
@@ -165,6 +171,11 @@ CurveFit::CurveFit(const std::vector<std::pair<double, double>> &points, CurveFi
             errors.push_back(residual / std::sqrt(double(freedom)));
         }
         residualSd = rss(errors);
+    }
+    // 所有测量点的 x 相同时，仍可在原点与测量点之间绘制过原点拟合线。
+    if (minimumX == maximumX) {
+        minimumX = std::min(minimumX, 0.);
+        maximumX = std::max(maximumX, 0.);
     }
 }
 
@@ -193,7 +204,7 @@ std::vector<std::wstring> CurveFit::process(const std::vector<std::pair<double, 
     }
     lines.push_back(L"");
     lines.push_back(L"RMSE = √[Σ残差²/n] = " + c(rmse) + L"；残差标准差 = √[Σ残差²/(n−p)] = " + (residualSd ? c(*residualSd) : L"无剩余自由度，未定义") + L"。");
-    lines.push_back(L"相关系数 r 由原始 x、y 的中心化数据计算；决定系数 R² = 1 − Σ残差²/Σ(y−ȳ)²。响应无变化时两者未定义。");
+    lines.push_back(L"相关系数 r 由原始 x、y 的中心化数据计算；x 或 y 无变化时 r 未定义。决定系数 R² = 1 − Σ残差²/Σ(y−ȳ)²；y 无变化时 R² 未定义。");
     return lines;
 }
 } // 命名空间 toolbox

@@ -76,11 +76,18 @@ void renderOther(Page &p) {
         p.processSteps.push_back(L"过程量范围 = " + inputNumber(a) + L"～" + inputNumber(b) + L" " + symbol + L"，跨度 = " + p.processValue(process.span) + L"；输出范围 = " + inputNumber(sl) + L"～" + inputNumber(sh) + L" " + signals[signal] + L"，跨度 = " + p.processValue(output.span) + L"。");
         if (direction == 0) {
             p.processSteps.push_back(L"过程量比例 f = (输入 − 下限)/跨度 = (" + inputNumber(input) + L" − " + inputNumber(a) + L") / " + p.processValue(process.span) + L" = " + p.processValue(result.second) + L"。");
-            p.processSteps.push_back(std::wstring(function ? L"开方特性 s = √f = " : L"线性特性 s = f = ") + p.processValue(function ? std::sqrt(result.second) : result.second) + L"；输出 = 输出下限 + s × 输出跨度 = " + inputNumber(sl) + L" + " + p.processValue(function ? std::sqrt(result.second) : result.second) + L" × " + p.processValue(output.span) + L" = " + p.processValue(result.first) + L" " + signals[signal] + L"。");
+            double signalFraction = function ? std::sqrt(result.second) : result.second;
+            p.processSteps.push_back(std::wstring(function ? L"开方特性 s = √f = " : L"线性特性 s = f = ") + p.processValue(signalFraction) + L"。");
+            p.processSteps.push_back(signalFraction == 1
+                ? L"信号比例为 1，输出直接取上限 " + inputNumber(sh) + L" " + signals[signal] + L"。"
+                : L"输出 = 输出下限 + s × 输出跨度 = " + inputNumber(sl) + L" + " + p.processValue(signalFraction) + L" × " + p.processValue(output.span) + L" = " + p.processValue(result.first) + L" " + signals[signal] + L"。");
         } else {
             double fraction = (input - sl) / output.span;
             p.processSteps.push_back(L"信号比例 s = (输入 − 输出下限)/输出跨度 = (" + inputNumber(input) + L" − " + inputNumber(sl) + L") / " + p.processValue(output.span) + L" = " + p.processValue(fraction) + L"。");
-            p.processSteps.push_back(std::wstring(function ? L"开方反算 f = s² = " : L"线性反算 f = s = ") + p.processValue(result.second) + L"；过程量 = 下限 + f × 跨度 = " + inputNumber(a) + L" + " + p.processValue(result.second) + L" × " + p.processValue(process.span) + L" = " + p.processValue(result.first) + L" " + symbol + L"。");
+            p.processSteps.push_back(std::wstring(function ? L"开方反算 f = s² = " : L"线性反算 f = s = ") + p.processValue(result.second) + L"。");
+            p.processSteps.push_back(fraction == 1
+                ? L"信号比例为 1，过程量直接取上限 " + inputNumber(b) + L" " + symbol + L"。"
+                : L"过程量 = 下限 + f × 跨度 = " + inputNumber(a) + L" + " + p.processValue(result.second) + L" × " + p.processValue(process.span) + L" = " + p.processValue(result.first) + L" " + symbol + L"。");
         }
         return;
     }

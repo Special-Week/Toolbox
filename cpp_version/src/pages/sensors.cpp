@@ -79,12 +79,14 @@ void renderSensors(Page &p) {
         double input = p.number(mode == 0 ? "temperature." + uk : "emf." + kind,
                                 mode == 0 ? L"热端温度 (" + unit.symbol() + L")" : L"测得热电势 (mV)",
                                 mode == 0 ? unit.display(100) : thermoEmf(kind, 100));
-        double cold =
-            unit.celsius(p.number("cold." + uk, L"参考端温度 (" + unit.symbol() + L")", unit.display(0)));
+        auto bounds = thermoBounds(kind);
+        double cold = unit.celsiusInBounds(
+            p.number("cold." + uk, L"参考端温度 (" + unit.symbol() + L")", unit.display(0)), bounds);
         p.rightColumn();
         p.check();
         double ce = thermoEmf(kind, cold),
-               t = mode == 0 ? unit.celsius(input) : thermoTemperature(kind, input + ce),
+               roundoff = std::max(std::abs(input), std::abs(ce)) * (4 * std::numeric_limits<double>::epsilon()),
+               t = mode == 0 ? unit.celsiusInBounds(input, bounds) : thermoTemperature(kind, input + ce, roundoff),
                emf = mode == 0 ? thermoEmf(kind, t) - ce : input;
         p.metrics(L"计算结果", {{L"热端温度", format(unit.display(t)) + L" " + unit.symbol()},
                                 {L"测得热电势", format(emf) + L" mV"},

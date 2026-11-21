@@ -116,4 +116,16 @@ impl TemperatureUnit {
     pub fn span(self) -> f64 {
         if self.0 == 2 { 1.8 } else { 1.0 }
     }
+    /// 温标往返在边界可能相差几个浮点末位；仅吸收运算舍入，不放宽实际温区。
+    pub fn celsius_in_bounds(self, value: f64, bounds: (f64, f64)) -> f64 {
+        let t = self.celsius(value);
+        let tolerance = 8.0 * f64::EPSILON * value.abs().max(t.abs()).max(1.0);
+        if t < bounds.0 && bounds.0 - t <= tolerance {
+            bounds.0
+        } else if t > bounds.1 && t - bounds.1 <= tolerance {
+            bounds.1
+        } else {
+            t
+        }
+    }
 }

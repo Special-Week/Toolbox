@@ -28,6 +28,11 @@ pub(crate) struct Selection {
     pub coverage: bool,
     pub meets: bool,
 }
+
+pub(super) fn meets_ratio(ratio: f64, required: f64) -> bool {
+    // Separate rounding of the two allowances can move an exact tie by a few ULPs.
+    ratio >= required || required - ratio <= required * (4.0 * f64::EPSILON)
+}
 /// 准确度输入为百分数，例如 0.05 表示 0.05%；量程覆盖和允差比必须同时满足。
 pub(crate) fn select_standard(
     dut: Range,
@@ -56,7 +61,7 @@ pub(crate) fn select_standard(
         reference_tolerance,
         ratio,
         coverage,
-        meets: coverage && ratio >= required,
+        meets: coverage && meets_ratio(ratio, required),
     })
 }
 
@@ -166,6 +171,15 @@ pub(crate) fn gas_difference_details(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn exact_ratio_meets_in_either_pressure_unit() {
+        for high in [0.06, 60.0] {
+            let range = Range::new(0.0, high).unwrap();
+            assert!(select_standard(range, range, 0.3, 0.1, 3.0).unwrap().meets);
+            assert!(!select_standard(range, range, 0.299999, 0.1, 3.0).unwrap().meets);
+        }
+    }
 
     #[test]
     fn gas_process_matches_the_result_for_absolute_and_gauge_pressure() {

@@ -13,7 +13,7 @@ pub(crate) fn write_rows(
     points: &[f64],
     unit: &str,
     signal_unit: &str,
-    values: impl Fn(f64) -> Result<(f64, f64), String>,
+    values: impl Fn(f64) -> Result<(f64, Option<f64>), String>,
 ) -> Result<(), String> {
     output
         .write_all(b"\xEF\xBB\xBF")
@@ -25,8 +25,14 @@ pub(crate) fn write_rows(
     .map_err(|e| e.to_string())?;
     for &x in points {
         let (y, d) = values(x)?;
-        super::numerics::finite(&[x, y, d])?;
-        writeln!(output, "{x},{y},{d}").map_err(|e| e.to_string())?;
+        super::numerics::finite(&[x, y])?;
+        let row = if let Some(rate) = d {
+            super::numerics::finite(&[rate])?;
+            writeln!(output, "{x},{y},{rate}")
+        } else {
+            writeln!(output, "{x},{y},")
+        };
+        row.map_err(|e| e.to_string())?;
     }
     output.flush().map_err(|e| e.to_string())
 }
@@ -51,18 +57,27 @@ pub(crate) fn sample_points(start: f64, end: f64, step: f64) -> Result<Vec<f64>,
             points.push(x);
         }
     }
-    if points
-        .last()
-        .is_none_or(|x| (x - end).abs() > 1e-10 * end.abs().max(1.0))
-    {
+    if points.last().is_none_or(|x| *x < end) {
         points.push(end);
-    } else {
-        *points.last_mut().unwrap() = end;
     }
     if points.len() > 50000 {
         return Err("分度表最多 50000 行".into());
     }
     Ok(points)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn short_division_range_keeps_both_endpoints_and_allows_undefined_slope() {
+        let points = sample_points(100.0, 100.000000001, 1.0).unwrap();
+        assert_eq!(points, [100.0, 100.000000001]);
+        let mut csv = Vec::new();
+        write_rows(&mut csv, &points, "°C", "mV", |temperature| Ok((temperature, None))).unwrap();
+        assert!(String::from_utf8(csv).unwrap().ends_with("100,100,\n100.000000001,100.000000001,\n"));
+    }
 }
 
 impl ToolboxApp {
@@ -76,6 +91,7 @@ impl ToolboxApp {
         unit: TemperatureUnit,
         signal_unit: &str,
         curve: impl Fn(f64) -> Result<f64, String>,
+        slope: Option<&dyn Fn(f64) -> Result<Option<f64>, String>>,
     ) {
         let p = theme::palette(ui.ctx());
         ui.add_space(10.0);
@@ -164,15 +180,17 @@ impl ToolboxApp {
                             end,
                             self.number(tool, &step_key, &unit.span().to_string())?,
                         )?;
-                        let values = |x: f64| -> Result<(f64, f64), String> {
-                            let t = unit.celsius(x);
-                            let delta = (t.abs() * f64::EPSILON * 8.0).max(0.01);
-                            let lo = (t - delta).max(bounds.0);
-                            let hi = (t + delta).min(bounds.1);
-                            Ok((
-                                curve(t)?,
-                                (curve(hi)? - curve(lo)?) / (hi - lo) / unit.span(),
-                            ))
+                        let values = |x: f64| -> Result<(f64, Option<f64>), String> {
+                            let t = unit.celsius(x).clamp(bounds.0, bounds.1);
+                            let rate = if let Some(slope) = slope {
+                                slope(t)?
+                            } else {
+                                let delta = (t.abs() * f64::EPSILON * 8.0).max(0.01);
+                                let lo = (t - delta).max(bounds.0);
+                                let hi = (t + delta).min(bounds.1);
+                                Some((curve(hi)? - curve(lo)?) / (hi - lo))
+                            };
+                            Ok((curve(t)?, rate.map(|rate| rate / unit.span())))
                         };
 
                         ui.add_space(6.0);
@@ -266,7 +284,7 @@ impl ToolboxApp {
                                                 "{}\t{}\t{}\n",
                                                 format_number(x),
                                                 format_number(y),
-                                                format_number(d)
+                                                d.map(format_number).unwrap_or_default()
                                             ));
                                         } else {
                                             ok = false;
@@ -372,7 +390,7 @@ impl ToolboxApp {
                                                     row.col(|ui| {
                                                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                                                             ui.label(
-                                                                RichText::new(format_number(d))
+                                                                RichText::new(d.map(format_number).unwrap_or_else(|| "—".to_owned()))
                                                                     .font(FontId::monospace(12.5))
                                                                     .color(p.muted),
                                                             );
@@ -396,7 +414,7 @@ impl ToolboxApp {
                         let mut plot_points = Vec::with_capacity(181);
                         for i in 0..=180 {
                             let x = start + (end - start) * i as f64 / 180.0;
-                            let y = curve(unit.celsius(x))?;
+                            let y = curve(unit.celsius(x).clamp(bounds.0, bounds.1))?;
                             super::numerics::finite(&[x, y])?;
                             plot_points.push([x, y]);
                         }

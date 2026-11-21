@@ -315,7 +315,7 @@ fn render_spline(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) {
             steps.push(String::new());
             steps.extend([
                 "内部控制点分别满足 Pᵢ₋₁ + 4Pᵢ + Pᵢ₊₁ = 6Qᵢ，程序用三对角消元求解；每段 x(u)、y(u) 均为三次多项式。".to_owned(),
-                format!("采样范围 {}～{}，步进 {}；区间数按 (最大值−最小值)/步进计算，接近整数时按整数处理，点数 = ceil(区间数)+1 = {}。最后一点固定为最大值。", format_process_number(minimum), format_process_number(maximum), format_process_number(step), sample_count),
+                format!("采样范围 {}～{}，步进 {}；区间数按 (最大值−最小值)/步进计算，接近整数时按整数处理。最后一点固定为最大值，若与常规采样点重合则只保留一点，共 {} 个采样点。", format_process_number(minimum), format_process_number(maximum), format_process_number(step), sample_count),
                 format!("以下选取一个预览点说明分段与反算；全部 {} 个采样点采用相同方法。", sample_count),
             ]);
             let is_interpolated = |point: &Point| !points.iter().any(|q| q.x == point.x);

@@ -229,7 +229,7 @@ void renderCurveFit(Page &p) {
     }
     p.metrics(L"方程系数", coefficients);
     p.metrics(L"相关性与拟合质量",
-              {{L"线性相关系数 r（x 与 y）", optionalNumber(fit.correlation, L"响应量无变化，未定义")},
+              {{L"线性相关系数 r（x 与 y）", optionalNumber(fit.correlation, L"输入量或响应量无变化，未定义")},
                {L"决定系数 R²", optionalNumber(fit.rSquared, L"响应量无变化，未定义")},
                {L"均方根误差 RMSE", format(fit.rmse)},
                {L"残差标准差", optionalNumber(fit.residualSd, L"无剩余自由度")},

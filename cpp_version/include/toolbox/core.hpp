@@ -53,6 +53,7 @@ struct TemperatureUnit {
     int index = 0; // 0=°C，1=K，2=°F，与 Rust 页面一致。
     std::wstring symbol() const;
     double celsius(double display) const;
+    double celsiusInBounds(double display, std::pair<double, double> bounds) const;
     double display(double celsius) const;
     double span() const;
 };

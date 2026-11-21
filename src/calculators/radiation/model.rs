@@ -83,6 +83,9 @@ impl Spectrum {
 
     fn transform(&self, temperature: f64, background: f64, weight: f64) -> Result<f64, String> {
         let (t, bg) = (kelvin(temperature)?, kelvin(background)?);
+        if weight == 1.0 {
+            return Ok(temperature);
+        }
         let lt = self.log_radiance(t);
         let lb = self.log_radiance(bg);
         let scale = lt.max(lb);
@@ -119,6 +122,19 @@ impl Spectrum {
             background,
             instrument_emissivity / source_emissivity,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn planck_unit_weight_ignores_background_radiance() {
+        let spectrum = Spectrum::new(Response::Single(0.1)).unwrap();
+        assert_eq!(spectrum.apparent(-180.0, 30.0, 1.0).unwrap(), -180.0);
+        assert_eq!(spectrum.corrected(-180.0, 30.0, 0.9, 0.9).unwrap(), -180.0);
+        assert!(spectrum.apparent(-180.0, -273.15, 1.0).is_err());
     }
 }
 

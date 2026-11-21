@@ -148,6 +148,7 @@ pub(crate) fn division(
     bounds: (f64, f64),
     signal: &str,
     curve: impl Fn(f64) -> Result<f64, String>,
+    slope: Option<&dyn Fn(f64) -> Result<Option<f64>, String>>,
 ) -> Result<(), String> {
     if !input.flag("division") {
         return Ok(());
@@ -171,13 +172,18 @@ pub(crate) fn division(
     for index in 0..count {
         let x = crate::calculators::spline::model::sample_x(start, end, step, count, index);
         let t = unit.celsius(x).clamp(bounds.0, bounds.1);
-        let delta = (t.abs() * f64::EPSILON * 8.0).max(0.01);
-        let lo = (t - delta).max(bounds.0);
-        let hi = (t + delta).min(bounds.1);
+        let rate = if let Some(slope) = slope {
+            slope(t)?
+        } else {
+            let delta = (t.abs() * f64::EPSILON * 8.0).max(0.01);
+            let lo = (t - delta).max(bounds.0);
+            let hi = (t + delta).min(bounds.1);
+            Some((curve(hi)? - curve(lo)?) / (hi - lo))
+        };
         out.rows.push(vec![
             json!(x),
             json!(curve(t)?),
-            json!((curve(hi)? - curve(lo)?) / (hi - lo) / unit.span()),
+            json!(rate.map(|rate| rate / unit.span())),
         ]);
     }
     for i in 0..=200 {

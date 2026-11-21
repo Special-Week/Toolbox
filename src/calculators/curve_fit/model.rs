@@ -50,6 +50,7 @@ pub(crate) struct CurveFit {
     pub(crate) rmse: f64,
     pub(crate) residual_sd: Option<f64>,
     pub(crate) maximum_residual: f64,
+    // Plotting interval. A single distinct input uses the origin as the second endpoint.
     pub(crate) minimum_x: f64,
     pub(crate) maximum_x: f64,
     x: Normalization,
@@ -212,9 +213,13 @@ impl CurveFit {
             ),
             None => "剩余自由度 n−p = 0，残差标准差未定义。".to_owned(),
         });
-        lines.push(match (self.correlation, self.r_squared) {
-            (Some(r), Some(r2)) => format!("Pearson r = Σ[(xᵢ−x̄)(yᵢ−ȳ)]/[√Σ(xᵢ−x̄)² · √Σ(yᵢ−ȳ)²] = {}；中心化 R² = 1 − Σeᵢ²/Σ(yᵢ−ȳ)² = {}。r 使用原始 x、y，与模型阶数无关；过原点时 R² 可为负。", c(r), c(r2)),
-            _ => "响应量无变化，Pearson r 和中心化 R² 未定义。".to_owned(),
+        lines.push(match self.correlation {
+            Some(r) => format!("Pearson r = Σ[(xᵢ−x̄)(yᵢ−ȳ)]/[√Σ(xᵢ−x̄)² · √Σ(yᵢ−ȳ)²] = {}。r 使用原始 x、y，与模型阶数无关。", c(r)),
+            None => "输入量或响应量无变化，Pearson r 未定义。".to_owned(),
+        });
+        lines.push(match self.r_squared {
+            Some(r2) => format!("中心化 R² = 1 − Σeᵢ²/Σ(yᵢ−ȳ)² = {}。过原点时 R² 可为负。", c(r2)),
+            None => "响应量无变化，中心化 R² 未定义。".to_owned(),
         });
         lines
     }
@@ -235,7 +240,7 @@ impl CurveFit {
         finite(&responses)?;
         let minimum_x = inputs.iter().copied().fold(f64::INFINITY, f64::min);
         let maximum_x = inputs.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        if minimum_x == maximum_x {
+        if minimum_x == maximum_x && kind != FitKind::ThroughOrigin {
             return Err("所有输入量 x 相同，无法建立有效的校准曲线".to_owned());
         }
 
@@ -289,19 +294,25 @@ impl CurveFit {
         let mean_y = sum(sy.iter().map(|value| value / count));
         let x_norm = rss(sx.iter().map(|value| value - mean_x))?;
         let y_norm = rss(sy.iter().map(|value| value - mean_y))?;
-        let (correlation, r_squared) = if y_norm == 0.0 {
-            (None, None)
+        let correlation = if x_norm == 0.0 || y_norm == 0.0 {
+            None
         } else {
             let r = sum(sx
                 .iter()
                 .zip(&sy)
                 .map(|(a, b)| ((a - mean_x) / x_norm) * ((b - mean_y) / y_norm)));
+            finite(&[r])?;
+            Some(r.clamp(-1.0, 1.0))
+        };
+        let r_squared = if y_norm == 0.0 {
+            None
+        } else {
             let residual_norm = rss(residuals.iter().map(|value| value / centered_y.scale))?;
             let ratio = residual_norm / y_norm;
             let r_squared = 1.0 - ratio * ratio;
-            finite(&[r, r_squared])?;
+            finite(&[r_squared])?;
             // 中心化 R² 在强制过原点时允许为负，不以 r² 冒充拟合优度。
-            (Some(r.clamp(-1.0, 1.0)), Some(r_squared))
+            Some(r_squared)
         };
         let rmse = rss(residuals.iter().map(|value| value / count.sqrt()))?;
         let freedom = points.len() - kind.parameter_count();
@@ -316,6 +327,11 @@ impl CurveFit {
             .iter()
             .map(|value| value.abs())
             .fold(0.0, f64::max);
+        let (minimum_x, maximum_x) = if minimum_x == maximum_x {
+            (minimum_x.min(0.0), maximum_x.max(0.0))
+        } else {
+            (minimum_x, maximum_x)
+        };
         Ok(Self {
             kind,
             coefficients,
@@ -340,5 +356,22 @@ impl CurveFit {
             .mul_add(self.y.scale, self.y.origin);
         finite(&[value])?;
         Ok(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn origin_fit_accepts_replicates_at_a_nonzero_input() {
+        let points = [(2.0, 4.0), (2.0, 6.0)];
+        let fit = CurveFit::calculate(&points, FitKind::ThroughOrigin).unwrap();
+        assert!((fit.coefficients[1] - 2.5).abs() < 1e-12);
+        assert_eq!(fit.correlation, None);
+        assert!(fit.r_squared.unwrap().abs() < 1e-12);
+        assert_eq!((fit.minimum_x, fit.maximum_x), (0.0, 2.0));
+        assert!(CurveFit::calculate(&points, FitKind::Linear).is_err());
+        assert!(CurveFit::calculate(&[(0.0, 4.0), (0.0, 6.0)], FitKind::ThroughOrigin).is_err());
     }
 }

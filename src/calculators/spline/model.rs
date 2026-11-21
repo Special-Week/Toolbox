@@ -454,9 +454,6 @@ pub(crate) fn planned_sample_count(minimum: f64, maximum: f64, step: f64) -> Res
     if minimum >= maximum || step <= 0.0 {
         return Err("采样范围无效或步进不大于 0".to_owned());
     }
-    if minimum + step == minimum || maximum - step == maximum {
-        return Err("步进小于当前坐标精度，请增大步进".to_owned());
-    }
     let intervals = (maximum - minimum) / step;
     if !intervals.is_finite() {
         return Err("采样点最多为 5000000 个，请增大步进或缩小范围".to_owned());
@@ -470,11 +467,36 @@ pub(crate) fn planned_sample_count(minimum: f64, maximum: f64, step: f64) -> Res
     if intervals > (MAX_SAMPLE_COUNT - 1) as f64 {
         return Err("采样点最多为 5000000 个，请增大步进或缩小范围".to_owned());
     }
-    let count = intervals.ceil() as usize + 1;
-    if count > MAX_SAMPLE_COUNT {
-        return Err("采样点最多为 5000000 个，请增大步进".to_owned());
+    let mut count = (intervals.ceil() as usize + 1).max(2);
+    // The last regular sample can round to the forced endpoint.
+    if count > 2 && sample_x(minimum, maximum, step, count, count - 2) >= maximum {
+        count -= 1;
     }
-    Ok(count.max(2))
+    let resolution = (minimum.next_up() - minimum).max(maximum - maximum.next_down());
+    let remainder = (minimum % resolution).abs();
+    // 坐标精度可能使采样重复时，核对实际采样而不是直接拒绝。
+    if count > 2
+        && (step < resolution
+            || (step == resolution && remainder > 0.0 && remainder == resolution * 0.5))
+    {
+        let reverse = minimum >= 0.0;
+        let mut previous = if reverse { maximum } else { minimum };
+        for offset in 1..count {
+            let index = if reverse { count - 1 - offset } else { offset };
+            let x = sample_x(minimum, maximum, step, count, index);
+            if (reverse && x >= previous) || (!reverse && x <= previous) {
+                return Err("步进小于当前坐标精度，请增大步进".to_owned());
+            }
+            // 向零检查到更细的浮点档位后，剩余采样点无需逐个核对。
+            if (reverse && step > x.next_up() - x)
+                || (maximum <= 0.0 && step > x - x.next_down())
+            {
+                break;
+            }
+            previous = x;
+        }
+    }
+    Ok(count)
 }
 
 pub(crate) fn sample_x(minimum: f64, maximum: f64, step: f64, count: usize, index: usize) -> f64 {
@@ -488,6 +510,29 @@ pub(crate) fn sample_x(minimum: f64, maximum: f64, step: f64, count: usize, inde
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sample_plan_prevents_duplicate_coordinates() {
+        let base = 1e16;
+        assert!(planned_sample_count(base, base + 20.0, 1.5).is_err());
+        let binade = (1_u64 << 53) as f64;
+        assert!(planned_sample_count(binade - 1.0, binade + 10.0, 2.0).is_err());
+        let start = binade - 1.0;
+        let end = binade + 2.0;
+        let count = planned_sample_count(start, end, 2.0).unwrap();
+        assert_eq!(count, 3);
+        assert_eq!(sample_x(start, end, 2.0, count, 1), binade);
+        assert_eq!(planned_sample_count(binade - 9_999_995.0, end, 2.0).unwrap(), 5_000_000);
+        for (end, step, expected) in [(base + 10.0, 3.25, 4), (base + 20.0, 2.0, 11)] {
+            let count = planned_sample_count(base, end, step).unwrap();
+            assert_eq!(count, expected);
+            let coordinates: Vec<_> = (0..count)
+                .map(|index| sample_x(base, end, step, count, index))
+                .collect();
+            assert_eq!(coordinates.last(), Some(&end));
+            assert!(coordinates.windows(2).all(|pair| pair[0] < pair[1]));
+        }
+    }
 
     #[test]
     fn inversion_resolves_flat_endpoint_at_small_scales() {

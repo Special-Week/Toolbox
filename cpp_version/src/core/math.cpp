@@ -64,6 +64,8 @@ std::array<double, 3> fitCvd(double r0, const std::array<std::pair<double, doubl
     return result;
 }
 double atmosphereTemperature(double h) {
+    finite({h});
+    require(h >= -1000 && h <= 86000, "位势高度应在 −1000 至 86 000 m 之间");
     static const double layers[][3] = {{0, 288.15, -.0065},    {11000, 216.65, 0}, {20000, 216.65, .001},
                                        {32000, 228.65, .0028}, {47000, 270.65, 0}, {51000, 270.65, -.0028},
                                        {71000, 214.65, -.002}};
@@ -115,6 +117,10 @@ Axis::Axis(const std::wstring &name, double low, double high, int intervals, boo
     factor = std::pow(10., exponent);
     low = (low - origin) / factor;
     high = (high - origin) / factor;
+    if (!std::isfinite(low) || !std::isfinite(high) || low > high) {
+        low = 0;
+        high = 1;
+    }
     if (low == high) {
         double padding = std::max(std::abs(low), 1.) * .05;
         low -= padding;
@@ -124,7 +130,11 @@ Axis::Axis(const std::wstring &name, double low, double high, int intervals, boo
         low -= padding;
         high += padding;
     }
-    double raw = (high - low) / std::max(intervals, 2), power = std::pow(10., std::floor(std::log10(raw))),
+    double raw = (high - low) / std::max(intervals, 2);
+    if (!std::isfinite(raw) || raw <= 0) {
+        raw = 1;
+    }
+    double power = std::pow(10., std::floor(std::log10(raw))),
            fraction = raw / power, multiple = 10;
     for (double m : {1., 2., 2.5, 5., 10.}) {
         if (fraction <= m * (1 + 1e-12)) {
@@ -133,6 +143,9 @@ Axis::Axis(const std::wstring &name, double low, double high, int intervals, boo
         }
     }
     double step = multiple * power;
+    if (!std::isfinite(step) || step <= 0) {
+        step = 1;
+    }
     if (roundBounds) {
         low = std::floor(low / step) * step;
         high = std::ceil(high / step) * step;
@@ -140,8 +153,10 @@ Axis::Axis(const std::wstring &name, double low, double high, int intervals, boo
     minimum = low;
     maximum = high;
     double first = std::ceil(low / step - 1e-9), last = std::floor(high / step + 1e-9);
-    int count = std::min(32, static_cast<int>(std::max(0., last - first)) + 1);
-    int precision = std::max(0, static_cast<int>(-std::floor(std::log10(step))));
+    double spanTicks = std::isfinite(last - first) ? std::clamp(last - first, 0., 31.) : 0.;
+    int count = static_cast<int>(spanTicks) + 1;
+    double rawPrecision = -std::floor(std::log10(step));
+    int precision = std::isfinite(rawPrecision) ? static_cast<int>(std::clamp(rawPrecision, 0., 15.)) : 0;
     double scaled = step * std::pow(10., std::min(15, precision));
     if (std::abs(scaled - std::round(scaled)) > 1e-8) {
         ++precision;

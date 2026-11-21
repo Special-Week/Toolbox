@@ -148,7 +148,7 @@ fn thermocouple(i: &Input) -> Result<Output, String> {
     }
     division(&mut out, i, tc::bounds(kind)?, "mV", |t| {
         tc::measured_emf(kind, t, cold, correction)
-    })?;
+    }, None)?;
     Ok(out)
 }
 
@@ -247,7 +247,7 @@ fn industrial(i: &Input) -> Result<Output, String> {
     if out.tolerances.is_empty() {
         out.warnings.push("此分度号未内置等级允差数据。".into())
     }
-    division(&mut out, i, (g.min, g.max), "Ω", |t| m.resistance(t))?;
+    division(&mut out, i, (g.min, g.max), "Ω", |t| m.resistance(t), None)?;
     Ok(out)
 }
 
@@ -315,13 +315,14 @@ fn standard(i: &Input) -> Result<Output, String> {
         out.details["coefficients"] = json!({"C":zone.2});
         m.zone = Some(zone);
     }
+    let bounds = m.bounds();
     let unit = i.unit()?;
     let dir = i.index("direction", 0, 2)?;
     let v = i.number("value", if dir == 0 { unit.display(1000.) } else { 9.587 })?;
-    let cold = unit.celsius(i.number("cold", unit.display(0.0))?);
+    let cold = celsius_in_bounds(unit, i.number("cold", unit.display(0.0))?, bounds);
     let corr = i.number("correction", 0.)?;
     let (t, e) = if dir == 0 {
-        let t = unit.celsius(v);
+        let t = celsius_in_bounds(unit, v, bounds);
         (t, m.emf(t)? - m.emf(cold)? - corr)
     } else {
         (m.temperature(v + corr + m.emf(cold)?)?, v)
@@ -406,42 +407,29 @@ fn standard(i: &Input) -> Result<Output, String> {
     ));
     if dir != 0 {
         out.process.push(format!(
-            "反算对补偿后电势执行有界二分；代回残差 = {} mV。",
+            "反算对补偿后电势执行{}有界二分；代回残差 = {} mV。",
+            if m.zone.is_none() { "分段" } else { "" },
             c(reconstructed - e)
         ));
     }
-    let bounds = m
-        .zone
-        .as_ref()
-        .map(|z| (z.0, z.1))
-        .unwrap_or(if kind == "S" {
-            (-50., 1768.1)
-        } else {
-            (0., 1820.)
-        });
-    let lo = (t - 0.01).max(bounds.0);
-    let hi = (t + 0.01).min(bounds.1);
+    let bounds = m.bounds();
+    let slope = m.slope(t)?;
     out.metric("参考端热电势", m.emf(cold)?, "mV");
-    out.metric(
+    out.optional(
         "微分热电势 dE/dt",
-        (m.emf(hi)? - m.emf(lo)?) / (hi - lo) / unit.span(),
+        slope.map(|(_, _, slope)| slope / unit.span()),
         &format!("mV/{}", unit.symbol()),
     );
-    out.process.push(format!(
-        "微分热电势使用有限差分：[E({}) − E({})]/({} − {}) = ({} − {})/({} − {}) = {} mV/°C。",
-        c(hi),
-        c(lo),
-        c(hi),
-        c(lo),
-        c(m.emf(hi)?),
-        c(m.emf(lo)?),
-        c(hi),
-        c(lo),
-        c((m.emf(hi)? - m.emf(lo)?) / (hi - lo))
+    out.process.push(slope.map_or_else(
+        || "分段交界处的微分热电势未定义。".to_owned(),
+        |(lo, hi, slope)| format!(
+            "微分热电势在同一分段内取差分：[E({}) − E({})]/({} − {}) = {} mV/°C。",
+            c(hi), c(lo), c(hi), c(lo), c(slope)
+        ),
     ));
     division(&mut out, i, bounds, "mV", |t| {
         Ok(m.emf(t)? - m.emf(cold)? - corr)
-    })?;
+    }, Some(&|t| m.slope(t).map(|value| value.map(|(_, _, slope)| slope))))?;
     Ok(out)
 }
 
@@ -591,10 +579,19 @@ fn platinum(i: &Input) -> Result<Output, String> {
             m.fit_silver(961.78, i.number("silver", m.resistance(961.78)?)?)?;
         }
     }
+    if hr == 6 {
+        m.a = 0.;
+        m.b = 0.;
+        m.c = 0.;
+    }
     if full {
         if hr == 0 && !fitted {
+            let default_w660 = m.resistance(660.323)? / m.rtp;
             m.d = i.number("d", m.d)?;
-            m.w660 = i.number("w660", m.resistance(660.323)? / m.rtp)?;
+            m.w660 = i.number("w660", default_w660)?;
+            if m.w660 <= 1.0 {
+                return Err("W660 须大于 1".into());
+            }
         }
         if hr >= 2 {
             m.c = 0.
@@ -681,7 +678,7 @@ fn platinum(i: &Input) -> Result<Output, String> {
     out.metric("电阻变化率", slope / u.span(), &format!("Ω/{}", u.symbol()));
     out.details =
         json!({"coefficients":{"a":m.a,"b":m.b,"c":m.c,"a4":m.a4,"b4":m.b4,"d":m.d,"w660":m.w660}});
-    division(&mut out, i, bounds, "Ω", curve)?;
+    division(&mut out, i, bounds, "Ω", curve, None)?;
     Ok(out)
 }
 
@@ -711,7 +708,7 @@ fn ntc(i: &Input) -> Result<Output, String> {
             },
         )?;
         let (t, r) = if direction == 0 {
-            let t = u.celsius(v);
+            let t = celsius_in_bounds(u, v, (min, max));
             (t, m.resistance(t)?)
         } else {
             (m.temperature(v)?, v)
@@ -774,7 +771,7 @@ fn ntc(i: &Input) -> Result<Output, String> {
             u.symbol()
         ));
         out.metric("电阻变化率", slope / u.span(), &format!("Ω/{}", u.symbol()));
-        division(&mut out, i, (min, max), "Ω", |t| m.resistance(t))?;
+        division(&mut out, i, (min, max), "Ω", |t| m.resistance(t), None)?;
         return Ok(out);
     }
     let order = i.index("order", 0, 4)? + 3;
@@ -824,7 +821,7 @@ fn ntc(i: &Input) -> Result<Output, String> {
     let dir = i.index("direction", 0, 2)?;
     let v = i.number("value", if dir == 0 { u.display(25.) } else { 10000. })?;
     let (t, r) = if dir == 0 {
-        let t = u.celsius(v);
+        let t = celsius_in_bounds(u, v, (min, max));
         (t, m.resistance(t)?)
     } else {
         (m.temperature(v)?, v)
@@ -888,7 +885,7 @@ fn ntc(i: &Input) -> Result<Output, String> {
     if out.details.is_null() {
         out.details = json!({"coefficients":{"A":m.a,"B":m.b}})
     }
-    division(&mut out, i, (min, max), "Ω", |t| m.resistance(t))?;
+    division(&mut out, i, (min, max), "Ω", |t| m.resistance(t), None)?;
     Ok(out)
 }
 
@@ -930,5 +927,57 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn platinum_validates_w660_and_clears_disabled_high_coefficients() {
+        let err = platinum(&Input(json!({
+            "highRange": 0,
+            "lowRange": 0,
+            "deviation": 0,
+            "source": 0,
+            "w660": 1.0
+        })))
+        .err()
+        .unwrap();
+        assert!(err.contains("W660 须大于 1"), "{err}");
+
+        let low_only = platinum(&Input(json!({
+            "highRange": 6,
+            "lowRange": 0,
+            "direction": 0,
+            "value": -20.0
+        })))
+        .unwrap();
+        let coeffs = &low_only.details["coefficients"];
+        assert_eq!(coeffs["a"].as_f64(), Some(0.0));
+        assert_eq!(coeffs["b"].as_f64(), Some(0.0));
+        assert_eq!(coeffs["c"].as_f64(), Some(0.0));
+    }
+
+    #[test]
+    fn standard_couple_and_thermistor_accept_fahrenheit_range_endpoints() {
+        let s_max_f = 1768.1 * 1.8 + 32.0;
+        let out = standard(&Input(json!({
+            "type": 0,
+            "source": 0,
+            "unit": 2,
+            "direction": 0,
+            "value": s_max_f
+        })))
+        .unwrap();
+        assert!((out.metrics[0].value.as_f64().unwrap() - s_max_f).abs() < 1e-9);
+
+        let ntc_min_f = -19.9 * 1.8 + 32.0;
+        let ntc_out = ntc(&Input(json!({
+            "family": 0,
+            "unit": 2,
+            "direction": 0,
+            "min": -19.9,
+            "max": 100.0,
+            "value": ntc_min_f
+        })))
+        .unwrap();
+        assert!((ntc_out.metrics[0].value.as_f64().unwrap() - ntc_min_f).abs() < 1e-9);
     }
 }

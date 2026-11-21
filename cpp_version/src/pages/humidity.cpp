@@ -34,9 +34,10 @@ void renderHumidity(Page &p) {
             const auto result = c(saturation(temperature));
             if (temperature <= 0)
                 steps.push_back(label + L"（t ≤ 0 °C，冰面）：pₛ(t) = 611.2 × exp[22.46t/(272.62+t)] = 611.2 × exp[22.46 × " + x + L"/(272.62 + " + x + L")] = " + result + L" Pa。");
-            else if (temperature < 1)
-                steps.push_back(label + L"（0 < t < 1 °C，水面）：pₛ(t) = 611.2 × exp[17.62t/(243.12+t)] = 611.2 × exp[17.62 × " + x + L"/(243.12 + " + x + L")] = " + result + L" Pa。");
-            else {
+            else if (temperature < 1) {
+                auto coefficient = c(humidityLowWaterCoefficient());
+                steps.push_back(label + L"（0 < t < 1 °C，水面）：a₁ = 244.12 × ln[pₛ(1)/611.2] = " + coefficient + L"；pₛ(t) = 611.2 × exp[a₁t/(243.12+t)] = 611.2 × exp[" + coefficient + L" × " + x + L"/(243.12 + " + x + L")] = " + result + L" Pa。");
+            } else {
                 const auto k = c(temperature + 273.15);
                 steps.push_back(label + L"（t ≥ 1 °C，水面）：T = t + 273.15 = " + k + L" K；pₛ(t) = 10^[(10.286T−2148.4909)/(T−35.85)] = 10^[(10.286 × " + k + L"−2148.4909)/(" + k + L"−35.85)] = " + result + L" Pa。");
             }
@@ -78,9 +79,16 @@ void renderHumidity(Page &p) {
         if (h.dew) {
             double z = std::log(h.vapor) - std::log(611.2), l = std::log10(h.vapor);
             steps.push_back(L"令 z = ln(pᵥ) − ln(611.2) = " + c(z) + L"；冰面公式反算温度 = 272.62z/(22.46−z) = " + c(*h.frost) + L" °C。" + (*h.frost <= 0 ? std::wstring(L"该温度不高于 0 °C，显示为霜点。") : std::wstring(L"该温度高于 0 °C，不显示为霜点。")));
-            steps.push_back(h.vapor < 657 ? L"露点采用低压水面逆公式 243.12z/(17.62−z) = " + c(*h.dew) + L" °C。" : L"令 l = log₁₀(pᵥ) = " + c(l) + L"；露点 = (−2148.4909+35.85l)/(l−10.286)−273.15 = " + c(*h.dew) + L" °C。");
+            if (h.vapor < saturation(1)) {
+                double coefficient = h.vapor <= 611.2 ? 17.62 : humidityLowWaterCoefficient();
+                steps.push_back(L"水汽压低于 pₛ(1)，露点采用水面逆公式 243.12z/(a−z)，a = " + c(coefficient) + L"；得 " + c(*h.dew) + L" °C。");
+            } else {
+                steps.push_back(L"令 l = log₁₀(pᵥ) = " + c(l) + L"；露点 = (−2148.4909+35.85l)/(l−10.286)−273.15 = " + c(*h.dew) + L" °C。");
+            }
         } else steps.push_back(L"水汽压为零，露点和霜点没有有限值。");
-        if (h.wet)
+        if (h.vapor == h.saturated)
+            steps.push_back(L"水汽分压等于饱和压，湿球温度等于环境温度：t湿 = " + c(t) + L" °C。");
+        else if (h.wet)
             steps.push_back(L"湿球温度通过在 −100 °C 至环境温度之间反解 pₛ(t湿) − 0.000662P(t−t湿) = pᵥ 得到：t湿 = " + c(*h.wet) + L" °C。");
         else steps.push_back(L"湿球方程在 −100 °C 至环境温度之间没有解，湿球温度超出模型范围。");
         Metrics m{{L"相对湿度", format(h.rh) + L" %RH"},
@@ -172,10 +180,19 @@ void renderHumidity(Page &p) {
             correction ? spectrum.corrected(t, bg, instrument, source) : spectrum.apparent(t, bg, source);
         delta = result - t;
         auto c = [&](double v) { return p.processValue(v); };
-        double lt = spectrum.logRadiance(t+273.15), lb = spectrum.logRadiance(bg+273.15), scale = std::max(lt,lb);
         double weight = correction ? instrument/source : source;
-        double signal = std::fma(weight, std::exp(lt-scale), (1-weight)*std::exp(lb-scale));
-        p.processSteps = {L"Planck 辐射平衡：Bλ(T) = λ⁻⁵/[exp(c₂/(λT))−1]，c₂ = hc/k；温度使用 K。", upper == 0 ? L"单一波长 λ = " + c(wavelength) + L" μm。" : L"平坦波段 " + c(wavelength) + L"～" + c(upper) + L" μm；使用 256 等分复合辛普森积分。", L"程序在对数域求辐射量和加权和，避免指数溢出。", L"", correction ? L"ε源B(T真)+(1−ε源)B(T背景) = ε表B(T示)+(1−ε表)B(T背景)；权重 w = ε表/ε源 = " + c(weight) + L"。" : L"B(T亮) = ε源B(T真)+(1−ε源)B(T背景)；权重 w = ε源 = " + c(weight) + L"。", L"ln(B输入) = " + c(lt) + L"，ln(B背景) = " + c(lb) + L"，S = max(两者) = " + c(scale) + L"。", L"Q = w·exp(ln(B输入)−S)+(1−w)·exp(ln(B背景)−S) = " + c(signal) + L"；目标 ln(B) = S+ln(Q) = " + c(scale+std::log(signal)) + L"。", L"从 0～512 K 开始，必要时将上限加倍，再二分 85 次反算温度。", L"反算温度 = " + c(result) + L" °C；与输入温度之差 = " + c(delta) + L" °C。"};
+        p.processSteps = {L"Planck 辐射平衡：Bλ(T) = λ⁻⁵/[exp(c₂/(λT))−1]，c₂ = hc/k；温度使用 K。", upper == 0 ? L"单一波长 λ = " + c(wavelength) + L" μm。" : L"平坦波段 " + c(wavelength) + L"～" + c(upper) + L" μm；使用 256 等分复合辛普森积分。", L"程序在对数域求辐射量和加权和，避免指数溢出。", L"", correction ? L"ε源B(T真)+(1−ε源)B(T背景) = ε表B(T示)+(1−ε表)B(T背景)；权重 w = ε表/ε源 = " + c(weight) + L"。" : L"B(T亮) = ε源B(T真)+(1−ε源)B(T背景)；权重 w = ε源 = " + c(weight) + L"。"};
+        if (weight == 1) {
+            p.processSteps.push_back(L"w = 1，背景辐射项的系数为零，计算温度等于输入温度。");
+        } else {
+            double lt = spectrum.logRadiance(t + 273.15), lb = spectrum.logRadiance(bg + 273.15);
+            double scale = std::max(lt, lb);
+            double signal = std::fma(weight, std::exp(lt - scale), (1 - weight) * std::exp(lb - scale));
+            p.processSteps.push_back(L"ln(B输入) = " + c(lt) + L"，ln(B背景) = " + c(lb) + L"，S = max(两者) = " + c(scale) + L"。");
+            p.processSteps.push_back(L"Q = w·exp(ln(B输入)−S)+(1−w)·exp(ln(B背景)−S) = " + c(signal) + L"；目标 ln(B) = S+ln(Q) = " + c(scale + std::log(signal)) + L"。");
+            p.processSteps.push_back(L"从 0～512 K 开始，必要时将上限加倍，再二分 85 次反算温度。");
+        }
+        p.processSteps.push_back(L"反算温度 = " + c(result) + L" °C；与输入温度之差 = " + c(delta) + L" °C。");
     }
     Metrics m;
     if (model == 0) {

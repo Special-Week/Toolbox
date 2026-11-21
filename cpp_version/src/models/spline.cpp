@@ -217,9 +217,30 @@ std::size_t sampleCount(double lo, double hi, double step) {
         n = nearest;
     }
     require(n <= 4999999, "采样点最多 5000000 个，请增大步进或缩小范围");
+    auto count = std::max<std::size_t>(2, std::size_t(std::ceil(n)) + 1);
+    if (count > 2 && sampleX(lo, hi, step, count, count - 2) >= hi) {
+        --count;
+    }
     double resolution = std::max(std::nextafter(lo, hi) - lo, hi - std::nextafter(hi, lo));
-    require(n <= 1 || step >= resolution, "采样步进小于当前坐标的可分辨精度，请增大步进");
-    return std::max<std::size_t>(2, std::size_t(std::ceil(n)) + 1);
+    double remainder = std::abs(std::fmod(lo, resolution));
+    bool ties = step == resolution && remainder > 0 && remainder == resolution * .5;
+    if (count > 2 && (step < resolution || ties)) {
+        const double infinity = std::numeric_limits<double>::infinity();
+        bool reverse = lo >= 0;
+        double previous = reverse ? hi : lo;
+        for (std::size_t offset = 1; offset < count; ++offset) {
+            auto index = reverse ? count - 1 - offset : offset;
+            double x = sampleX(lo, hi, step, count, index);
+            require(reverse ? x < previous : x > previous, "采样步进小于当前坐标的可分辨精度，请增大步进");
+            // 向零检查到更细的浮点档位后，剩余采样点无需逐个核对。
+            if ((reverse && step > std::nextafter(x, infinity) - x) ||
+                (hi <= 0 && step > x - std::nextafter(x, -infinity))) {
+                break;
+            }
+            previous = x;
+        }
+    }
+    return count;
 }
 double sampleX(double lo, double hi, double step, std::size_t count, std::size_t index) {
     return index + 1 == count ? hi : std::fma(double(index), step, lo);
@@ -237,10 +258,8 @@ Values divisionPoints(double start, double end, double step) {
             p.push_back(x);
         }
     }
-    if (p.empty() || std::abs(p.back() - end) > 1e-10 * std::max(std::abs(end), 1.)) {
+    if (p.empty() || p.back() < end) {
         p.push_back(end);
-    } else {
-        p.back() = end;
     }
     require(p.size() <= 50000, "分度表最多 50000 行");
     return p;

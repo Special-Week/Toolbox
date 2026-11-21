@@ -23,7 +23,11 @@ std::wstring wide(const std::string &text) {
     if (text.empty()) {
         return {};
     }
+    require(text.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()), "文本过长");
     int n = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
+    if (n <= 0) {
+        return {};
+    }
     std::wstring out(n, L'\0');
     MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), &out[0], n);
     return out;
@@ -32,8 +36,12 @@ std::string utf8(const std::wstring &text) {
     if (text.empty()) {
         return {};
     }
+    require(text.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()), "文本过长");
     int n = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr,
                                 nullptr);
+    if (n <= 0) {
+        return {};
+    }
     std::string out(n, '\0');
     WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), &out[0], n, nullptr, nullptr);
     return out;
@@ -163,7 +171,8 @@ Statistics statistics(const Values &values) {
         differences.push_back(v - values[0]);
         valid = valid && std::isfinite(differences.back());
     }
-    double mean, delta = 0;
+    double mean, delta = 0, sd = 0;
+    const double factor = std::sqrt(count - 1);
     if (valid) {
         Values divided;
         for (double d : differences) {
@@ -171,24 +180,28 @@ Statistics statistics(const Values &values) {
         }
         delta = compensated(divided);
         mean = values[0] + delta;
+        Values scaled;
         for (double d : differences) {
-            residuals.push_back(d - delta);
+            double residual = d - delta;
+            residuals.push_back(residual);
+            scaled.push_back(residual / factor);
         }
+        sd = rss(scaled);
     } else {
         double scale = std::max(std::abs(minimum), std::abs(maximum));
         Values normalized;
         for (double v : values) {
             normalized.push_back((v / scale) / count);
         }
-        mean = compensated(normalized) * scale;
+        double normalizedMean = compensated(normalized);
+        mean = normalizedMean * scale;
+        Values scaled;
         for (double v : values) {
             residuals.push_back(v - mean);
+            scaled.push_back(((v / scale) - normalizedMean) / factor);
         }
+        sd = rss(scaled) * scale;
     }
-    Values scaled;
-    for (double residual : residuals)
-        scaled.push_back(residual / std::sqrt(count - 1));
-    double sd = rss(scaled);
     finite({mean, sd, minimum, maximum});
     return {mean, sd, minimum, maximum, sd / std::sqrt(count), valid, values[0], delta, residuals};
 }
@@ -200,6 +213,17 @@ double rangeCoefficient(std::size_t n) {
 std::wstring TemperatureUnit::symbol() const { return index == 1 ? L"K" : index == 2 ? L"°F" : L"°C"; }
 double TemperatureUnit::celsius(double t) const {
     return index == 1 ? t - 273.15 : index == 2 ? (t - 32) / 1.8 : t;
+}
+double TemperatureUnit::celsiusInBounds(double value, std::pair<double, double> bounds) const {
+    double t = celsius(value);
+    double tolerance = 8 * std::numeric_limits<double>::epsilon() * std::max({std::abs(value), std::abs(t), 1.});
+    if (t < bounds.first && bounds.first - t <= tolerance) {
+        return bounds.first;
+    }
+    if (t > bounds.second && t - bounds.second <= tolerance) {
+        return bounds.second;
+    }
+    return t;
 }
 double TemperatureUnit::display(double t) const {
     return index == 1 ? t + 273.15 : index == 2 ? t * 1.8 + 32 : t;

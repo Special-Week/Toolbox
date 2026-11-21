@@ -177,6 +177,9 @@ pub(crate) fn default_filename(code: &str, name: &str) -> String {
         })
         .collect();
     label = label.trim_end_matches([' ', '.']).to_owned();
+    if label.is_empty() {
+        label = "standard".to_owned();
+    }
     let stem = label
         .split('.')
         .next()

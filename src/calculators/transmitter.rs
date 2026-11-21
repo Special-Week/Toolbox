@@ -282,7 +282,11 @@ impl ToolboxApp {
                             } else {
                                 format!("线性特性：信号比例 q = r = {}。", c(output_fraction))
                             });
-                            steps.push(format!("输出信号 = 下限 + q × 信号跨度 = {} + {} × {} = {} {signal_symbol}；程序使用融合乘加。", n(signal_low), c(output_fraction), c(signal_span), c(signal)));
+                            steps.push(if output_fraction == 1.0 {
+                                format!("信号比例为 1，输出信号直接取上限 {} {signal_symbol}。", n(signal))
+                            } else {
+                                format!("输出信号 = 下限 + q × 信号跨度 = {} + {} × {} = {} {signal_symbol}；程序使用融合乘加。", n(signal_low), c(output_fraction), c(signal_span), c(signal))
+                            });
                         } else {
                             let signal_fraction = (signal - signal_low) / signal_span;
                             steps.push(format!(
@@ -301,14 +305,11 @@ impl ToolboxApp {
                             } else {
                                 format!("线性特性：被测量比例 r = q = {}。", c(fraction))
                             });
-                            steps.push(format!(
-                                "被测量 = 下限 + r × 被测量跨度 = {} + {} × {} = {} {}；程序使用融合乘加。",
-                                n(low),
-                                c(fraction),
-                                c(process_span),
-                                c(process_value),
-                                unit_symbol
-                            ));
+                            steps.push(if signal_fraction == 1.0 {
+                                format!("信号比例为 1，被测量直接取上限 {} {unit_symbol}。", n(process_value))
+                            } else {
+                                format!("被测量 = 下限 + r × 被测量跨度 = {} + {} × {} = {} {}；程序使用融合乘加。", n(low), c(fraction), c(process_span), c(process_value), unit_symbol)
+                            });
                         }
                         steps.push(format!(
                             "量程比例 = r × 100 = {} × 100 = {}%。",

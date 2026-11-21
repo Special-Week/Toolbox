@@ -90,7 +90,7 @@ static const ThermoSegment &segment(const std::string &kind, double t) {
 }
 double thermoEmf(const std::string &kind, double t) { return segment(kind, t).evaluate(t).first; }
 double thermoSlope(const std::string &kind, double t) { return segment(kind, t).evaluate(t).second; }
-double thermoTemperature(const std::string &kind, double e) {
+double thermoTemperature(const std::string &kind, double e, double roundoff) {
     finite({e});
     auto bounds = thermoBounds(kind);
     if (kind == "B") {
@@ -104,17 +104,18 @@ double thermoTemperature(const std::string &kind, double e) {
     }
     double lo = bounds.first, hi = bounds.second;
     double lowEmf = thermoEmf(kind, lo), highEmf = thermoEmf(kind, hi);
-    require(e >= lowEmf && e <= highEmf, "热电势超出所选分度号的参考函数范围");
-    if (e == lowEmf) {
+    require(!(e < lowEmf && lowEmf - e > roundoff) && !(e > highEmf && e - highEmf > roundoff),
+            "热电势超出所选分度号的参考函数范围");
+    if (std::abs(e - lowEmf) <= roundoff) {
         return lo;
     }
-    if (e == highEmf) {
+    if (std::abs(e - highEmf) <= roundoff) {
         return hi;
     }
     // 精确命中连接点时直接返回，避免微小分段差异让二分迭代误报无解。
     for (const auto &part : thermoSegments(kind)) {
         const double join = part.maximum;
-        if (join > lo && join < hi && thermoEmf(kind, join) == e) {
+        if (join > lo && join < hi && std::abs(thermoEmf(kind, join) - e) <= roundoff) {
             return join;
         }
     }

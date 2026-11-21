@@ -4,7 +4,7 @@
     {LR"MATH(0\.0015\s*×\s*∛(@)\s*\+\s*0\.0015\s*×\s*√(@)\s*\+\s*0\.015\s*×\s*(@)\^\(2/3\))MATH", LR"MATH(0.0015\sqrt[3]{$1}+0.0015\sqrt{$2}+0.015($3)^{2/3})MATH"},
     {LR"MATH(ln\((@)\))MATH", LR"MATH(\ln($1))MATH"},
     {LR"MATH(611\.2\s*×\s*exp\[22\.46\s*×\s*(@)\s*/\s*\(272\.62\s*\+\s*(@)\)\])MATH", LR"MATH(611.2\times\exp\left(\frac{22.46\times $1}{272.62+$2}\right))MATH"},
-    {LR"MATH(611\.2\s*×\s*exp\[17\.62\s*×\s*(@)\s*/\s*\(243\.12\s*\+\s*(@)\)\])MATH", LR"MATH(611.2\times\exp\left(\frac{17.62\times $1}{243.12+$2}\right))MATH"},
+    {LR"MATH(611\.2\s*×\s*exp\[(@)\s*×\s*(@)\s*/\s*\(243\.12\s*\+\s*(@)\)\])MATH", LR"MATH(611.2\times\exp\left(\frac{$1\times $2}{243.12+$3}\right))MATH"},
     {LR"MATH(10\^\[\(10\.286\s*×\s*(@)\s*−\s*2148\.4909\)\s*/\s*\((@)\s*−\s*35\.85\)\])MATH", LR"MATH(10^{\frac{10.286\times $1-2148.4909}{$2-35.85}})MATH"},
     {LR"MATH((@)\s*×\s*exp\[−9\.80665\s*×\s*\((@)\s*−\s*(@)\)\s*/\s*\(287\.05287\s*×\s*(@)\)\])MATH", LR"MATH($1\times\exp\left[-\frac{9.80665\times($2-$3)}{287.05287\times $4}\right])MATH"},
     {LR"MATH((@)\s*×\s*\[\((@)\s*\+\s*(@)\s*×\s*\((@)\s*−\s*(@)\)\)\s*/\s*(@)\]\^\(−9\.80665\s*/\s*\(287\.05287\s*×\s*(@)\)\))MATH", LR"MATH($1\times\left[\frac{$2+\left($3\right)\times($4-$5)}{$6}\right]^{-\frac{9.80665}{287.05287\times\left($7\right)}})MATH"},

@@ -267,7 +267,7 @@ class Client {
                                  WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_len, WINHTTP_NO_HEADER_INDEX))
             throw Failure(win_error(L"无法读取网站响应"));
         if (status == 429)
-            throw Failure(L"???????HTTP 429????????");
+            throw Failure(L"请求过于频繁（HTTP 429），请稍后再试。 ");
         if (status < 200 || status >= 300)
             throw Failure(L"网站返回 HTTP " + std::to_wstring(status));
         std::vector<unsigned char> data;
@@ -442,6 +442,8 @@ std::wstring default_filename(const std::wstring &code, const std::wstring &name
     }
     while (!label.empty() && (label.back() == L' ' || label.back() == L'.'))
         label.pop_back();
+    if (label.empty())
+        label = L"standard";
     auto base = label.substr(0, label.find(L'.'));
     std::transform(base.begin(), base.end(), base.begin(), towupper);
     if (base == L"CON" || base == L"PRN" || base == L"AUX" || base == L"NUL" ||

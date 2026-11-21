@@ -1661,12 +1661,21 @@ mod tests {
                     assert!(show(&mut app).iter().any(|s| s.contains("温度 → 电阻：")));
                     app.set_value(tool, "ntc.temperature.0", "-20".into());
                     let boundary = show(&mut app);
-                    assert!(boundary.iter().any(|s| s.contains("间隔 1 °C 的差分")));
                     assert!(
                         boundary
                             .iter()
-                            .any(|s| s.contains("差分点超出所填校准温区"))
+                            .any(|s| s.contains("B 曲线在校准温区内取差分点"))
                     );
+                    app.set_value(tool, "ntc.b.3.false.0", "1".into());
+                    app.set_value(tool, "ntc.b.3.false.1", "0".into());
+                    app.set_value(tool, "ntc.range.min", "-273".into());
+                    app.set_value(tool, "ntc.range.max", "-270".into());
+                    app.set_value(tool, "ntc.temperature.0", "-273".into());
+                    let cold = show(&mut app);
+                    assert!(cold.iter().any(|s| s.contains("2.71828183")), "{cold:?}");
+                    assert!(cold.iter().any(|s| s.contains("在校准温区内取差分点")));
+                    app.set_value(tool, "ntc.range.min", "-20".into());
+                    app.set_value(tool, "ntc.range.max", "100".into());
                     app.set_value(tool, "ntc.temperature.0", "25".into());
                     app.set_value(tool, "ntc.source", "1".into());
                     assert!(

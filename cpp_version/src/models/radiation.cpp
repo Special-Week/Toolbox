@@ -92,7 +92,11 @@ double Spectrum::invert(double logarithm) const {
     return (lo + hi) / 2;
 }
 double Spectrum::transform(double t, double bg, double weight) const {
-    double lt = logRadiance(kelvin(t)), lb = logRadiance(kelvin(bg)), scale = std::max(lt, lb);
+    double tk = kelvin(t), bk = kelvin(bg);
+    if (weight == 1) {
+        return t;
+    }
+    double lt = logRadiance(tk), lb = logRadiance(bk), scale = std::max(lt, lb);
     finite({lt, lb, scale, weight});
     double signal = std::fma(weight, std::exp(lt - scale), (1 - weight) * std::exp(lb - scale));
     require(std::isfinite(signal) && signal > 0, "当前发射率、示值与背景不能得到有效辐射信号");

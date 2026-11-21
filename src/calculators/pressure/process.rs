@@ -117,11 +117,16 @@ pub(crate) fn selection(
         ),
         tolerance,
         format!(
-            "量传比 = 被检允差 / 标准器允差 = {} / {} = {}；要求 ≥ {}。",
+            "量传比 = 被检允差 / 标准器允差 = {} / {} = {}；要求 ≥ {}。{}",
             c(result.dut_tolerance),
             c(result.reference_tolerance),
             c(result.ratio),
-            n(required)
+            n(required),
+            if result.meets && result.ratio < required {
+                "计算值与要求的差落在浮点舍入误差内，按相等判定。"
+            } else {
+                ""
+            }
         ),
         format!(
             "通道判定：{}。",

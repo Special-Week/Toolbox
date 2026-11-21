@@ -345,30 +345,19 @@ impl ToolboxApp {
                         &cd,
                         "多项式温区以外的参考端请使用 0 °C",
                     );
-                    let cold = u.celsius(app.number(tool, &ck, &cd)?);
+                    let (lo, hi) = model.bounds();
+                    let cold = u.celsius_in_bounds(app.number(tool, &ck, &cd)?, (lo, hi));
                     let cold_e = model.emf(cold)?;
                     let v = app.number(tool, &key, &default)?;
                     let (t, e, hot_e) = if direction == 0 {
-                        let t = u.celsius(v);
+                        let t = u.celsius_in_bounds(v, (lo, hi));
                         let hot_e = model.emf(t)?;
                         (t, hot_e - cold_e, hot_e)
                     } else {
                         let hot_e = v + cold_e;
                         (model.temperature(hot_e)?, v, hot_e)
                     };
-                    let h = 0.01;
-                    let (lo, hi) = model
-                        .zone
-                        .as_ref()
-                        .map(|(a, b, _)| (*a, *b))
-                        .unwrap_or(if k == 0 {
-                            (-50.0, 1768.1)
-                        } else {
-                            (0.0, 1820.0)
-                        });
-                    let a = (t - h).max(lo);
-                    let b = (t + h).min(hi);
-                    let slope = (model.emf(b)? - model.emf(a)?) / (b - a);
+                    let slope = model.slope(t)?;
                     let mut steps = vec![format!(
                         "{} 型标准热电偶；{}。",
                         kind,
@@ -465,12 +454,13 @@ impl ToolboxApp {
                             u.symbol()
                         ));
                     }
-                    steps.push(format!(
-                        "在 {}～{} °C 内作差分，得到微分热电势 {} mV/{}。",
-                        format_process_number(a),
-                        format_process_number(b),
-                        format_process_computed(slope / u.span()),
-                        u.symbol()
+                    steps.push(slope.map_or_else(
+                        || "分段交界处的微分热电势未定义。".to_owned(),
+                        |(a, b, value)| format!(
+                            "在同一分段的 {}～{} °C 内作差分，得到微分热电势 {} mV/{}。",
+                            format_process_number(a), format_process_number(b),
+                            format_process_computed(value / u.span()), u.symbol()
+                        ),
                     ));
                     Ok::<_, String>((
                         vec![
@@ -481,7 +471,9 @@ impl ToolboxApp {
                             ("测得热电势", format!("{} mV", format_number(e))),
                             (
                                 "微分热电势 dE/dt",
-                                format!("{} mV/{}", format_number(slope / u.span()), u.symbol()),
+                                slope.map_or_else(|| "未定义".to_owned(), |(_, _, value)| {
+                                    format!("{} mV/{}", format_number(value / u.span()), u.symbol())
+                                }),
                             ),
                             ("参考端电势", format!("{} mV", format_number(cold_e))),
                         ],
@@ -537,6 +529,7 @@ impl ToolboxApp {
                 u,
                 "mV",
                 |t| model.emf(t).map(|e| e - cold),
+                Some(&|t| model.slope(t).map(|value| value.map(|(_, _, slope)| slope))),
             );
         }
         if let Some(lines) = &process {

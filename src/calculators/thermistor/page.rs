@@ -156,15 +156,6 @@ impl ToolboxApp {
                         "输入待换算值",
                     );
                     let input = app.number(tool, &key, &default)?;
-                    let (t, r) = if direction == 0 {
-                        (model.temperature(input)?, input)
-                    } else {
-                        let t = unit.celsius(input);
-                        (t, model.resistance(t)?)
-                    };
-                    let upper_resistance = model.resistance(t + 1.0)?;
-                    let lower_resistance = model.resistance(t - 1.0)?;
-                    let slope = (upper_resistance - lower_resistance) / 2.0;
                     app.input(
                         ui,
                         tool,
@@ -183,9 +174,24 @@ impl ToolboxApp {
                     );
                     let min = app.number(tool, "ntc.range.min", "-20")?;
                     let max = app.number(tool, "ntc.range.max", "100")?;
-                    if min >= max || t < min || t > max {
-                        return Err("温度须处于所填校准温区内，温区下限须小于上限".into());
+                    let (t, r) = if direction == 0 {
+                        (model.temperature(input)?, input)
+                    } else {
+                        let t = unit.celsius_in_bounds(input, (min, max));
+                        (t, model.resistance(t)?)
+                    };
+                    if min <= -273.15 || min >= max || t < min || t > max {
+                        return Err("校准温区须高于绝对零度、下限小于上限，且温度处于所填校准温区内".into());
                     }
+                    let mut lower = (t - 1.0).max(min);
+                    if lower <= -273.15 {
+                        lower = t;
+                    }
+                    let upper = (t + 1.0).min(max);
+                    let upper_resistance = model.resistance(upper)?;
+                    let lower_resistance = model.resistance(lower)?;
+                    let slope = (upper_resistance - lower_resistance) / (upper - lower);
+                    crate::calculators::numerics::finite(&[slope])?;
                     let mut steps = vec![
                         format!(
                             "{} 阶{}；{}；校准温区 {}～{} °C。",
@@ -271,16 +277,16 @@ impl ToolboxApp {
                         ));
                     }
                     steps.push(format!(
-                        "B 曲线采用以 t 为中心、间隔 1 °C 的差分：dR/dt ≈ [R(t+1)−R(t−1)]/2 = ({} − {}) / 2 = {} Ω/°C；按显示温标换算后 = {} Ω/{}。",
+                        "B 曲线在校准温区内取差分点 {} °C 和 {} °C：dR/dt ≈ ({} − {}) / {} = {} Ω/°C；按显示温标换算后 = {} Ω/{}。",
+                        format_process_computed(lower),
+                        format_process_computed(upper),
                         format_process_computed(upper_resistance),
                         format_process_computed(lower_resistance),
+                        format_process_computed(upper - lower),
                         format_process_computed(slope),
                         format_process_computed(slope / unit.span()),
                         unit.symbol()
                     ));
-                    if t - 1.0 < min || t + 1.0 > max {
-                        steps.push("差分点超出所填校准温区；此变化率包含温区外的曲线外推。".to_owned());
-                    }
                     let fit_coeff = if source == 1 {
                         let mut c = Vec::new();
                         for (name, values) in [("A", &model.a), ("B", &model.b)] {
@@ -343,7 +349,7 @@ impl ToolboxApp {
             },
         );
         if let Some((m, u, min, max)) = table {
-            self.render_division_table(ui, tool, "ntc", (min, max), u, "Ω", |t| m.resistance(t));
+            self.render_division_table(ui, tool, "ntc", (min, max), u, "Ω", |t| m.resistance(t), None);
         }
         if let Some(lines) = &process {
             calculation_process(ui, "thermistor_polynomial_process", lines);

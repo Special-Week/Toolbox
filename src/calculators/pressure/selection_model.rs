@@ -1,5 +1,5 @@
 //! 标准器选型的纯模型；量程预先统一单位，准确度统一使用百分数。
-use super::model::{Range, Selection};
+use super::model::{Range, Selection, meets_ratio};
 use crate::calculators::numerics::finite;
 pub(crate) fn verify(
     dut: Range,
@@ -15,7 +15,7 @@ pub(crate) fn verify(
         result.reference_tolerance = ra / 100.0 * dut.span.max(reference.span * 0.1);
         result.ratio = result.dut_tolerance / result.reference_tolerance;
         finite(&[result.reference_tolerance, result.ratio])?;
-        result.meets = result.coverage && result.ratio >= required;
+        result.meets = result.coverage && meets_ratio(result.ratio, required);
     }
     Ok(result)
 }

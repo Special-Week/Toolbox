@@ -243,7 +243,12 @@ pub(crate) fn bounds(kind: &str) -> Result<(f64, f64), String> {
     Ok((r.segments[0].min, r.segments.last().unwrap().max))
 }
 
-pub(crate) fn thermocouple_temperature(kind: &str, emf: f64) -> Result<f64, String> {
+#[cfg(test)]
+fn thermocouple_temperature(kind: &str, emf: f64) -> Result<f64, String> {
+    temperature_with_roundoff(kind, emf, 0.0)
+}
+
+fn temperature_with_roundoff(kind: &str, emf: f64, roundoff: f64) -> Result<f64, String> {
     if !emf.is_finite() {
         return Err("热电势必须是有限数字".to_owned());
     }
@@ -270,20 +275,22 @@ pub(crate) fn thermocouple_temperature(kind: &str, emf: f64) -> Result<f64, Stri
     }
     let low_emf = reference.emf(lower)?;
     let high_emf = reference.emf(upper)?;
-    if emf < low_emf || emf > high_emf {
+    if (emf < low_emf && low_emf - emf > roundoff)
+        || (emf > high_emf && emf - high_emf > roundoff)
+    {
         return Err(format!("热电势超出 {kind} 型参考函数范围"));
     }
-    if emf == low_emf {
+    if (emf - low_emf).abs() <= roundoff {
         return Ok(lower);
     }
-    if emf == high_emf {
+    if (emf - high_emf).abs() <= roundoff {
         return Ok(upper);
     }
     // 分段多项式在连接处存在微小数值差异。连接点本身若精确命中，
     // 直接返回该点，避免二分迭代收敛到另一段的一侧后误报无解。
     for segment in &reference.segments {
         let join = segment.max;
-        if join > lower && join < upper && reference.emf(join)? == emf {
+        if join > lower && join < upper && (reference.emf(join)? - emf).abs() <= roundoff {
             return Ok(join);
         }
     }
@@ -323,13 +330,29 @@ pub(crate) fn corrected_temperature(
     cold: f64,
     correction: f64,
 ) -> Result<(f64, f64), String> {
-    let compensated = measured + correction + thermocouple_emf(kind, cold)?;
-    Ok((thermocouple_temperature(kind, compensated)?, compensated))
+    let cold_emf = thermocouple_emf(kind, cold)?;
+    let compensated = measured + correction + cold_emf;
+    let scale = measured.abs().max(correction.abs()).max(cold_emf.abs());
+    let roundoff = scale * (4.0 * f64::EPSILON);
+    Ok((temperature_with_roundoff(kind, compensated, roundoff)?, compensated))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn compensation_preserves_valid_range_endpoints() {
+        for (kind, hot) in [("E", -270.0), ("S", -50.0), ("G", 630.615)] {
+            for correction in [0.0, 0.01, -0.1] {
+                let measured = measured_emf(kind, hot, 100.0, correction).unwrap();
+                assert_eq!(corrected_temperature(kind, measured, 100.0, correction).unwrap().0, hot);
+            }
+        }
+        let measured = measured_emf("E", -270.0, 100.0, 0.0).unwrap();
+        assert!(corrected_temperature("E", measured - 1e-8, 100.0, 0.0).is_err());
+        assert!(corrected_temperature("B", 0.0, 0.0, 0.0).is_err());
+    }
 
     #[test]
     #[cfg(feature = "desktop-ui")]

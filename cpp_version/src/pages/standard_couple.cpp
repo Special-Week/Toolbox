@@ -137,18 +137,19 @@ void standardCouplePage(Page &p) {
     double input = p.number(direction == 0 ? k + ".t." + std::to_string(unit.index) : k + ".e",
                             direction == 0 ? L"热端温度 (" + unit.symbol() + L")" : L"测得热电势 (mV)",
                             direction == 0 ? unit.display(dt) : model.emf(dt));
-    double cold = unit.celsius(p.number("cold." + std::to_string(unit.index),
-                                        L"参考端温度 (" + unit.symbol() + L")", unit.display(0)));
+    auto bounds = model.bounds();
+    double cold = unit.celsiusInBounds(p.number("cold." + std::to_string(unit.index),
+                                                L"参考端温度 (" + unit.symbol() + L")", unit.display(0)),
+                                       bounds);
     p.rightColumn();
     p.check();
-    double ce = model.emf(cold), t = direction == 0 ? unit.celsius(input) : model.temperature(input + ce),
+    double ce = model.emf(cold),
+           t = direction == 0 ? unit.celsiusInBounds(input, bounds) : model.temperature(input + ce),
            e = direction == 0 ? model.emf(t) - ce : input;
-    double lo = model.zone ? model.zone->minimum : (type == 0 ? -50 : 0),
-           hi = model.zone ? model.zone->maximum : (type == 0 ? 1768.1 : 1820), a = std::max(t - .01, lo),
-           b = std::min(t + .01, hi), slope = (model.emf(b) - model.emf(a)) / (b - a);
+    auto slope = model.slope(t);
     p.metrics(L"换算结果", {{L"热端温度", format(unit.display(t)) + L" " + unit.symbol()},
                             {L"测得热电势", format(e) + L" mV"},
-                            {L"微分热电势 dE/dt", format(slope / unit.span()) + L" mV/" + unit.symbol()},
+                            {L"微分热电势 dE/dt", slope ? format((*slope)[2] / unit.span()) + L" mV/" + unit.symbol() : L"未定义"},
                             {L"参考端电势", format(ce) + L" mV"}});
     p.endSplit();
     standardReferenceProcess(p, model, t, L"热端");
@@ -158,7 +159,17 @@ void standardCouplePage(Page &p) {
     double reconstructed = model.emf(t) - ce;
     p.processSteps.push_back(std::wstring(direction == 0 ? L"测得热电势" : L"反算温度代回得到的热电势") + L" = E(热端) − E(参考端) = " + p.processValue(model.emf(t)) + L" − " + p.processValue(ce) + L" = " + p.processValue(reconstructed) + L" mV。" );
     if (direction != 0)
-        p.processSteps.push_back(L"反算时输入电势 = " + inputNumber(input) + L" mV，先加回参考端电势，再在所选有效温区内二分；正算残差 = 代回电势 − 输入电势 = " + p.processValue(reconstructed - input) + L" mV。");
-    p.division(k, {lo, hi}, unit, L"mV", [model, ce](double t) { return model.emf(t) - ce; });
+        p.processSteps.push_back(L"反算时输入电势 = " + inputNumber(input) + L" mV，先加回参考端电势，再" + (model.zone ? L"在所选有效温区内二分" : L"对固定点曲线分段二分") + L"；正算残差 = 代回电势 − 输入电势 = " + p.processValue(reconstructed - input) + L" mV。");
+    if (slope) {
+        auto [lo, hi, value] = *slope;
+        p.processSteps.push_back(L"在同一分段的 " + p.processValue(lo) + L"～" + p.processValue(hi) + L" °C 内作差分，得到微分热电势 " + p.processValue(value / unit.span()) + L" mV/" + unit.symbol() + L"。");
+    } else {
+        p.processSteps.push_back(L"分段交界处的微分热电势未定义。");
+    }
+    p.division(k, model.bounds(), unit, L"mV", [model, ce](double t) { return model.emf(t) - ce; },
+               [model](double t) -> std::optional<double> {
+                   auto slope = model.slope(t);
+                   return slope ? std::optional<double>((*slope)[2]) : std::nullopt;
+               });
 }
 } // 命名空间 toolbox

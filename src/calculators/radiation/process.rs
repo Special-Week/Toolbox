@@ -173,11 +173,6 @@ pub(crate) fn planck(
     } else {
         source
     };
-    let lt = spectrum.log_radiance(temperature + 273.15);
-    let lb = spectrum.log_radiance(background + 273.15);
-    let scale = lt.max(lb);
-    let signal = weight.mul_add((lt - scale).exp(), (1.0 - weight) * (lb - scale).exp());
-    let log_target = scale + signal.ln();
     let mut lines = vec![
         format!("采用 Planck 辐射平衡；输入温度 = {} °C = {} K，背景 = {} °C = {} K，辐射源发射率 = {}。", n(temperature), computed(temperature + 273.15), n(background), computed(background + 273.15), n(source)),
         match response { 1 => "光谱响应为 8～14 μm 平坦波段，采用 256 等分复合辛普森积分。".to_owned(), 2 => "光谱响应为 7～18 μm 平坦波段，采用 256 等分复合辛普森积分。".to_owned(), _ => format!("光谱响应为单一波长 {} μm。", n(lambda)) },
@@ -193,14 +188,23 @@ pub(crate) fn planck(
             computed(weight)
         ));
     }
-    lines.push(format!(
-        "输入温度的 ln(B) = {}，背景的 ln(B) = {}；取 S = max[ln(B输入), ln(B背景)] = {}。",
-        computed(lt),
-        computed(lb),
-        computed(scale)
-    ));
-    lines.push(format!("对数域合成：Q = w·exp(ln(B输入)−S) + (1−w)·exp(ln(B背景)−S) = {}；目标 ln(B) = S + ln(Q) = {}。", computed(signal), computed(log_target)));
-    lines.push("从 0～512 K 开始，必要时将上限加倍；再对同一辐射函数进行 85 次二分，以最终区间中点作为反算温度。".to_owned());
+    if weight == 1.0 {
+        lines.push("w = 1，背景辐射项的系数为零，计算温度等于输入温度。".to_owned());
+    } else {
+        let lt = spectrum.log_radiance(temperature + 273.15);
+        let lb = spectrum.log_radiance(background + 273.15);
+        let scale = lt.max(lb);
+        let signal = weight.mul_add((lt - scale).exp(), (1.0 - weight) * (lb - scale).exp());
+        let log_target = scale + signal.ln();
+        lines.push(format!(
+            "输入温度的 ln(B) = {}，背景的 ln(B) = {}；取 S = max[ln(B输入), ln(B背景)] = {}。",
+            computed(lt),
+            computed(lb),
+            computed(scale)
+        ));
+        lines.push(format!("对数域合成：Q = w·exp(ln(B输入)−S) + (1−w)·exp(ln(B背景)−S) = {}；目标 ln(B) = S + ln(Q) = {}。", computed(signal), computed(log_target)));
+        lines.push("从 0～512 K 开始，必要时将上限加倍；再对同一辐射函数进行 85 次二分，以最终区间中点作为反算温度。".to_owned());
+    }
     lines.push(String::new());
     if correction {
         lines.push(format!(
@@ -329,12 +333,6 @@ mod tests {
                             } else {
                                 source
                             };
-                            let lt = spectrum.log_radiance(temperature + 273.15);
-                            let lb = spectrum.log_radiance(background + 273.15);
-                            let scale = lt.max(lb);
-                            let signal = weight
-                                .mul_add((lt - scale).exp(), (1.0 - weight) * (lb - scale).exp());
-                            let target = scale + signal.ln();
                             let text = planck(
                                 &spectrum,
                                 response,
@@ -348,17 +346,19 @@ mod tests {
                             )
                             .join("\n")
                             .replace('\u{2063}', "");
-                            assert!(
-                                text.contains(&format!("ln(B输入), ln(B背景)] = {}。", n(scale)))
-                            );
-                            assert!(text.contains(&format!(
-                                "= {}；目标 ln(B) = S + ln(Q) = {}。",
-                                n(signal),
-                                n(target)
-                            )));
-                            assert!(
-                                (spectrum.log_radiance(result + 273.15) - target).abs() < 1e-10
-                            );
+                            if weight == 1.0 {
+                                assert_eq!(result, temperature);
+                                assert!(text.contains("背景辐射项的系数为零"));
+                            } else {
+                                let lt = spectrum.log_radiance(temperature + 273.15);
+                                let lb = spectrum.log_radiance(background + 273.15);
+                                let scale = lt.max(lb);
+                                let signal = weight.mul_add((lt - scale).exp(), (1.0 - weight) * (lb - scale).exp());
+                                let target = scale + signal.ln();
+                                assert!(text.contains(&format!("ln(B输入), ln(B背景)] = {}。", n(scale))));
+                                assert!(text.contains(&format!("= {}；目标 ln(B) = S + ln(Q) = {}。", n(signal), n(target))));
+                                assert!((spectrum.log_radiance(result + 273.15) - target).abs() < 1e-10);
+                            }
                             checked += 1;
                         }
                         let lambda = website::wavelength(response, 0.65, temperature);

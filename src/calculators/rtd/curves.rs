@@ -63,6 +63,21 @@ fn polynomial(coefficients: &[f64], t: f64) -> (f64, f64) {
 }
 
 impl Curve {
+    pub(crate) fn inverse_intervals(self, low: f64, high: f64) -> Vec<(f64, f64)> {
+        if let Self::Cu427 = self {
+            return vec![(low, (-50.0_f64).next_down()), (-50.0, 150.0), (150.0_f64.next_up(), high)];
+        }
+        if let Self::Ni672 = self {
+            let mut start = low;
+            return NI672.iter().map(|(_, end)| {
+                let interval = (start, *end);
+                start = end.next_up();
+                interval
+            }).collect();
+        }
+        vec![(low, high)]
+    }
+
     pub(crate) fn evaluate(self, t: f64) -> (f64, f64) {
         if let Self::Cvd([a, b, c]) = self {
             if t < 0.0 {

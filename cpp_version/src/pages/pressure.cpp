@@ -11,6 +11,9 @@ static void selectionProcess(Page &p, Range dut, Range reference, double da, dou
     else
         p.processSteps.push_back(L"标准器允差 = 标准器跨度 × 准确度/100 = " + p.processValue(reference.span) + L" × " + inputNumber(ra) + L"/100 = " + p.processValue(s.referenceTolerance) + L" " + unit + L"。");
     p.processSteps.push_back(L"量传比 = 被检允差/标准器允差 = " + p.processValue(s.dutTolerance) + L" / " + p.processValue(s.referenceTolerance) + L" = " + p.processValue(s.ratio) + L"；要求 ≥ " + inputNumber(required) + L"；压力通道：" + judgement(s.meets) + L"。");
+    if (s.meets && s.ratio < required) {
+        p.processSteps.push_back(L"计算值与要求的差落在浮点舍入误差内，按相等判定。");
+    }
 }
 static void electricalProcess(Page &p, Range dut, Range output, double da, double reading, double fixed,
                               double required, const ElectricalSelection &s, const std::wstring &unit) {
@@ -137,7 +140,12 @@ static void selection(Page &p, bool transmitter) {
     p.rightColumn();
     p.check();
     Range dut(dl, dh);
-    selectStandard(dut, dut, da, .01, required, piston);
+    double verifyAccuracy = mode == 2 ? fixedAccuracy : .01;
+    if (transmitter) {
+        selectTransmitter(dut, dut, Range(sl, sh), da, verifyAccuracy, reading, fixed, required);
+    } else {
+        selectStandard(dut, dut, da, verifyAccuracy, required, piston);
+    }
     std::vector<Range> catalogue;
     for (auto [lo, hi] : series == 0 ? commonRanges() : extendedRanges()) {
         catalogue.emplace_back(convert(Dimension::Pressure, lo, mpa, index),
@@ -155,6 +163,9 @@ static void selection(Page &p, bool transmitter) {
     }
     int count = 0;
     p.processSteps.push_back(mode == 1 ? L"遍历内置标准器量程及准确度，先按准确度百分数从大到小、再按量程跨度从小到大排序。" : L"先选择完整落在检定范围内的目录量程，再逐一核验标准器量程及准确度。");
+    if (duties.empty()) {
+        p.processSteps.push_back(L"输入的检定范围未完整覆盖任何目录量程。");
+    }
     for (auto duty : duties) {
         Values accuracies = mode == 2 ? Values{fixedAccuracy}
                                       : (piston ? Values{.003, .005, .01, .05} : Values{.01, .02, .05});

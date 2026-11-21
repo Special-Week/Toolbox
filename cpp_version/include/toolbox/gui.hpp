@@ -167,7 +167,8 @@ class Page {
     void button(const std::wstring &title, std::function<void()> action);
     void check() const;
     void division(const std::string &field, std::pair<double, double> bounds, TemperatureUnit unit,
-                  const std::wstring &signal, Curve curve);
+                  const std::wstring &signal, Curve curve,
+                  std::function<std::optional<double>(double)> slope = {});
 };
 // 导出线程只读取输入快照，通过原子进度和消息通知主线程，禁止直接访问 HWND 控件。
 struct ExportJob {

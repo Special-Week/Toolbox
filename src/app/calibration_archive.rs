@@ -233,15 +233,13 @@ fn validate_fields(
             let low = &crate::calculators::sprt::ranges::LOW_RANGES[lr];
             if source == 0 {
                 if hr != 6 {
-                    expected.extend(
-                        [
-                            "sprt.coefficient.a",
-                            "sprt.coefficient.b",
-                            "sprt.coefficient.c",
-                        ]
-                        .into_iter()
-                        .map(str::to_owned),
-                    );
+                    expected.push("sprt.coefficient.a".to_owned());
+                    if deviation != 0 || hr <= 3 {
+                        expected.push("sprt.coefficient.b".to_owned());
+                    }
+                    if deviation != 0 || hr <= 1 {
+                        expected.push("sprt.coefficient.c".to_owned());
+                    }
                 }
                 if let Some(labels) = low.coefficients {
                     expected.extend(

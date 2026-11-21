@@ -47,7 +47,7 @@ impl ToolboxApp {
             |ui, app| {
                 let archive_save = app.calibration_archive_controls(ui, tool);
                 let mut archive_required = None;
-                type SprtFitSummary = (Vec<(&'static str, String)>, Vec<(f64, f64)>, Sprt);
+                type SprtFitSummary = (Vec<(&'static str, String)>, Vec<(bool, f64, f64)>, Sprt);
                 let mut fit_summary: Option<SprtFitSummary> = None;
                 let result = panel(ui, |ui| {
                     ui.set_width(ui.available_width());
@@ -128,20 +128,29 @@ impl ToolboxApp {
                     );
                     m.rtp = app.number(tool, "sprt.rtp", &m.rtp.to_string())?;
                     if source == 0 {
-                        for (key, label, item) in if hr == 6 {
-                            vec![]
+                        if hr == 6 {
+                            m.a = 0.0;
+                            m.b = 0.0;
+                            m.c = 0.0;
                         } else {
-                            vec![
-                                ("a", "a", &mut m.a),
-                                ("b", "b", &mut m.b),
-                                ("c", "c", &mut m.c),
-                            ]
-                        } {
-                            let k = format!("sprt.coefficient.{key}");
-                            required.push(k.clone());
-                            let d = item.to_string();
-                            app.input(ui, tool, &k, label, &d, "证书系数");
-                            *item = app.number(tool, &k, &d)?;
+                            let mut high_coeffs = vec![("a", "a", &mut m.a)];
+                            if !full || hr <= 3 {
+                                high_coeffs.push(("b", "b", &mut m.b));
+                            } else {
+                                m.b = 0.0;
+                            }
+                            if !full || hr <= 1 {
+                                high_coeffs.push(("c", "c", &mut m.c));
+                            } else {
+                                m.c = 0.0;
+                            }
+                            for (key, label, item) in high_coeffs {
+                                let k = format!("sprt.coefficient.{key}");
+                                required.push(k.clone());
+                                let d = item.to_string();
+                                app.input(ui, tool, &k, label, &d, "证书系数");
+                                *item = app.number(tool, &k, &d)?;
+                            }
                         }
                         if let Some([a_label, b_label]) = low_range.coefficients {
                             for (label, item) in [(a_label, &mut m.a4), (b_label, &mut m.b4)] {
@@ -177,8 +186,21 @@ impl ToolboxApp {
                         let highs = ranges::high_fixed_points(hr);
                         let mut hp = Vec::new();
                         let mut lp = Vec::new();
+                        let mut seen_fixed: Vec<(f64, f64)> = Vec::new();
                         for (list, out) in [(highs, &mut hp), (low_range.fixed_points, &mut lp)] {
                             for &t in list {
+                                if let Some(&(_, r)) = seen_fixed.iter().find(|(pt, _)| *pt == t) {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{} °C 固定点与高温分区共用上方实测电阻。",
+                                            format_number(t)
+                                        ))
+                                        .size(12.0)
+                                        .color(p.muted),
+                                    );
+                                    out.push((t, r));
+                                    continue;
+                                }
                                 let key = format!("sprt.fixed.{t}");
                                 required.push(key.clone());
                                 let d = m.resistance(t)?.to_string();
@@ -190,8 +212,15 @@ impl ToolboxApp {
                                     &d,
                                     "固定点证书电阻",
                                 );
-                                out.push((t, app.number(tool, &key, &d)?));
+                                let r = app.number(tool, &key, &d)?;
+                                seen_fixed.push((t, r));
+                                out.push((t, r));
                             }
+                        }
+                        if hr == 6 {
+                            m.a = 0.0;
+                            m.b = 0.0;
+                            m.c = 0.0;
                         }
                         m.fit(
                             &hp,
@@ -225,11 +254,14 @@ impl ToolboxApp {
                             m.fit_silver(961.78, resistance)?;
                             hp.push((961.78, resistance));
                         }
-                        let mut coefficients = vec![
-                            ("a", format_process_number(m.a)),
-                            ("b", format_process_number(m.b)),
-                            ("c", format_process_number(m.c)),
-                        ];
+                        let mut coefficients = Vec::new();
+                        if hr != 6 {
+                            coefficients.extend([
+                                ("a", format_process_number(m.a)),
+                                ("b", format_process_number(m.b)),
+                                ("c", format_process_number(m.c)),
+                            ]);
+                        }
                         if let Some([a_label, b_label]) = low_range.coefficients {
                             coefficients.extend([
                                 (a_label, format_process_number(m.a4)),
@@ -242,7 +274,11 @@ impl ToolboxApp {
                                 ("W660", format_process_number(m.w660)),
                             ]);
                         }
-                        let all_pts: Vec<(f64, f64)> = hp.iter().chain(&lp).copied().collect();
+                        let all_pts: Vec<(bool, f64, f64)> = hp
+                            .iter()
+                            .map(|&(t, r)| (true, t, r))
+                            .chain(lp.iter().map(|&(t, r)| (false, t, r)))
+                            .collect();
                         fit_summary = Some((coefficients, all_pts, m));
                         fit_points = Some((hp, lp));
                     }
@@ -287,9 +323,11 @@ impl ToolboxApp {
                         &d,
                         "输入换算值",
                     );
+                    let min = low_range.minimum;
+                    let max = [961.78, 660.323, 419.527, 231.928, 156.599, 29.765, 0.0][hr];
                     let v = app.number(tool, &key, &d)?;
                     let (t, r) = if direction == 0 {
-                        let t = u.celsius(v);
+                        let t = u.celsius_in_bounds(v, (min, max));
                         (
                             t,
                             m.resistance_branch(
@@ -306,8 +344,6 @@ impl ToolboxApp {
                             v,
                         )
                     };
-                    let min = low_range.minimum;
-                    let max = [961.78, 660.323, 419.527, 231.928, 156.599, 29.765, 0.0][hr];
                     if t < min - 1e-8 || t > max + 1e-8 {
                         return Err(format!(
                             "所选分段范围为 {}～{} °C",
@@ -479,10 +515,11 @@ impl ToolboxApp {
                                 render_metrics(ui, "拟合系数", &coefficients);
                                 ui.add_space(6.0);
                                 ui.collapsing("固定点拟合残差", |ui| {
-                                    for &(t, r) in &points {
-                                        if let Ok(actual) = model.temperature(r) {
+                                    for &(is_high, t, r) in &points {
+                                        if let Ok(actual) = model.temperature_branch(r, is_high) {
                                             ui.label(format!(
-                                                "{} °C：{} °C（证书温度 − 反算温度）",
+                                                "{}{} °C：{} °C（证书温度 − 反算温度）",
+                                                if is_high { "高温 " } else { "低温 " },
                                                 format_number(t),
                                                 format_number(t - actual)
                                             ));
@@ -510,6 +547,7 @@ impl ToolboxApp {
                 u,
                 "Ω",
                 |t| m.resistance_branch(t, model::high_for_temperature(t, hr != 6, lr != 2)),
+                None,
             );
         }
         if let Some(lines) = &process {

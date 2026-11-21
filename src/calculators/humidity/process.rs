@@ -18,8 +18,9 @@ fn saturation_steps(t: f64, label: &str, converted: bool) -> Result<Vec<String>,
             c(pressure)
         )
     } else if t < 1.0 {
+        let coefficient = c(website::low_water_coefficient());
         format!(
-            "水面（0 < t < 1 °C）：pₛ(t) = 611.2 × exp[17.62t / (243.12 + t)] = 611.2 × exp[17.62 × {} / (243.12 + {})] = {} Pa。",
+            "水面（0 < t < 1 °C）：a₁ = 244.12 × ln[pₛ(1)/611.2] = {coefficient}；pₛ(t) = 611.2 × exp[a₁t / (243.12 + t)] = 611.2 × exp[{coefficient} × {} / (243.12 + {})] = {} Pa。",
             shown_t,
             shown_t,
             c(pressure)
@@ -128,11 +129,13 @@ pub(crate) fn steps(
             c(r.vapor),
             c(z)
         ));
-        if r.vapor < 657.0 {
-            lines.push(format!("e < 657 Pa：水面露点 = 243.12z / (17.62 − z) = 243.12 × {} / (17.62 − {}) = {} °C = {} {}。", c(z), c(z), c(dew), c(unit.display(dew)), unit.symbol()));
+        let boundary = website::water_boundary();
+        if r.vapor < boundary {
+            let coefficient = if r.vapor <= 611.2 { 17.62 } else { website::low_water_coefficient() };
+            lines.push(format!("e < pₛ(1) = {} Pa：水面露点 = 243.12z / (a − z)；a = {}，代入得 243.12 × {} / ({} − {}) = {} °C = {} {}。", c(boundary), c(coefficient), c(z), c(coefficient), c(z), c(dew), c(unit.display(dew)), unit.symbol()));
         } else {
             let log = r.vapor.log10();
-            lines.push(format!("e ≥ 657 Pa：log₁₀(e) = {}；水面露点 = [−2148.4909 + 35.85 log₁₀(e)] / [log₁₀(e) − 10.286] − 273.15 = [−2148.4909 + 35.85 × {}] / ({} − 10.286) − 273.15 = {} °C = {} {}。", c(log), c(log), c(log), c(dew), c(unit.display(dew)), unit.symbol()));
+            lines.push(format!("e ≥ pₛ(1) = {} Pa：log₁₀(e) = {}；水面露点 = [−2148.4909 + 35.85 log₁₀(e)] / [log₁₀(e) − 10.286] − 273.15 = [−2148.4909 + 35.85 × {}] / ({} − 10.286) − 273.15 = {} °C = {} {}。", c(boundary), c(log), c(log), c(log), c(dew), c(unit.display(dew)), unit.symbol()));
         }
         if frost <= 0.0 {
             lines.push(String::new());
@@ -157,7 +160,11 @@ pub(crate) fn steps(
         ));
     }
     lines.push(String::new());
-    lines.push(format!("湿球温度：在 −100～{} °C 内对 pₛ(t湿) − 0.000662 × p × (t − t湿) = e 执行 100 次二分，并核对反算残差；得到 t湿 = {} °C = {} {}。", n(t), c(r.wet), c(unit.display(r.wet)), unit.symbol()));
+    if r.vapor == r.saturated {
+        lines.push(format!("湿球温度：水汽分压等于饱和压，t湿 等于环境温度 = {} °C = {} {}。", c(r.wet), c(unit.display(r.wet)), unit.symbol()));
+    } else {
+        lines.push(format!("湿球温度：在 −100～{} °C 内对 pₛ(t湿) − 0.000662 × p × (t − t湿) = e 执行 100 次二分，并核对反算残差；得到 t湿 = {} °C = {} {}。", n(t), c(r.wet), c(unit.display(r.wet)), unit.symbol()));
+    }
     lines.extend(saturation_steps(r.wet, "反算湿球温度的饱和水汽压", true)?);
     let wet_check = website::saturation(r.wet)? - 0.000662 * p * (t - r.wet);
     lines.push(format!(
@@ -248,10 +255,10 @@ mod tests {
                 }
                 if let Some(dew) = result.dew {
                     assert!(text.contains(&n(dew)));
-                    assert!(text.contains(if result.vapor < 657.0 {
-                        "e < 657 Pa"
+                    assert!(text.contains(if result.vapor < website::water_boundary() {
+                        "e < pₛ(1)"
                     } else {
-                        "e ≥ 657 Pa"
+                        "e ≥ pₛ(1)"
                     }));
                 }
                 assert!(text.contains("100 次二分"));

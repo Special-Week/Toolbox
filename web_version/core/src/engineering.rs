@@ -327,6 +327,7 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
             } else {
                 m.forward(v)?
             };
+            let signal_symbol = ["mA", "V", "mV"][i.index("signalUnit", 0, 3)?];
             let c = crate::calculators::common::format_process_computed;
             o.process = vec![
                 format!(
@@ -339,7 +340,13 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
                     signal.high,
                     c(signal.span)
                 ),
-                if inverse {
+                if f == 1.0 {
+                    if inverse {
+                        format!("信号比例为 1，过程量直接取上限 {} {symbol}。", c(result))
+                    } else {
+                        format!("被测量比例为 1，输出信号直接取上限 {} {signal_symbol}。", c(result))
+                    }
+                } else if inverse {
                     format!(
                         "信号比例 s = (输入 − 输出下限)/输出跨度 = ({} − {})/{}；{}，过程量 = 下限 + f × 跨度 = {} {}。",
                         v,
@@ -361,11 +368,10 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
                     )
                 },
             ];
-            let s = ["mA", "V", "mV"][i.index("signalUnit", 0, 3)?];
             o.metric(
                 if inverse { "过程量" } else { "输出信号" },
                 result,
-                if inverse { symbol } else { s },
+                if inverse { symbol } else { signal_symbol },
             );
             o.metric("过程量量程比例", f * 100., "%");
         }

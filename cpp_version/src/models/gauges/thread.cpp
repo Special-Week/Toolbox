@@ -139,13 +139,13 @@ std::vector<std::string> grades(bool trap, double d, double p) {
     return out;
 }
 Report thread(bool trap, double d, double p, const std::string &grade, int lines) {
-    const auto available = grades(trap, d, p);
-    require(std::find(available.begin(), available.end(), grade) != available.end(),
-            "当前直径、螺距没有该公差带的定义");
     const double d2 = d - (trap ? .5 : 3 * std::sqrt(3.) / 8) * p,
                  d1 = d - (trap ? 1. : 5 * std::sqrt(3.) / 8) * p;
     positiveGeometry(d, p, d2, d1);
     require(lines >= 1 && lines <= 5 && (trap || lines == 1), "线数范围不正确");
+    const auto available = grades(trap, d, p);
+    require(std::find(available.begin(), available.end(), grade) != available.end(),
+            "当前直径、螺距没有该公差带的定义");
     const std::string num = grade.substr(0, grade.size() - 1), letter = grade.substr(grade.size() - 1);
     const bool ring = letter[0] >= 'a' && letter[0] <= 'z';
     const auto &db = database()["DATA"][trap ? "trap" : "metric"];

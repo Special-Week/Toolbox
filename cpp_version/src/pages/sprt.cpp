@@ -31,6 +31,8 @@ void sprtPage(Page &p) {
             // 子区间 8/9 只用 a、b，10/11 只用 a；不能沿用默认 c 或 b。
             m.b = !full || hr <= 3 ? p.number("coefficient.b", L"b", m.b) : 0;
             m.c = !full || hr <= 1 ? p.number("coefficient.c", L"c", m.c) : 0;
+        } else {
+            m.a = m.b = m.c = 0;
         }
         if (lr != 2) {
             std::string k = lr == 0 ? "4" : "5";
@@ -75,6 +77,9 @@ void sprtPage(Page &p) {
             lp.push_back({t, readFixed(t)});
         }
         p.check();
+        if (hr == 6) {
+            m.a = m.b = m.c = 0;
+        }
         m.fit(hp, lp, hr <= 1 ? 3 : (hr <= 3 ? 2 : 1));
         if (full && hr == 0) {
             for (auto [t, r] : hp) {
@@ -123,13 +128,13 @@ void sprtPage(Page &p) {
                             direction == 0 ? unit.display(dt) : m.resistance(dt));
     p.rightColumn();
     p.check();
-    auto highForTemperature = [hr, lr](double temperature) { return hr != 6 && (lr == 2 || temperature >= .01); };
-    double t = direction == 0 ? unit.celsius(input)
-                              : m.temperatureBranch(input, hr != 6 && (lr == 2 || input >= m.rtp)),
-           r = direction == 0 ? m.resistanceBranch(t, highForTemperature(t)) : input;
     const double lows[] = {-189.344, -38.834, 0},
                  highs[] = {961.78, 660.323, 419.527, 231.928, 156.599, 29.765, 0};
     double lo = lows[lr], hi = highs[hr];
+    auto highForTemperature = [hr, lr](double temperature) { return hr != 6 && (lr == 2 || temperature >= .01); };
+    double t = direction == 0 ? unit.celsiusInBounds(input, {lo, hi})
+                              : m.temperatureBranch(input, hr != 6 && (lr == 2 || input >= m.rtp)),
+           r = direction == 0 ? m.resistanceBranch(t, highForTemperature(t)) : input;
     require(t >= lo - 1e-8 && t <= hi + 1e-8, "温度超出所选高低温分区");
     auto curve = [m, highForTemperature](double t) { return m.resistanceBranch(t, highForTemperature(t)); };
     double a = std::max(t - 1, lo), b = std::min(t + 1, hi), slope = (curve(b) - curve(a)) / (b - a);

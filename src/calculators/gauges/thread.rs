@@ -342,9 +342,6 @@ pub(super) fn calculate(
     grade: &str,
     lines: usize,
 ) -> Result<Report, String> {
-    if !grades(trap, d, p).iter().any(|s| s == grade) {
-        return Err("当前直径、螺距没有该公差带的定义".into());
-    }
     let angle = if trap { 30. } else { 60. };
     // 基本尺寸及后续量规界限均保留 f64 精度，只在输出层统一显示五位小数。
     let d2 = d - if trap { 0.5 } else { 3. * 3_f64.sqrt() / 8. } * p;
@@ -352,6 +349,9 @@ pub(super) fn calculate(
     positive_geometry(d, p, d2, d1)?;
     if !(1..=5).contains(&lines) || (!trap && lines != 1) {
         return Err("线数范围不正确".into());
+    }
+    if !grades(trap, d, p).iter().any(|s| s == grade) {
+        return Err("当前直径、螺距没有该公差带的定义".into());
     }
     let (num, letter) = grade.split_at(grade.len() - 1);
     let ring = letter.chars().all(char::is_lowercase);
@@ -712,4 +712,17 @@ pub(super) fn rebar(angle: usize, index: usize, lines: usize) -> Result<Report, 
     minor_table(&mut out, d1, d1, d1 + td1.unwrap_or(0.) / 1000., td1, false);
     out.note("工件公差和量规位置要素为借用体系；多头不另增公差系数。具体旋合判定按产品实际执行标准。复核牙型与标准后使用。");
     out.checked()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn invalid_geometry_is_reported_before_missing_grade() {
+        for (d, p) in [(-10.0, 1.5), (10.0, 0.0), (1.0, 2.0)] {
+            let err = calculate(false, d, p, "", 1).err().unwrap();
+            assert!(err.contains("直径和螺距须为有效正数"), "{err}");
+        }
+    }
 }

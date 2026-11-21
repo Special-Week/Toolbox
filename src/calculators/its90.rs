@@ -139,14 +139,17 @@ impl ToolboxApp {
                     ui.set_width(ui.available_width());
                     let mut calculated_temperature = None;
                     let result = (|| {
+                        let bounds = crate::calculators::thermocouple::bounds(type_code)?;
                         let input = app.number(tool, &params.input_key, &params.input_default)?;
                         let input = if mode == 0 {
-                            unit.celsius(input)
+                            unit.celsius_in_bounds(input, bounds)
                         } else {
                             input
                         };
-                        let cold =
-                            unit.celsius(app.number(tool, &params.cold_key, &params.cold_default)?);
+                        let cold = unit.celsius_in_bounds(
+                            app.number(tool, &params.cold_key, &params.cold_default)?,
+                            bounds,
+                        );
                         if mode == 0 {
                             let cold_emf = thermocouple_emf(type_code, cold)?;
                             let emf = measured_emf(type_code, input, cold, 0.0)?;
@@ -395,10 +398,11 @@ impl ToolboxApp {
             crate::calculators::thermocouple::bounds(type_code),
             self.number(tool, &tc_params.cold_key, &tc_params.cold_default),
         ) {
-            let cold = unit.celsius(cold);
-            self.render_division_table(ui, tool, type_code, bounds, unit, "mV", |t| {
-                measured_emf(type_code, t, cold, 0.0)
-            });
+            let cold = unit.celsius_in_bounds(cold, bounds);
+            self.render_division_table(
+                ui, tool, type_code, bounds, unit, "mV",
+                |t| measured_emf(type_code, t, cold, 0.0), None,
+            );
         }
         if let Some(lines) = &process {
             calculation_process(ui, "industrial_thermocouple_process", lines);

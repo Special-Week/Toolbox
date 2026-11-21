@@ -245,7 +245,7 @@ fn render_results(
         &[
             (
                 "线性相关系数 r（x 与 y）",
-                optional_number(fit.correlation, "响应量无变化，未定义"),
+                optional_number(fit.correlation, "输入量或响应量无变化，未定义"),
             ),
             (
                 "决定系数 R²",

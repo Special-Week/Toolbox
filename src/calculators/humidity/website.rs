@@ -32,7 +32,7 @@ pub(crate) struct ResultSet {
     pub rh: f64,
     pub dew: Option<f64>,
     pub frost: Option<f64>,
-    pub wet: f64,
+    pub wet: Option<f64>,
     pub saturated: f64,
     pub vapor: f64,
     pub raw_vapor: f64,
@@ -110,16 +110,19 @@ pub(crate) fn calculate(t: f64, p: f64, known: usize, value: f64) -> Result<Resu
     } else {
         (None, None)
     };
+    let wet_equation = |w| Ok(saturation(w)? - 0.000662 * p * (t - w));
     let wet = if vapor == saturated {
-        t
+        Some(t)
+    } else if vapor < wet_equation(-100.0)? {
+        None
     } else {
-        inverse(|w| Ok(saturation(w)? - 0.000662 * p * (t - w)), vapor, -100.0, t)?
+        Some(inverse(wet_equation, vapor, -100.0, t)?)
     };
     let ppm = vapor / (p - vapor) * 1e6;
     let mass = ppm * 18.0152 / 28.959;
     let absolute = vapor * 18.015 / ((t + 273.15) * 8.31451);
     let normal = absolute * (t + 273.15) * 101325.0 / (273.15 * p);
-    finite(&[wet, ppm, mass, absolute, normal])?;
+    finite(&[ppm, mass, absolute, normal])?;
     Ok(ResultSet {
         rh,
         dew,
@@ -145,9 +148,10 @@ mod tests {
     #[test]
     fn a_dry_cold_wet_bulb_can_be_used_as_input() {
         let dry = calculate(-90.0, 85_000.0, 0, 0.0).unwrap();
-        let returned = calculate(-90.0, 85_000.0, 2, dry.wet).unwrap();
+        let wet = dry.wet.unwrap();
+        let returned = calculate(-90.0, 85_000.0, 2, wet).unwrap();
         assert!(returned.rh.abs() < 1e-8);
-        assert!(calculate(-90.0, 85_000.0, 2, dry.wet - 1e-8).is_err());
+        assert!(calculate(-90.0, 85_000.0, 2, wet - 1e-8).is_err());
     }
 
     #[test]
@@ -160,12 +164,12 @@ mod tests {
             assert!((pressure - previous) < 0.005);
             previous = pressure;
             let saturated = calculate(t, p, 0, 100.0).unwrap();
-            assert_eq!(saturated.wet, t);
+            assert_eq!(saturated.wet, Some(t));
             assert!((saturated.dew.unwrap() - t).abs() < 1e-10);
             let from_dew = calculate(1.0002, p, 1, t).unwrap();
             assert!((from_dew.dew.unwrap() - t).abs() < 1e-10);
             let from_wet = calculate(1.0002, p, 2, t).unwrap();
-            assert!((from_wet.wet - t).abs() < 1e-10);
+            assert!((from_wet.wet.unwrap() - t).abs() < 1e-10);
         }
         assert!(calculate(1.0, p, 1, 0.9999).unwrap().rh < 100.0);
     }

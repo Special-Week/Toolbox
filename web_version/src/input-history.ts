@@ -18,3 +18,32 @@ export function rememberedInputs(
   }
   return result;
 }
+
+export function readRememberedInputs(tools: Tool[], storage: Storage): Record<string, State> {
+  const read = (key: string) => {
+    const value = storage.getItem(key);
+    try { return value === null ? undefined : JSON.parse(value); }
+    catch { return undefined; }
+  };
+  const result = rememberedInputs(tools, read(INPUT_STORAGE_KEY));
+  for (const tool of tools) {
+    if (!tool.rememberInputs) continue;
+    const state = read(`${INPUT_STORAGE_KEY}:${tool.id}`);
+    if (state && typeof state === "object" && !Array.isArray(state)) result[tool.id] = state;
+  }
+  return result;
+}
+
+export function saveChangedInputs(
+  tools: Tool[],
+  states: Record<string, State>,
+  saved: Map<string, string>,
+  storage: Storage,
+) {
+  for (const [id, state] of Object.entries(rememberedInputs(tools, states))) {
+    const text = JSON.stringify(state);
+    if (text === saved.get(id)) continue;
+    storage.setItem(`${INPUT_STORAGE_KEY}:${id}`, text);
+    saved.set(id, text);
+  }
+}

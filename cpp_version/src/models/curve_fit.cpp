@@ -185,6 +185,17 @@ double CurveFit::predict(double input) const {
     finite({value});
     return value;
 }
+std::wstring CurveFit::predictionFormula() const {
+    std::wstring text = L"X = (x − (" + inputNumber(x_.origin) + L")) / " + inputNumber(x_.scale) +
+                        L"\r\nŷ = (" + inputNumber(y_.origin) + L") + " + inputNumber(y_.scale) +
+                        L" × P(X)\r\nP 的升幂系数 = [";
+    for (std::size_t i = 0; i < normalizedCoefficients_.size(); ++i) {
+        if (i > 0) text += L", ";
+        text += inputNumber(normalizedCoefficients_[i]);
+    }
+    return text + L"]\r\n使用秦九韶法求 P(X)，有条件时使用融合乘加。";
+}
+
 std::vector<std::wstring> CurveFit::process(const std::vector<std::pair<double, double>> &points, bool full) const {
     auto c = [full](double v) { return processNumber(v, full); };
     std::vector<std::wstring> lines{

@@ -175,7 +175,7 @@ impl ToolboxApp {
                     let min = app.number(tool, "ntc.range.min", "-20")?;
                     let max = app.number(tool, "ntc.range.max", "100")?;
                     let (t, r) = if direction == 0 {
-                        (model.temperature(input)?, input)
+                        (model.temperature_in_bounds(input, min, max)?, input)
                     } else {
                         let t = unit.celsius_in_bounds(input, (min, max));
                         (t, model.resistance(t)?)

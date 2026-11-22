@@ -11,6 +11,18 @@
 
 Rust 计算代码位于 `src/calculators/gauges/`，C++ 数据副本位于 `cpp_version/resources/gauges/`。
 
+## 标准出处与核对状态
+
+2026-11-22 已核对以下标准的公开目录。内置表的来源版次、表号和逐项数值仍需与完整标准和原始录入资料对照。
+
+| 工具 | 官方目录与待核对内容 |
+|---|---|
+| M、钢筋直螺纹 | [GB/T 3934-2025](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=CB961A1456EDADCED21C0779BBA996DD) 已于 2026-05-01 实施，[GB/T 197-2018](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=4B9C1010476FF8385A59AD3076EC3A68) 为普通螺纹公差。需核对 M 表采用的版次及新版量规尺寸变化。钢筋直螺纹借用这些公差和量规要素，钢筋专用规格表的来源仍待确认。 |
+| Tr | [GB/T 8124-2004](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=121A61B6B3C7DAFDCAF237AB2633FD5E) 为梯形螺纹量规技术条件，[GB/T 5796.4-2022](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=515A70D2BBF5649D13A2D0F0CCF6CFFB) 为梯形螺纹公差。需对照不同线数、外小径公差带和量规长度表。 |
+| UN | [ASME B1.1](https://www.asme.org/codes-standards/find-codes-standards/b1-1-unified-inch-screw-threads-un-unr-thread-form) 涵盖统一英制螺纹，[ASME B1.2](https://www.asme.org/codes-standards/find-codes-standards?designatorCategory=B1&page=1&perPage=25&sortBy=designator&sortByDir=asc&type=Standards) 涵盖相关量规。需确认 `unified.json` 的 U 值和校对规尺寸对应的版次与表号。 |
+| R / NPT | R 模型注明 [JB/T 10031-2019](https://std.samr.gov.cn/hb/search/stdHBDetailed?id=C362C05F3EBAA68DE05397BE0A0A9B00)。[ASME B1.20.1](https://www.asme.org/codes-standards/find-codes-standards/b1201-pipe-threads-general-purpose-inch) 的目录确认范围包含 NPT。需核对内置尺寸和量规表，尤其是暂缺的 NPT 6 inch 环规中径。 |
+| 光滑量规 | [GB/T 1957-2006](https://openstd.samr.gov.cn/bzgk/std/newGbInfo?hcno=19CD017560D9E213D73150AC76C10DE4) 规定技术条件，[JJG 343-2012](https://www.samr.gov.cn/cms_files/filemanager/samr/www/samrnew/samrgkml/nsjg/jls/202112/W020211229469641399704.pdf) 为检定规程。需逐项对照基本偏差、量规公差和等级相关 Δ 修正。 |
+
 ## 取值约定
 
 - `99999`、`-100000` 和空值表示缺失，不能作为尺寸或零公差；负偏差保留符号。

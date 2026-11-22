@@ -207,7 +207,15 @@ void renderGauges(Page &p) {
         const auto &report = *data.report;
         p.processSteps = report.process;
         p.heading(wide(report.title));
-        auto text = wide(report.text(type));
+        std::string inputs = "输入参数\n";
+        for (const auto &field : data.fields) {
+            auto value = data.state.find(field.key);
+            if (value != data.state.end()) {
+                inputs += field.label + "：" + value->second + "\n";
+            }
+        }
+        auto text = wide("工具标识：" + p.tool.id + "\n软件版本：Toolbox C++ " TOOLBOX_VERSION
+                         "\n数值精度：计算尺寸按界面显示为五位小数。\n\n" + inputs + "\n" + report.text(type));
         p.button(L"复制完整结果", [owner = &p.app, text] {
             owner->copyToClipboard(text, L"已复制量规完整结果");
         });

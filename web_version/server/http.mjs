@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { gzip } from "node:zlib";
 import { promisify } from "node:util";
+import { pipeline } from "node:stream/promises";
 import { createPdfCache, PdfError } from "./pdf-cache.mjs";
 
 function json(response, status, message) {
@@ -45,27 +46,35 @@ export function createPdfMiddleware(options = {}) {
       return;
     }
     cache
-      .get(inputs[0])
-      .then((result) => {
-        if (response.destroyed) return;
-        response.writeHead(200, {
-          "Content-Type": "application/pdf",
-          "Content-Length": result.data.length,
-          "Content-Disposition":
-            "attachment; filename=standard.pdf; filename*=UTF-8''" +
-            encodeURIComponent(result.filename),
-          "Cache-Control": "no-store",
-          "X-Content-Type-Options": "nosniff",
-          "X-PDF-Code": encodeURIComponent(result.code),
-          "X-PDF-Name": encodeURIComponent(result.name),
-          "X-PDF-Filename": encodeURIComponent(result.filename),
-          "X-PDF-Pages": String(result.pages),
-          "X-PDF-Cache": result.cache,
-        });
-        response.end(result.data);
+      .get(inputs[0], { stream: true })
+      .then(async (result) => {
+        try {
+          if (response.destroyed) return;
+          response.writeHead(200, {
+            "Content-Type": "application/pdf",
+            "Content-Length": result.size,
+            "Content-Disposition":
+              "attachment; filename=standard.pdf; filename*=UTF-8''" +
+              encodeURIComponent(result.filename),
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+            "X-PDF-Code": encodeURIComponent(result.code),
+            "X-PDF-Name": encodeURIComponent(result.name),
+            "X-PDF-Filename": encodeURIComponent(result.filename),
+            "X-PDF-Pages": String(result.pages),
+            "X-PDF-Cache": result.cache,
+          });
+          await pipeline(result.stream, response);
+        } finally {
+          result.stream.destroy();
+        }
       })
       .catch((error) => {
         if (response.destroyed) return;
+        if (response.headersSent) {
+          response.destroy(error);
+          return;
+        }
         if (error instanceof PdfError)
           json(response, error.status, error.message);
         else {

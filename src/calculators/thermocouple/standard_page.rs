@@ -347,7 +347,7 @@ impl ToolboxApp {
                     );
                     let (lo, hi) = model.bounds();
                     let cold = u.celsius_in_bounds(app.number(tool, &ck, &cd)?, (lo, hi));
-                    let cold_e = model.emf(cold)?;
+                    let cold_e = model.reference_end_emf(cold)?;
                     let v = app.number(tool, &key, &default)?;
                     let (t, e, hot_e) = if direction == 0 {
                         let t = u.celsius_in_bounds(v, (lo, hi));
@@ -370,7 +370,7 @@ impl ToolboxApp {
                         }
                     )];
                     if let Some((min, max, coefficients)) = &model.zone {
-                        steps.push(format!("系数温区 {}～{} °C；E(t) = Σ c[i]·tⁱ，t 用 °C、E 用 mV；t = 0 °C 时模型按 0 mV 处理。", format_process_number(*min), format_process_number(*max)));
+                        steps.push(format!("系数温区 {}～{} °C；E(t) = Σ c[i]·tⁱ，t 用 °C、E 用 mV。参考端为 0 °C 时电势为 0 mV。", format_process_number(*min), format_process_number(*max)));
                         if let Some((points, base, delta)) = &fit_details {
                             steps.push("拟合使用基准多项式 E₀(t)=Σ b[i]·tⁱ。对各校准点，以 ΔE=实测电势−E₀(t) 建立 ΔE≈Δc₁·t+Δc₂·t²，并用最小二乘法求解。".to_owned());
                             steps.extend(base.iter().enumerate().map(|(i, c)| {

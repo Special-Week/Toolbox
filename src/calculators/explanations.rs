@@ -12,7 +12,7 @@ pub(crate) fn for_tool(kind: ToolKind) -> &'static str {
             "按所选分度曲线换算，计入参考端补偿。公式温度用 °C，热电势用 mV。\n分度曲线与等级允差各有适用温区；B 型非正基准电势不作唯一反算，U 型范围为 −200～600 °C。允差电势界限按参考端 0 °C 计算。"
         }
         ToolKind::StandardThermocouple => {
-            "使用所选 S/B 型校准曲线并计入参考端补偿。证书热电势填实际值（mV），不是修正量。\n系数公式温度用 °C；反算限于所选温区，B 型采用 ≥50 °C 的单调分支。"
+            "使用所选 S/B 型校准曲线并计入参考端补偿。证书热电势填实际值（mV），不是修正量。\n系数公式温度用 °C；反算限于所选温区，B 型反算限于 ≥50 °C。"
         }
         ToolKind::IndustrialResistance => {
             "按所选分度曲线和 R₀ 换算；R₀ 为 0 °C 电阻，Cu10 的 10 Ω 标称值对应约 25 °C。\n公式温度用 °C，电阻用 Ω。等级允差按卡片温区判断，电阻界限由温度界限换算。"
@@ -108,7 +108,7 @@ pub(crate) fn formula(kind: ToolKind) -> String {
             "分层界面为 11、20、32、47、51、71 km，按恒温或恒温度梯度关系计算。空气密度 ρ=p/(287.05287T)，p 用 Pa，T 用 K。"
         }
         ToolKind::HumidityConversion => {
-            "环境及湿球温度 t 用 °C、气压 p 和水汽分压 e 用 Pa，t 范围 −100～100 °C。饱和压 ps(t) 分段计算：t≤0：611.2·exp[22.46t/(272.62+t)]；0<t<1：611.2·exp[a₁t/(243.12+t)]；t≥1：10^[(10.286T−2148.4909)/(T−35.85)]，其中 T=t+273.15 K。a₁=244.12·ln[ps(1)/611.2]，使两段水面公式连续。\n已知相对湿度时 e=RH·ps(t)/100；已知露/霜点时 e=ps(t点)；已知湿球时 e=ps(t湿)−0.000662p(t−t湿)；已知混合比 m（g/kg）时 q=(m/1000)·28.959/18.0152，e=pq/(1+q)。湿球反算使用同一方程的有界求解。若在 −100 °C 至环境温度内无连续解，则提示无法反算，不输出结果。\nRH=100e/ps；体积分数=e/p（L/L）；以干空气计的体积比=e/(p−e)×10⁶（μL/L）；质量比=体积比×18.0152/28.959（μg/g）；混合比=质量比/1000（g/kg）；比湿=1000×质量比/(10⁶+质量比)（g/kg）。绝对湿度=e×18.015/(8.31451T)（g/m³）；标准状态含水量=绝对湿度×T×101325/(273.15p)。\n当 e>0，令 z=ln(e)−ln(611.2)：霜点=272.62z/(22.46−z)；e<ps(1) 时水面露点=243.12z/(a−z)，e≤611.2 Pa 时 a=17.62，否则 a=a₁；e≥ps(1) 时露点=[−2148.4909+35.85log₁₀(e)]/[log₁₀(e)−10.286]−273.15。非正露/霜点输入按冰面处理；RH=0 时无有限露/霜点。水汽分压须小于总压。由其他湿度参数反算的 RH 若因数值误差仅略微超出 0%～100%，则将水汽分压同时归整至对应边界。"
+            "环境及湿球温度 t 用 °C、气压 p 和水汽分压 e 用 Pa，t 范围 −100～100 °C。饱和压 ps(t) 分段计算：t≤0：611.2·exp[22.46t/(272.62+t)]；0<t<1：611.2·exp[a₁t/(243.12+t)]；t≥1：10^[(10.286T−2148.4909)/(T−35.85)]，其中 T=t+273.15 K。a₁=244.12·ln[ps(1)/611.2]，使两段水面公式连续。\n已知相对湿度时 e=RH·ps(t)/100；已知露/霜点时 e=ps(t点)；已知湿球时 e=ps(t湿)−0.000662p(t−t湿)；已知混合比 m（g/kg）时 q=(m/1000)·28.959/18.0152，e=pq/(1+q)。湿球反算使用同一方程的有界求解。当湿球温度低于 −100 °C 时，标记湿球温度超出模型范围，仍显示其余可计算结果。\nRH=100e/ps；体积分数=e/p（L/L）；以干空气计的体积比=e/(p−e)×10⁶（μL/L）；质量比=体积比×18.0152/28.959（μg/g）；混合比=质量比/1000（g/kg）；比湿=1000×质量比/(10⁶+质量比)（g/kg）。绝对湿度=e×18.015/(8.31451T)（g/m³）；标准状态含水量=绝对湿度×T×101325/(273.15p)。\n当 e>0，令 z=ln(e)−ln(611.2)：霜点=272.62z/(22.46−z)；e<ps(1) 时水面露点=243.12z/(a−z)，e≤611.2 Pa 时 a=17.62，否则 a=a₁；e≥ps(1) 时露点=[−2148.4909+35.85log₁₀(e)]/[log₁₀(e)−10.286]−273.15。非正露/霜点输入按冰面处理；RH=0 时无有限露/霜点。水汽分压须小于总压。由其他湿度参数反算的 RH 若因数值误差仅略微超出 0%～100%，则将水汽分压同时归整至对应边界。"
         }
         ToolKind::EarBlackbody => {
             "D=ε黑+(1−ε黑)ε探。\nT亮⁴=[ε黑T黑⁴+(1−ε黑)ε探T探⁴]/D。公式温度均用 K。"
@@ -163,7 +163,7 @@ pub(crate) fn variants(kind: ToolKind) -> &'static [NoteVariant] {
         )],
         ToolKind::StandardThermocouple => &[(
             1,
-            "温区系数按 E(t)=Σc[i]t^i 计算，t 用 °C，E 用 mV；0 °C 特别规定为 0 mV。含 0 °C 的系数温区要求常数项 C0 为零。\n校准点拟合只修正一次、二次项；反算要求曲线在所选反算温区内严格单调，B 型采用 ≥50 °C 分支。",
+            "温区系数按 E(t)=Σc[i]t^i 计算，t 用 °C，E 用 mV。参考端为 0 °C 时电势为 0 mV，热端须在所选系数温区内。含 0 °C 的系数温区要求常数项 C0 为零。\n校准点拟合只修正一次、二次项；反算要求曲线在所选反算温区内严格单调，B 型采用 ≥50 °C 分支。",
             "E测=E(t热端)−E(t参考端)；反算先加回参考端电势。热电势残差=实测电势−拟合电势。",
         )],
         ToolKind::StandardPlatinumResistor => &[
@@ -301,8 +301,10 @@ mod tests {
         assert!(note.contains("0<t<1"));
         assert!(note.contains("t≥1"));
         assert!(note.contains("ln(e)−ln(611.2)"));
-        assert!(note.contains("无连续解"));
-        assert!(calculate(-100.0, 101325.0, 0, 50.0).is_err());
+        assert!(note.contains("湿球温度低于 −100 °C"));
+        assert!(note.contains("仍显示其余可计算结果"));
+        let cold = calculate(-100.0, 101325.0, 0, 50.0).unwrap();
+        assert!(cold.wet.is_none() && cold.vapor > 0.0);
         for t in [
             -100.0_f64, -0.000001, 0.0, 0.000001, 0.5, 0.999999, 1.0, 20.0, 100.0,
         ] {
@@ -327,13 +329,14 @@ mod tests {
     #[test]
     fn standard_thermocouple_note_includes_zero_reference_exception() {
         let (note, _) = selected(ToolKind::StandardThermocouple, 1);
-        assert!(note.contains("0 °C 特别规定为 0 mV"));
+        assert!(note.contains("参考端为 0 °C 时电势为 0 mV"));
         let couple = super::super::thermocouple::standard::StandardCouple {
             kind: "S",
             points: vec![],
             zone: Some((100.0, 200.0, vec![1.0, 2.0, 3.0])),
         };
-        assert_eq!(couple.emf(0.0).unwrap(), 0.0);
+        assert_eq!(couple.reference_end_emf(0.0).unwrap(), 0.0);
+        assert!(couple.emf(0.0).is_err());
         assert!(couple.emf(99.0).is_err());
         assert_eq!(
             couple.emf(100.0).unwrap(),

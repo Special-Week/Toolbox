@@ -213,6 +213,28 @@ test("缓存写入失败时不宣称下载成功，不留下临时文件", async
   assert.equal(await readFile(blocked, "utf8"), "keep");
 });
 
+test("流式缓存复用校验结果，文件被替换后重新读取页数", async (t) => {
+  const directory = await temporary(t), remote = upstream(pdf(2));
+  const cache = createPdfCache({ cacheDirectory: directory, fetchImpl: remote.fetchImpl });
+  const first = await cache.get(LINK);
+  const download = async () => {
+    const result = await cache.get(LINK, { stream: true });
+    const chunks = [];
+    for await (const chunk of result.stream) chunks.push(chunk);
+    const data = Buffer.concat(chunks);
+    assert.equal(data.length, result.size);
+    assert.equal(result.data, undefined);
+    return { pages: result.pages, cache: result.cache, data };
+  };
+  for (let i = 0; i < 2; i++) {
+    assert.deepEqual(await download(), { pages: 2, cache: "HIT", data: first.data });
+  }
+  const updated = pdf(3);
+  await writeFile(path.join(directory, parseDetailLink(LINK).key + ".pdf"), updated);
+  assert.deepEqual(await download(), { pages: 3, cache: "HIT", data: updated });
+  assert.equal(remote.calls.length, 3);
+});
+
 test("真实解析页数并保留原始字节，文件名过滤 Windows 非法字符", async () => {
   const data = pdf(4),
     copy = Buffer.from(data);

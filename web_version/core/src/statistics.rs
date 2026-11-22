@@ -48,12 +48,16 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
         ToolKind::Repeatability => {
             let values = i.values("values", SAMPLES, 2, 50)?;
             let s = statistics(&values)?;
+            let range = s.max - s.min;
+            let range = range.is_finite().then_some(range);
+            let rsd = s.sd / s.mean.abs() * 100.0;
+            let rsd = rsd.is_finite().then_some(rsd);
             o.process = error_process::samples(&values, &s, true);
             o.process.push(format!(
                 "极差 = 最大值 − 最小值 = {} − {} = {}。",
                 n(s.max),
                 n(s.min),
-                c(s.max - s.min)
+                range.map(c).unwrap_or_else(|| "超出双精度范围".into())
             ));
             o.process.push(format!(
                 "平均值标准差 = s/√n = {} / √{} = {}。",
@@ -61,21 +65,28 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
                 values.len(),
                 c(s.standard_error)
             ));
-            o.process.push(match percent(s.sd, s.mean.abs())? {
+            o.process.push(match rsd {
                 Some(value) => format!(
                     "相对标准偏差 = s/|平均值| × 100 = {} / |{}| × 100 = {}%。",
                     c(s.sd),
                     c(s.mean),
                     c(value)
                 ),
-                None => "平均值为零，相对标准偏差无定义。".into(),
+                None if s.mean == 0.0 => "平均值为零，相对标准偏差无定义。".into(),
+                None => "相对标准偏差超出双精度范围。".into(),
             });
             o.metric("测量次数", values.len(), "次");
             o.metric("平均值", s.mean, "");
             o.metric("样本标准差 s", s.sd, "");
             o.metric("平均值标准差", s.standard_error, "");
-            o.metric("极差", s.max - s.min, "");
-            o.optional("相对标准偏差 RSD", percent(s.sd, s.mean.abs())?, "%");
+            o.optional("极差", range, "");
+            if range.is_none() {
+                o.warnings.push("极差超出双精度范围。".into());
+            }
+            o.optional("相对标准偏差 RSD", rsd, "%");
+            if rsd.is_none() && s.mean != 0.0 {
+                o.warnings.push("相对标准偏差超出双精度范围。".into());
+            }
         }
         ToolKind::RangeMethod => {
             let (min, max, count) = if i.index("mode", 0, 2)? == 1 {

@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build:wasm": "node scripts/build-wasm.mjs",
+    "test": "node --test scripts/*.test.mjs scripts/*.test.cjs server/*.test.mjs scripts/boundaries.mjs",
     "test:offline": "node --test scripts/service-worker.test.mjs scripts/build-cache.test.mjs",
     "test:pdf": "node --test scripts/pdf-download.test.mjs server/pdf-cache.test.mjs server/http.test.mjs",
     "test:curve": "node --test scripts/curve-chart.test.mjs",

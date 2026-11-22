@@ -6,6 +6,8 @@ namespace toolbox {
 namespace {
 constexpr std::size_t rowsPerPage = 10;
 using DataPoints = std::vector<std::pair<double, double>>;
+const std::vector<std::wstring> modelNames{
+    L"一次（含常数项）", L"一次（过原点）", L"二次多项式", L"三次多项式"};
 const std::array<std::pair<const wchar_t *, const wchar_t *>, 6> example{{
     {L"0", L"0.197"},
     {L"5", L"0.208"},
@@ -58,8 +60,11 @@ std::wstring report(const CurveFit &fit, const DataPoints &points, const std::ws
     auto numberOr = [](std::optional<double> value, const wchar_t *missing) {
         return value ? inputNumber(*value) : std::wstring(missing);
     };
-    std::wstring text =
-        L"校准曲线拟合\r\n" + equation(fit, true) + L"\r\n输入：" + xLabel + L"\r\n响应：" + yLabel + L"\r\n";
+    std::wstring text = L"校准曲线拟合\r\n软件版本：Toolbox C++ " + wide(TOOLBOX_VERSION) +
+                        L"\r\n拟合模型：" + modelNames[static_cast<std::size_t>(fit.kind)] +
+                        L"\r\n数值精度：保留计算精度。\r\n\r\n归一化预测式（用于复算）\r\n" +
+                        fit.predictionFormula() + L"\r\n\r\n原坐标展开式（供参考）\r\n" + equation(fit, true) +
+                        L"\r\n输入：" + xLabel + L"\r\n响应：" + yLabel + L"\r\n";
     for (std::size_t power = 0; power < fit.coefficients.size(); ++power) {
         text += L"K" + std::to_wstring(power) + L" = " + inputNumber(fit.coefficients[power]) + L"\r\n";
     }
@@ -188,8 +193,7 @@ void resultRows(Page &p, const CurveFit &fit, const DataPoints &points) {
 void renderCurveFit(Page &p) {
     p.beginSplit(0.46f);
     p.heading(L"拟合设置与校准数据");
-    auto kind = CurveFitKind(p.select(
-        "model", L"拟合模型", {L"一次（含常数项）", L"一次（过原点）", L"二次多项式", L"三次多项式"}));
+    auto kind = CurveFitKind(p.select("model", L"拟合模型", modelNames));
     if (p.collapse("axis.labels", L"坐标名称与单位（可选）")) {
         p.textInput("x_name", L"输入量名称", L"输入量");
         p.textInput("x_unit", L"输入量单位", L"");

@@ -34,13 +34,19 @@ impl ToolboxApp {
                         let values = values?;
                         let stats = statistics(&values)?;
                         let (mean, sd, min, max) = (stats.mean, stats.sd, stats.min, stats.max);
-                        finite(&[max - min])?;
+                        let range = max - min;
+                        let range_text = if range.is_finite() {
+                            format_number(range)
+                        } else {
+                            "超出双精度范围".to_owned()
+                        };
+                        let percent = sd / mean.abs() * 100.0;
                         let rsd = if mean == 0.0 {
                             "平均值为 0".to_owned()
-                        } else {
-                            let percent = sd / mean.abs() * 100.0;
-                            finite(&[percent])?;
+                        } else if percent.is_finite() {
                             format!("{} %", format_number(percent))
+                        } else {
+                            "超出双精度范围".to_owned()
                         };
                         let mut steps = super::error_process::samples(&values, &stats, true);
                         steps.push(String::new());
@@ -48,7 +54,7 @@ impl ToolboxApp {
                             "极差 R = 最大值 − 最小值 = {} − {} = {}。",
                             format_process_number(max),
                             format_process_number(min),
-                            format_process_computed(max - min)
+                            if range.is_finite() { format_process_computed(range) } else { range_text.clone() }
                         ));
                         steps.push(format!(
                             "平均值标准差 = s/√n = {} / √{} = {}。",
@@ -58,13 +64,15 @@ impl ToolboxApp {
                         ));
                         steps.push(if mean == 0.0 {
                             "平均值为 0，相对标准偏差无定义。".to_owned()
-                        } else {
+                        } else if percent.is_finite() {
                             format!(
                                 "相对标准偏差 = s/|x̄| × 100 = {} / |{}| × 100 = {}%。",
                                 format_process_computed(sd),
                                 format_process_computed(mean),
-                                format_process_computed(sd / mean.abs() * 100.0)
+                                format_process_computed(percent)
                             )
+                        } else {
+                            "相对标准偏差超出双精度范围。".to_owned()
                         });
                         process = Some(steps);
                         residuals_out = Some(stats.residuals);
@@ -72,7 +80,7 @@ impl ToolboxApp {
                             ("测量次数", values.len().to_string()),
                             ("平均值", format_number(mean)),
                             ("样本标准差 s", format_number(sd)),
-                            ("极差", format_number(max - min)),
+                            ("极差", range_text),
                             ("平均值标准差 s/√n", format_number(stats.standard_error)),
                             ("相对标准偏差", rsd),
                         ])

@@ -100,7 +100,7 @@ void thermistorPage(Page &p) {
            hi = p.number("range.max", L"校准温区上限 (°C)", 100);
     p.rightColumn();
     p.check();
-    double t = direction == 0 ? model.temperature(input) : unit.celsiusInBounds(input, {lo, hi}),
+    double t = direction == 0 ? model.temperatureInBounds(input, lo, hi) : unit.celsiusInBounds(input, {lo, hi}),
            r = direction == 0 ? input : model.resistance(t);
     require(lo > -273.15 && lo < hi && t >= lo && t <= hi,
             "校准温区须高于绝对零度、下限小于上限，计算温度须在温区内");

@@ -4,7 +4,7 @@ use crate::calculators::common::*;
 use crate::catalog::ToolDef;
 use crate::theme;
 use eframe::egui::{self, RichText};
-mod model;
+pub(super) mod model;
 use crate::calculators::pressure::model::Range;
 use model::Transmitter;
 

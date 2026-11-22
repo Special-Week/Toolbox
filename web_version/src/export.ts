@@ -1,20 +1,34 @@
 /** CSV 同时包含摘要与明细，避免有表格时漏掉方程系数和相关性等结果。 */
-import type { Result, Tool } from "./types";
+import { version } from "../package.json";
+import type { Result, State, Tool } from "./types";
 import { csvCell, decimal } from "./format";
+
+export function calculationMetadata(tool: Tool, input: State): [string, string][] {
+  return [
+    ["工具", tool.name],
+    ["工具标识", tool.id],
+    ["软件版本", `Toolbox Web ${version}`],
+    ["输入参数 (JSON)", JSON.stringify(input)],
+    ["数值精度", "保留计算结果精度；计算模型中的修约按输入参数执行"],
+  ];
+}
 
 export function resultCsv(
   tool: Tool,
   result: Result,
+  input: State,
   note = { note: tool.note, formula: tool.formula },
 ): string {
   const rows: unknown[][] = [
-    ["工具", tool.name],
+    ...calculationMetadata(tool, input),
     [],
     ["计算结果"],
     ["参数", "结果", "单位"],
     ...result.metrics.map((m) => [m.label, m.value ?? "未定义", m.unit]),
   ];
-  if (result.equation) rows.push([], ["拟合方程", "y = " + result.equation]);
+  if (result.prediction_formula)
+    rows.push([], ["归一化预测式（用于复算）", result.prediction_formula]);
+  if (result.equation) rows.push([], ["原坐标展开式（供参考）", "y = " + result.equation]);
   if (result.coefficients.length)
     rows.push(
       [],

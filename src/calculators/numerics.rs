@@ -62,28 +62,36 @@ pub(crate) fn statistics(values: &[f64]) -> Result<Statistics, String> {
     // 符号相反的极端值需要缩放，避免 x - origin 溢出。
     let origin = values[0];
     let differences: Vec<_> = values.iter().map(|x| x - origin).collect();
-    let (mean, residuals, center, sd) = if differences.iter().all(|x| x.is_finite()) {
+    let scale = min.abs().max(max.abs());
+    let factor = (count - 1.0).sqrt();
+    let centered = if (scale == 0.0 || scale >= f64::MIN_POSITIVE * count)
+        && differences.iter().all(|x| x.is_finite())
+    {
         let delta_mean = compensated_sum(differences.iter().map(|x| x / count));
         let residuals = differences
             .iter()
             .map(|x| x - delta_mean)
             .collect::<Vec<_>>();
-        let sd = rss(residuals.iter().map(|x| x / (count - 1.0).sqrt()))?;
-        (origin + delta_mean, residuals, Some((origin, delta_mean)), sd)
+        ((origin + delta_mean).is_finite() && residuals.iter().all(|x| x.is_finite()))
+            .then_some((delta_mean, residuals))
     } else {
-        let scale = min.abs().max(max.abs());
+        None
+    };
+    let (mean, residuals, center, sd, standard_error) = if let Some((delta_mean, residuals)) = centered {
+        let sd = rss(residuals.iter().map(|x| x / factor))?;
+        (origin + delta_mean, residuals, Some((origin, delta_mean)), sd, sd / count.sqrt())
+    } else {
         let normalized_mean = compensated_sum(values.iter().map(|x| (x / scale) / count));
         let mean = normalized_mean * scale;
-        let factor = (count - 1.0).sqrt();
-        let sd = rss(values
+        let normalized_sd = rss(values
             .iter()
-            .map(|x| ((x / scale) - normalized_mean) / factor))?
-            * scale;
+            .map(|x| ((x / scale) - normalized_mean) / factor))?;
         (
             mean,
             values.iter().map(|x| x - mean).collect::<Vec<_>>(),
             None,
-            sd,
+            normalized_sd * scale,
+            (normalized_sd / count.sqrt()) * scale,
         )
     };
     finite(&[mean, sd, min, max])?;
@@ -92,7 +100,7 @@ pub(crate) fn statistics(values: &[f64]) -> Result<Statistics, String> {
         sd,
         min,
         max,
-        standard_error: sd / count.sqrt(),
+        standard_error,
         residuals,
         center,
     })

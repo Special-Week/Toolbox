@@ -8,7 +8,9 @@ use eframe::egui::{self, CornerRadius, FontId, RichText, Stroke};
 
 use crate::calculators::math::{cvd_basis, cvd_resistance, solve_3x3};
 use crate::calculators::thermistor::BetaThermistor;
-use crate::calculators::thermocouple::{corrected_temperature, measured_emf, thermocouple_emf};
+use crate::calculators::thermocouple::{
+    WORKING_KINDS, corrected_temperature, measured_emf, thermocouple_emf,
+};
 
 impl ToolboxApp {
     pub(crate) fn render_thermocouple(
@@ -27,10 +29,6 @@ impl ToolboxApp {
             "B 型", "E 型", "J 型", "K 型", "N 型", "R 型", "S 型", "T 型", "C 型", "D 型",
             "G 型", "L 型", "LR 型", "U 型", "A 型",
         ];
-        let type_codes = [
-            "B", "E", "J", "K", "N", "R", "S", "T", "C", "D", "G", "L", "LR", "U", "A",
-        ];
-
         struct TcParams {
             type_code: &'static str,
             unit: crate::calculators::calibration::TemperatureUnit,
@@ -60,7 +58,7 @@ impl ToolboxApp {
                     ui.label(RichText::new("热电偶参数").size(14.5).strong().color(p.ink));
                     ui.add_space(10.0);
                     let type_index = app.select_index(ui, tool, "type", "分度号", &types, 3);
-                    params.type_code = type_codes[type_index];
+                    params.type_code = WORKING_KINDS[type_index];
                     params.unit = crate::calculators::calibration::TemperatureUnit(
                         app.select_segmented(
                             ui,

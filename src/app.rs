@@ -1304,6 +1304,14 @@ impl ToolboxApp {
             .unwrap_or_else(|| default.to_owned())
     }
 
+    pub(crate) fn tool_inputs(&self, tool: &ToolDef) -> std::collections::BTreeMap<&str, &str> {
+        let prefix = format!("{}.", tool.id);
+        self.values
+            .iter()
+            .filter_map(|(key, value)| key.strip_prefix(&prefix).map(|key| (key, value.as_str())))
+            .collect()
+    }
+
     pub(crate) fn number(&self, tool: &ToolDef, key: &str, default: &str) -> Result<f64, String> {
         parse_number(&self.value(tool, key, default))
     }

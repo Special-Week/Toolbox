@@ -39,36 +39,22 @@ pub(crate) fn write_rows(
 
 /// 由索引计算采样点，避免逐次累加误差；末点包含终值，总行数最多 50,000。
 pub(crate) fn sample_points(start: f64, end: f64, step: f64) -> Result<Vec<f64>, String> {
-    super::numerics::finite(&[start, end, step])?;
-    if start >= end || step <= 0.0 {
-        return Err("起点须小于终点，步长须大于 0".into());
-    }
-    let count = ((end - start) / step).floor();
-    if !count.is_finite() || count > 49999.0 {
-        return Err("分度表最多 50000 行，请增大步长".into());
-    }
-    let mut points = Vec::new();
-    for i in 0..=count as usize {
-        let x = start + i as f64 * step;
-        if points.last().is_some_and(|v| *v >= x) {
-            return Err("步长小于当前数值的可分辨精度".into());
-        }
-        if x <= end {
-            points.push(x);
-        }
-    }
-    if points.last().is_none_or(|x| *x < end) {
-        points.push(end);
-    }
-    if points.len() > 50000 {
-        return Err("分度表最多 50000 行".into());
-    }
-    Ok(points)
+    use super::spline::model::{division_sample_count, sample_x};
+    let count = division_sample_count(start, end, step)?;
+    Ok((0..count)
+        .map(|index| sample_x(start, end, step, count, index))
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn division_row_limit_is_inclusive() {
+        assert_eq!(sample_points(0., 49_999., 1.).unwrap().len(), 50_000);
+        assert!(sample_points(0., 49_999.1, 1.).unwrap_err().contains("50000"));
+    }
 
     #[test]
     fn short_division_range_keeps_both_endpoints_and_allows_undefined_slope() {

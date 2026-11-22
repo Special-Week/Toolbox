@@ -11,6 +11,10 @@ mod standard_page;
 #[path = "thermocouple/tolerance.rs"]
 pub(crate) mod tolerance;
 
+pub(crate) const WORKING_KINDS: [&str; 15] = [
+    "B", "E", "J", "K", "N", "R", "S", "T", "C", "D", "G", "L", "LR", "U", "A",
+];
+
 pub(crate) fn slope(kind: &str, t: f64) -> Result<f64, String> {
     let r = reference(kind)?;
     r.segments

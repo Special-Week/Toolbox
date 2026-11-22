@@ -45,9 +45,21 @@ LIBS := -lstdc++ -ld2d1 -ldwrite -lwindowscodecs -lcomctl32 -lcomdlg32 -lole32 -
 LINKFLAGS := -O2 -s $(CPU_FLAGS) -municode -mwindows -static -static-libgcc -Wl,--major-subsystem-version,6,--minor-subsystem-version,1
 RESOURCE_DEPS := resources/Toolbox.rc resources/microtex-fonts.rcinc include/toolbox/resource_ids.h $(wildcard resources/*.ico resources/*.manifest resources/*.json resources/gauges/*.json licenses/*.txt third_party/microtex/res/fonts/*/*.ttf third_party/microtex/res/fonts/*/*/*.ttf)
 
-.PHONY: all
+.PHONY: all test
 .DELETE_ON_ERROR:
 all: $(TARGET)
+
+TEST := $(BUILD)/boundaries.exe
+TEST_OBJECT := $(BUILD)/tests/boundaries.cpp.o
+TEST_MODELS := $(filter-out %/pdf_download.cpp.o,$(filter $(BUILD)/src/models/%,$(CPP_OBJECTS)))
+TEST_OBJECTS := $(TEST_OBJECT) $(TEST_MODELS) $(filter $(BUILD)/src/core/% $(BUILD)/third_party/double-conversion/%,$(CPP_OBJECTS))
+
+test: $(TEST)
+	"$(subst /,\,$(TEST))" "..\tests\boundaries.json"
+
+REPORT_PAGES := $(BUILD)/src/pages/curve_fit.cpp.o $(BUILD)/src/pages/gauges.cpp.o
+$(REPORT_PAGES): CXXFLAGS += -DTOOLBOX_VERSION=\"$(VERSION)\"
+$(REPORT_PAGES): resources/Toolbox.rc
 
 # 并发创建目录时，只有目录仍不存在才视为失败。
 define ensure_dir
@@ -80,4 +92,7 @@ $(TARGET): $(OBJECTS) $(RESOURCE) Makefile
 	$(CC) @$(BUILD)/link.rsp -o "$@"
 	@echo 已生成：$(TARGET)
 
--include $(OBJECTS:.o=.d)
+$(TEST): $(TEST_OBJECTS)
+	$(CXX) $(CPU_FLAGS) -static $(TEST_OBJECTS) -o "$@"
+
+-include $(OBJECTS:.o=.d) $(TEST_OBJECT:.o=.d)

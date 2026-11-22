@@ -39,7 +39,10 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
             ] {
                 o.metric(label, value, unit)
             }
-            o.metric("湿球温度", u.display(r.wet), u.symbol());
+            o.optional("湿球温度", r.wet.map(|t| u.display(t)), u.symbol());
+            if r.wet.is_none() {
+                o.warnings.push("湿球温度低于 −100 °C，超出模型范围。".into());
+            }
         }
         ToolKind::EarBlackbody => {
             let t = i.number("target", 35.)?;

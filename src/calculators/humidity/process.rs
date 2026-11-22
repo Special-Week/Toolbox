@@ -160,17 +160,21 @@ pub(crate) fn steps(
         ));
     }
     lines.push(String::new());
-    if r.vapor == r.saturated {
-        lines.push(format!("湿球温度：水汽分压等于饱和压，t湿 等于环境温度 = {} °C = {} {}。", c(r.wet), c(unit.display(r.wet)), unit.symbol()));
+    if let Some(wet) = r.wet {
+        if r.vapor == r.saturated {
+            lines.push(format!("湿球温度：水汽分压等于饱和压，t湿 等于环境温度 = {} °C = {} {}。", c(wet), c(unit.display(wet)), unit.symbol()));
+        } else {
+            lines.push(format!("湿球温度：在 −100～{} °C 内对 pₛ(t湿) − 0.000662 × p × (t − t湿) = e 执行 100 次二分，并核对反算残差；得到 t湿 = {} °C = {} {}。", n(t), c(wet), c(unit.display(wet)), unit.symbol()));
+        }
+        lines.extend(saturation_steps(wet, "反算湿球温度的饱和水汽压", true)?);
+        let wet_check = website::saturation(wet)? - 0.000662 * p * (t - wet);
+        lines.push(format!(
+            "代入湿球方程，水汽分压校验 = {} Pa（与输入分压末位可能有数值误差）。",
+            c(wet_check)
+        ));
     } else {
-        lines.push(format!("湿球温度：在 −100～{} °C 内对 pₛ(t湿) − 0.000662 × p × (t − t湿) = e 执行 100 次二分，并核对反算残差；得到 t湿 = {} °C = {} {}。", n(t), c(r.wet), c(unit.display(r.wet)), unit.symbol()));
+        lines.push("湿球温度低于 −100 °C，超出模型范围。".to_owned());
     }
-    lines.extend(saturation_steps(r.wet, "反算湿球温度的饱和水汽压", true)?);
-    let wet_check = website::saturation(r.wet)? - 0.000662 * p * (t - r.wet);
-    lines.push(format!(
-        "代入湿球方程，水汽分压校验 = {} Pa（与输入分压末位可能有数值误差）。",
-        c(wet_check)
-    ));
     lines.push(String::new());
     lines.push(format!(
         "水汽体积分数 = e / p = {} / {} = {} L/L。",
@@ -217,6 +221,15 @@ mod tests {
     use super::*;
 
     #[test]
+    fn steps_explain_unavailable_wet_bulb_and_keep_other_values() {
+        let r = website::calculate(-100., 101_325., 0, 50.).unwrap();
+        assert!(r.wet.is_none() && r.vapor > 0.0);
+        let text = steps(-100., 101_325., 0, 50., TemperatureUnit(0), &r).unwrap().join("\n");
+        assert!(text.contains("湿球温度低于 −100 °C"));
+        assert!(text.contains("绝对湿度 ="));
+    }
+
+    #[test]
     fn explains_all_inputs_saturation_branches_and_output_values() {
         for (t, known, value, source) in [
             (20.0, 0, 50.0, "输入相对湿度"),
@@ -242,7 +255,7 @@ mod tests {
                     result.saturated,
                     result.vapor,
                     result.rh,
-                    result.wet,
+                    result.wet.unwrap(),
                     result.volume_fraction,
                     result.ppm,
                     result.absolute,
@@ -369,8 +382,13 @@ mod tests {
                     text.contains("后续计算使用调整后的分压"),
                     r.raw_vapor != r.vapor
                 );
-                let check = website::saturation(r.wet).unwrap() - 0.000662 * pressure * (t - r.wet);
-                assert!((check - vapor).abs() <= 1e-9 * vapor.abs().max(1.0));
+                if let Some(wet) = r.wet {
+                    let check = website::saturation(wet).unwrap() - 0.000662 * pressure * (t - wet);
+                    assert!((check - vapor).abs() <= 1e-9 * vapor.abs().max(1.0));
+                } else {
+                    let minimum = website::saturation(-100.0).unwrap() - 0.000662 * pressure * (t + 100.0);
+                    assert!(vapor < minimum);
+                }
                 checked += 1;
             }
         }

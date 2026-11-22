@@ -1,6 +1,7 @@
 // 限定规范网站来源，校验 PDF 内容并在本地缓存，供下载接口复用。
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
+import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
@@ -314,20 +315,41 @@ export function createPdfCache({
 } = {}) {
   const directory = path.resolve(cacheDirectory);
   const pending = new Map();
+  const verified = new Map();
   let queue = Promise.resolve();
+  const fileVersion = (info) =>
+    [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":");
   async function readCache(standard) {
     const pdf = path.join(directory, standard.key + ".pdf");
     try {
-      const info = await stat(pdf);
+      const info = await stat(pdf, { bigint: true });
       if (!info.isFile() || info.size > MAX_CACHED_PDF_BYTES) return null;
-      const data = await readFile(pdf);
-      let pages;
-      try {
-        pages = await inspectPdf(data);
-      } catch (error) {
-        if (error instanceof PdfError) return null;
-        throw error;
+      const version = fileVersion(info);
+      const previous = verified.get(standard.key);
+      let pages = previous?.version === version ? previous.pages : undefined;
+      if (pages === undefined) {
+        verified.delete(standard.key);
+        const file = await open(pdf, "r");
+        let data;
+        try {
+          if (fileVersion(await file.stat({ bigint: true })) !== version)
+            throw new PdfError("缓存文件正在更新，请重试。", 503);
+          data = await file.readFile();
+          if (fileVersion(await file.stat({ bigint: true })) !== version)
+            throw new PdfError("缓存文件正在更新，请重试。", 503);
+        } finally {
+          await file.close();
+        }
+        try {
+          pages = await inspectPdf(data);
+        } catch (error) {
+          if (error instanceof PdfError) return null;
+          throw error;
+        }
       }
+      verified.delete(standard.key);
+      verified.set(standard.key, { version, pages });
+      if (verified.size > 128) verified.delete(verified.keys().next().value);
       let name = "";
       try {
         const metaPath = path.join(directory, standard.key + ".json");
@@ -349,7 +371,9 @@ export function createPdfCache({
         name,
         filename: defaultFilename(standard.code, name),
         pages,
-        data,
+        pdf,
+        version,
+        size: Number(info.size),
         cache: "HIT",
       };
     } catch (error) {
@@ -383,24 +407,49 @@ export function createPdfCache({
       await atomicWrite(path.join(directory, standard.key + ".pdf"), data);
       return { ...result, cache: "MISS" };
     });
-    queue = job.catch(() => {});
+    queue = job.then(() => {}, () => {});
     return job;
+  }
+  async function prepareOnce(standard) {
+    const running = pending.get(standard.key);
+    if (running) return running;
+    if (pending.size >= 16)
+      throw new PdfError("服务器正在处理其他规范，请稍后重试。", 503);
+    const job = prepare(standard);
+    pending.set(standard.key, job);
+    try {
+      return await job;
+    } finally {
+      if (pending.get(standard.key) === job) pending.delete(standard.key);
+    }
   }
   return {
     directory,
-    async get(input) {
+    async get(input, { stream = false } = {}) {
       const standard = parseDetailLink(input);
-      const running = pending.get(standard.key);
-      if (running) return running;
-      if (pending.size >= 16)
-        throw new PdfError("服务器正在处理其他规范，请稍后重试。", 503);
-      const job = prepare(standard);
-      pending.set(standard.key, job);
-      try {
-        return await job;
-      } finally {
-        if (pending.get(standard.key) === job) pending.delete(standard.key);
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const { pdf, version, size, data, ...meta } = await prepareOnce(standard);
+        if (data) {
+          return stream
+            ? { ...meta, size: data.length, stream: Readable.from([data]) }
+            : { ...meta, data };
+        }
+        let file;
+        try {
+          file = await open(pdf, "r");
+          if (fileVersion(await file.stat({ bigint: true })) !== version) continue;
+          if (!stream) return { ...meta, data: await file.readFile() };
+          // 将已核对版本的同一个句柄交给流，由流负责关闭。
+          const source = file.createReadStream({ end: size - 1 });
+          file = undefined;
+          return { ...meta, size, stream: source };
+        } catch (error) {
+          if (error.code !== "ENOENT") throw error;
+        } finally {
+          await file?.close();
+        }
       }
+      throw new PdfError("缓存文件正在更新，请重试。", 503);
     },
   };
 }

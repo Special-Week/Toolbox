@@ -18,6 +18,8 @@ mod numerics;
 pub(crate) mod pressure;
 mod radiation;
 mod range_method;
+#[cfg(test)]
+mod regression;
 mod rtd;
 pub(crate) mod spline;
 pub(crate) mod sprt;

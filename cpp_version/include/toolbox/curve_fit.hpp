@@ -17,6 +17,7 @@ struct CurveFit {
     static int degree(CurveFitKind model);
     static std::size_t parameterCount(CurveFitKind model);
     double predict(double input) const;
+    std::wstring predictionFormula() const;
     std::vector<std::wstring> process(const std::vector<std::pair<double, double>> &points, bool full) const;
 
   private:

@@ -16,7 +16,7 @@ static void sampleProcess(Page &p, const Values &values, const Statistics &s, bo
     if (s.centered)
         p.processSteps.push_back(L"以首个测量值 x₀ = " + inputNumber(s.origin) + L" 为基准；中心化均值 d̄ = Σ(xᵢ − x₀)/n = " + p.processValue(s.deltaMean) + L"。");
     else
-        p.processSteps.push_back(L"中心化差值溢出，使用缩放均值；残差按 xᵢ − x̄ 计算。");
+        p.processSteps.push_back(L"为避免中间值溢出或下溢，程序在缩放后的数据上计算均值和标准差。下列残差以原单位表示。");
     for (std::size_t i = 0; i < values.size(); ++i) {
         if (separate)
             p.processSteps.push_back(L"");
@@ -291,15 +291,17 @@ void renderErrors(Page &p) {
         p.rightColumn();
         p.check();
         auto s = statistics(v);
-        finite({s.maximum - s.minimum});
+        const double range = s.maximum - s.minimum;
+        const std::wstring rangeText = std::isfinite(range) ? format(range) : L"超出双精度范围";
         double rsd = s.mean == 0 ? 0 : s.sd / std::abs(s.mean) * 100;
-        finite({rsd});
+        const std::wstring rsdText = s.mean == 0 ? L"平均值为 0" :
+                                     std::isfinite(rsd) ? format(rsd) + L" %" : L"超出双精度范围";
         p.metrics(L"统计结果", {{L"测量次数", std::to_wstring(n)},
                                 {L"平均值", format(s.mean)},
                                 {L"样本标准差 s", format(s.sd)},
-                                {L"极差", format(s.maximum - s.minimum)},
+                                {L"极差", rangeText},
                                 {L"平均值标准差 s/√n", format(s.standardError)},
-                                {L"相对标准偏差", s.mean == 0 ? L"平均值为 0" : format(rsd) + L" %"}});
+                                {L"相对标准偏差", rsdText}});
         if (p.collapse("residual", L"各项残差")) {
             for (int i = 0; i < n; ++i) {
                 p.note(L"测量 " + std::to_wstring(i + 1) + L"：" + format(s.residuals[i]));
@@ -308,8 +310,14 @@ void renderErrors(Page &p) {
         p.endSplit();
         sampleProcess(p, v, s, true);
         p.processSteps.push_back(L"");
-        p.processSteps.push_back(L"极差 R = 最大值 − 最小值 = " + inputNumber(s.maximum) + L" − " + inputNumber(s.minimum) + L" = " + p.processValue(s.maximum - s.minimum) + L"；平均值标准差 = s/√n = " + p.processValue(s.sd) + L" / √" + std::to_wstring(n) + L" = " + p.processValue(s.standardError) + L"。");
-        p.processSteps.push_back(s.mean == 0 ? L"平均值为 0，相对标准偏差无定义。" : L"相对标准偏差 = s/|x̄| × 100 = " + p.processValue(s.sd) + L" / |" + p.processValue(s.mean) + L"| × 100 = " + p.processValue(rsd) + L"%。");
+        p.processSteps.push_back(L"极差 R = 最大值 − 最小值 = " + inputNumber(s.maximum) + L" − " + inputNumber(s.minimum) + L" = " + (std::isfinite(range) ? p.processValue(range) : rangeText) + L"；平均值标准差 = s/√n = " + p.processValue(s.sd) + L" / √" + std::to_wstring(n) + L" = " + p.processValue(s.standardError) + L"。");
+        if (s.mean == 0) {
+            p.processSteps.push_back(L"平均值为 0，相对标准偏差无定义。");
+        } else if (std::isfinite(rsd)) {
+            p.processSteps.push_back(L"相对标准偏差 = s/|x̄| × 100 = " + p.processValue(s.sd) + L" / |" + p.processValue(s.mean) + L"| × 100 = " + p.processValue(rsd) + L"%。");
+        } else {
+            p.processSteps.push_back(L"相对标准偏差超出双精度范围。");
+        }
         return;
     }
     if (p.tool.kind == Kind::RangeMethod) {

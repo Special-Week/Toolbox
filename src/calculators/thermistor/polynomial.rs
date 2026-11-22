@@ -22,6 +22,18 @@ impl PolynomialThermistor {
         finite(&[t])?;
         Ok(t)
     }
+    pub(crate) fn temperature_in_bounds(&self, r: f64, min: f64, max: f64) -> Result<f64, String> {
+        let t = self.temperature(r)?;
+        // 反算最后从 K 转为 °C，近零摄氏度的舍入仍由开尔文量级决定。
+        let roundoff = 4.0 * f64::EPSILON * (t + 273.15);
+        Ok(if t < min && min - t <= roundoff {
+            min
+        } else if t > max && t - max <= roundoff {
+            max
+        } else {
+            t
+        })
+    }
     pub fn resistance(&self, t: f64) -> Result<f64, String> {
         if !t.is_finite() || t <= -273.15 {
             return Err("温度必须高于绝对零度".into());

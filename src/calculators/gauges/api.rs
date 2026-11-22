@@ -275,7 +275,7 @@ fn suggestions(items: Vec<String>) -> Vec<Value> {
     items.iter().map(|s| json!({"value":s,"label":s})).collect()
 }
 /// 报告只传显示值；所有计算、修约和英寸附注由共享数值模块完成。
-pub(crate) fn page(kind: GaugeKind, state: Value, changed: &str) -> Value {
+pub(crate) fn page(id: &str, kind: GaugeKind, state: Value, changed: &str) -> Value {
     let mut form = Form {
         state: if state.is_object() { state } else { json!({}) },
         fields: vec![],
@@ -287,7 +287,7 @@ pub(crate) fn page(kind: GaugeKind, state: Value, changed: &str) -> Value {
         Ok(r) => (
             json!({"title":r.title,"metrics":r.metrics.iter().map(|(k,c)|json!({"label":k,"value":c.display})).collect::<Vec<_>>(),
             "tables":r.tables.iter().map(|t|json!({"title":t.title,"headings":t.headings,"rows":t.rows.iter().map(|r|r.iter().map(|c|&c.display).collect::<Vec<_>>()).collect::<Vec<_>>()})).collect::<Vec<_>>(),
-            "notes":r.notes,"process":r.process,"text":r.text(explanation,&convention)}),
+            "notes":r.notes,"process":r.process,"text":r.text(id,&form.state.to_string(),explanation,&convention)}),
             String::new(),
         ),
         Err(e) => (Value::Null, e),

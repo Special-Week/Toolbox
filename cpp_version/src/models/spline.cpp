@@ -207,20 +207,21 @@ std::vector<std::wstring> Spline::processAt(double x, bool full) const {
         L"Y(u) = a + bu + cu² + du³；本段系数 a、b、c、d = " + inputNumber(segment.y.a) + L"、" + inputNumber(segment.y.b) + L"、" + inputNumber(segment.y.c) + L"、" + inputNumber(segment.y.d) + L"。",
         L"恢复坐标 y = y₀ + sᵧY(u) = " + inputNumber(origin_.y) + L" + " + c(scale_.y) + L" × " + c(normalized) + L" = " + c(result) + L"；多项式及恢复坐标使用融合乘加。"};
 }
-std::size_t sampleCount(double lo, double hi, double step) {
+static std::size_t boundedSampleCount(double lo, double hi, double step, std::size_t limit,
+                                      const char *limitError) {
     finite({lo, hi, step});
     require(hi > lo && step > 0, "曲线最小 x 必须小于最大 x，步进必须大于 0");
     double n = (hi - lo) / step;
-    require(std::isfinite(n), "采样点最多 5000000 个");
+    require(std::isfinite(n) && n <= double(limit), limitError);
     double nearest = std::round(n);
     if (std::abs(n - nearest) <= 8 * eps * std::max(n, 1.)) {
         n = nearest;
     }
-    require(n <= 4999999, "采样点最多 5000000 个，请增大步进或缩小范围");
     auto count = std::max<std::size_t>(2, std::size_t(std::ceil(n)) + 1);
     if (count > 2 && sampleX(lo, hi, step, count, count - 2) >= hi) {
         --count;
     }
+    require(count <= limit, limitError);
     double resolution = std::max(std::nextafter(lo, hi) - lo, hi - std::nextafter(hi, lo));
     double remainder = std::abs(std::fmod(lo, resolution));
     bool ties = step == resolution && remainder > 0 && remainder == resolution * .5;
@@ -242,26 +243,19 @@ std::size_t sampleCount(double lo, double hi, double step) {
     }
     return count;
 }
+std::size_t sampleCount(double lo, double hi, double step) {
+    return boundedSampleCount(lo, hi, step, 5000000, "采样点最多 5000000 个，请增大步进或缩小范围");
+}
+
 double sampleX(double lo, double hi, double step, std::size_t count, std::size_t index) {
     return index + 1 == count ? hi : std::fma(double(index), step, lo);
 }
 Values divisionPoints(double start, double end, double step) {
-    finite({start, end, step});
-    require(start < end && step > 0, "起点须小于终点，步长须大于 0");
-    double count = std::floor((end - start) / step);
-    require(std::isfinite(count) && count <= 49999, "分度表最多 50000 行，请增大步长");
-    Values p;
-    for (std::size_t i = 0; i <= std::size_t(count); ++i) {
-        double x = start + double(i) * step;
-        require(p.empty() || p.back() < x, "步长小于当前数值的可分辨精度");
-        if (x <= end) {
-            p.push_back(x);
-        }
+    auto count = boundedSampleCount(start, end, step, 50000, "分度表最多 50000 行，请增大步长");
+    Values p(count);
+    for (std::size_t i = 0; i < count; ++i) {
+        p[i] = sampleX(start, end, step, count, i);
     }
-    if (p.empty() || p.back() < end) {
-        p.push_back(end);
-    }
-    require(p.size() <= 50000, "分度表最多 50000 行");
     return p;
 }
 } // 命名空间 toolbox

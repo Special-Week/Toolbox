@@ -65,14 +65,12 @@ void renderSensors(Page &p) {
     if (p.tool.kind == Kind::WorkingThermocouple) {
         p.beginSplit(0.42f);
         p.heading(L"热电偶参数");
-        const std::vector<std::string> codes{"B", "E", "J", "K", "N",  "R", "S", "T",
-                                             "C", "D", "G", "L", "LR", "U", "A"};
         std::vector<std::wstring> names;
-        for (auto &k : codes) {
+        for (const auto k : workingThermocoupleKinds) {
             names.push_back(wide(k) + L" 型");
         }
         int selected = p.select("type", L"分度号", names, 3);
-        auto kind = codes[selected];
+        const std::string kind = workingThermocoupleKinds[selected];
         TemperatureUnit unit{p.select("unit", L"温度单位", {L"°C", L"K", L"°F"})};
         int mode = p.select("direction", L"计算方式", {L"温度 → 热电势", L"热电势 → 温度"});
         std::string uk = std::to_string(unit.index);
@@ -85,8 +83,7 @@ void renderSensors(Page &p) {
         p.rightColumn();
         p.check();
         double ce = thermoEmf(kind, cold),
-               roundoff = std::max(std::abs(input), std::abs(ce)) * (4 * std::numeric_limits<double>::epsilon()),
-               t = mode == 0 ? unit.celsiusInBounds(input, bounds) : thermoTemperature(kind, input + ce, roundoff),
+               t = mode == 0 ? unit.celsiusInBounds(input, bounds) : thermoTemperatureFromMeasured(kind, input, ce),
                emf = mode == 0 ? thermoEmf(kind, t) - ce : input;
         p.metrics(L"计算结果", {{L"热端温度", format(unit.display(t)) + L" " + unit.symbol()},
                                 {L"测得热电势", format(emf) + L" mV"},

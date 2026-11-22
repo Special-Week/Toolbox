@@ -166,12 +166,13 @@ Statistics statistics(const Values &values) {
     double minimum = *std::min_element(values.begin(), values.end()),
            maximum = *std::max_element(values.begin(), values.end());
     Values differences, residuals;
-    bool valid = true;
+    const double scale = std::max(std::abs(minimum), std::abs(maximum));
+    bool valid = scale == 0 || scale >= std::numeric_limits<double>::min() * count;
     for (double v : values) {
         differences.push_back(v - values[0]);
         valid = valid && std::isfinite(differences.back());
     }
-    double mean, delta = 0, sd = 0;
+    double mean = 0, delta = 0, sd = 0, standardError = 0;
     const double factor = std::sqrt(count - 1);
     if (valid) {
         Values divided;
@@ -180,15 +181,20 @@ Statistics statistics(const Values &values) {
         }
         delta = compensated(divided);
         mean = values[0] + delta;
-        Values scaled;
         for (double d : differences) {
             double residual = d - delta;
             residuals.push_back(residual);
-            scaled.push_back(residual / factor);
+            valid = valid && std::isfinite(residual);
         }
+        valid = valid && std::isfinite(mean);
+    }
+    if (valid) {
+        Values scaled;
+        for (double residual : residuals) scaled.push_back(residual / factor);
         sd = rss(scaled);
+        standardError = sd / std::sqrt(count);
     } else {
-        double scale = std::max(std::abs(minimum), std::abs(maximum));
+        residuals.clear();
         Values normalized;
         for (double v : values) {
             normalized.push_back((v / scale) / count);
@@ -200,10 +206,12 @@ Statistics statistics(const Values &values) {
             residuals.push_back(v - mean);
             scaled.push_back(((v / scale) - normalizedMean) / factor);
         }
-        sd = rss(scaled) * scale;
+        const double normalizedSd = rss(scaled);
+        sd = normalizedSd * scale;
+        standardError = (normalizedSd / std::sqrt(count)) * scale;
     }
     finite({mean, sd, minimum, maximum});
-    return {mean, sd, minimum, maximum, sd / std::sqrt(count), valid, values[0], delta, residuals};
+    return {mean, sd, minimum, maximum, standardError, valid, values[0], delta, residuals};
 }
 double rangeCoefficient(std::size_t n) {
     static const double c[] = {1.13, 1.69, 2.06, 2.33, 2.53, 2.70, 2.85, 2.97};

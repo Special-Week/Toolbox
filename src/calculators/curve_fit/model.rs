@@ -146,6 +146,19 @@ fn original_coefficients(
 }
 
 impl CurveFit {
+    pub(crate) fn prediction_formula(&self) -> String {
+        let coefficients = self
+            .normalized_coefficients
+            .iter()
+            .map(f64::to_string)
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "X = (x − ({})) / {}\nŷ = ({}) + {} × P(X)\nP 的升幂系数 = [{coefficients}]\n使用秦九韶法求 P(X)，有条件时使用融合乘加。",
+            self.x.origin, self.x.scale, self.y.origin, self.y.scale
+        )
+    }
+
     pub(crate) fn process(&self, points: &[(f64, f64)]) -> Vec<String> {
         use crate::calculators::common::{
             format_process_computed as c, format_process_number as n,

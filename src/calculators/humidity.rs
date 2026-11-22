@@ -126,7 +126,11 @@ impl ToolboxApp {
                                 ("比湿", format!("{} g/kg", format_number(r.specific))),
                                 ("混合比", format!("{} g/kg", format_number(r.mixing))),
                                 ("含水量", format!("{} g/Nm³", format_number(r.normal))),
-                                ("湿球温度", temp(Some(r.wet))),
+                                ("湿球温度", if r.wet.is_some() {
+                                    temp(r.wet)
+                                } else {
+                                    "低于 −100 °C，超出模型范围".into()
+                                }),
                             ]);
                             render_metrics(ui, "换算结果", &metrics);
                             process_lines = Some(steps);

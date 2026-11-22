@@ -121,6 +121,8 @@ pub(crate) struct Output {
     pub details: Value,
     pub total: usize,
     pub equation: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub prediction_formula: String,
 }
 #[derive(Serialize)]
 pub(crate) struct Metric {
@@ -160,10 +162,7 @@ pub(crate) fn division(
     if unit.celsius(start) < bounds.0 - 1e-9 || unit.celsius(end) > bounds.1 + 1e-9 {
         return Err("分度表超出所选温区".into());
     }
-    let count = crate::calculators::spline::model::planned_sample_count(start, end, step)?;
-    if count > 50_000 {
-        return Err("分度表最多 50000 行，请增大步进".into());
-    }
+    let count = crate::calculators::spline::model::division_sample_count(start, end, step)?;
     out.headings = vec![
         format!("温度 ({})", unit.symbol()),
         format!("信号 ({signal})"),
@@ -187,7 +186,11 @@ pub(crate) fn division(
         ]);
     }
     for i in 0..=200 {
-        let x = start + (end - start) * i as f64 / 200.0;
+        let x = if i == 200 {
+            end
+        } else {
+            (end - start).mul_add(i as f64 / 200.0, start).min(end)
+        };
         out.curve
             .push([x, curve(unit.celsius(x).clamp(bounds.0, bounds.1))?]);
     }

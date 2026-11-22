@@ -73,7 +73,7 @@ mod explanation_catalog_tests {
             match tool.kind {
                 ToolKind::PdfDownload => continue,
                 ToolKind::Gauge(kind) => {
-                    let page = calculators::gauges::api::page(kind, json!({}), "");
+                    let page = calculators::gauges::api::page(tool.id, kind, json!({}), "");
                     assert!(
                         page["error"].as_str().unwrap_or("").is_empty(),
                         "{}: {}",
@@ -166,7 +166,7 @@ mod explanation_catalog_tests {
                 json!({"side":"环规（外螺纹）"}),
             ),
         ] {
-            let page = calculators::gauges::api::page(kind, state, "");
+            let page = calculators::gauges::api::page("test", kind, state, "");
             assert!(page["error"].as_str().unwrap_or("").is_empty(), "{page}");
             let text = page["report"]["process"]
                 .as_array()
@@ -291,12 +291,7 @@ pub fn calculate(id: &str, input: &str) -> Result<String, JsValue> {
 /// 大量样条采样按块返回，浏览器可逐块写入文件并在块间响应取消。
 #[wasm_bindgen]
 pub fn spline_chunk(input: &str, offset: usize, limit: usize) -> Result<String, JsValue> {
-    curves::spline_csv(
-        &Input::new(input).map_err(|e| JsValue::from_str(&e))?,
-        offset,
-        limit,
-    )
-    .map_err(|e| JsValue::from_str(&e))
+    curves::spline_csv(input, offset, limit).map_err(|e| JsValue::from_str(&e))
 }
 
 #[wasm_bindgen]
@@ -340,5 +335,5 @@ pub fn gauge_page(id: &str, input: &str, changed: &str) -> Result<String, JsValu
     };
     let state: Value =
         serde_json::from_str(input).map_err(|e| JsValue::from_str(&e.to_string()))?;
-    Ok(calculators::gauges::api::page(kind, state, changed).to_string())
+    Ok(calculators::gauges::api::page(id, kind, state, changed).to_string())
 }

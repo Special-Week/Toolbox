@@ -128,6 +128,13 @@ double thermoTemperature(const std::string &kind, double e, double roundoff) {
             "该电势位于分段曲线的不连续区间，无法可靠反算温度");
     return t;
 }
+double thermoTemperatureFromMeasured(const std::string &kind, double measured, double coldEmf,
+                                     double correction) {
+    const double roundoff = std::max({std::abs(measured), std::abs(coldEmf), std::abs(correction)}) *
+                            (4 * std::numeric_limits<double>::epsilon());
+    return thermoTemperature(kind, measured + correction + coldEmf, roundoff);
+}
+
 std::vector<Tolerance> thermoTolerances(const std::string &kind, double t) {
     struct Def {
         const wchar_t *name;

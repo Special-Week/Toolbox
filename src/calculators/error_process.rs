@@ -29,7 +29,7 @@ pub(crate) fn samples(values: &[f64], stats: &Statistics, separate_points: bool)
     if let Some((origin, delta_mean)) = stats.center {
         lines.push(format!("计算采用首个测量值 x₀ = {}，中心化均值 d̄ = Σ(xᵢ − x₀)/n = {}；残差按 (xᵢ − x₀) − d̄ 计算。", n(origin), c(delta_mean)));
     } else {
-        lines.push("中心化差值溢出，程序使用缩放均值；残差按 xᵢ − x̄ 计算。".to_owned());
+        lines.push("为避免中间值溢出或下溢，程序在缩放后的数据上计算均值和标准差。下列残差以原单位表示。".to_owned());
     }
     for (i, (value, residual)) in values.iter().zip(&stats.residuals).enumerate() {
         if separate_points {

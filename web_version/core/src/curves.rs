@@ -6,6 +6,7 @@ use crate::calculators::{
 };
 use crate::catalog::ToolKind;
 use serde_json::json;
+use std::cell::RefCell;
 
 pub(crate) const SPLINE_POINTS: &[(f64, f64)] = &[
     (250., 2002.),
@@ -35,6 +36,7 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
         let fit = CurveFit::calculate(&pts, kind)?;
         o.process = fit.process(&pts);
         o.coefficients = fit.coefficients.clone();
+        o.prediction_formula = fit.prediction_formula();
         o.equation = fit
             .coefficients
             .iter()
@@ -105,7 +107,11 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
         o.rows.push(vec![json!(x), json!(m.y_at_x(x)?)]);
     }
     for j in 0..=240 {
-        let x = start + (end - start) * j as f64 / 240.;
+        let x = if j == 240 {
+            end
+        } else {
+            (end - start).mul_add(j as f64 / 240.0, start).min(end)
+        };
         o.curve.push([x, m.y_at_x(x)?]);
     }
     o.points = pts.iter().map(|p| [p.x, p.y]).collect();
@@ -123,20 +129,25 @@ pub(crate) fn curve_value(id: &str, i: &Input, x: f64) -> Result<f64, String> {
             let kind = FitKind::from_index(i.index("model", 0, 4)?);
             CurveFit::calculate(&points, kind)?.predict(x)
         }
-        "bspline_interpolation" => spline_model(i)?.1.y_at_x(x),
+        "bspline_interpolation" => spline_geometry(i)?.1.y_at_x(x),
         _ => Err("此工具不支持曲线悬停取值".into()),
     }
 }
 
 type SplineModelData = (Vec<Point>, UniformCubicSpline, f64, f64, f64, usize);
 
-fn spline_model(i: &Input) -> Result<SplineModelData, String> {
+fn spline_geometry(i: &Input) -> Result<(Vec<Point>, UniformCubicSpline), String> {
     let points = i
         .points(SPLINE_POINTS, 2, 500)?
         .into_iter()
         .map(|(x, y)| Point { x, y })
         .collect::<Vec<_>>();
     let m = UniformCubicSpline::interpolate(&points)?;
+    Ok((points, m))
+}
+
+fn spline_model(i: &Input) -> Result<SplineModelData, String> {
+    let (points, m) = spline_geometry(i)?;
     let start = i.number("start", points[0].x)?;
     let end = i.number("end", points.last().ok_or("缺少 Q 点")?.x)?;
     let step = i.number("step", 0.5)?;
@@ -146,24 +157,50 @@ fn spline_model(i: &Input) -> Result<SplineModelData, String> {
     Ok((points, m, start, end, step, total))
 }
 
-pub(crate) fn spline_csv(i: &Input, offset: usize, limit: usize) -> Result<String, String> {
+thread_local! {
+    // 导出请求携带同一份输入快照；页面改参或悬停不影响正在写出的分块。
+    static SPLINE_EXPORT: RefCell<Option<(String, SplineModelData)>> = const { RefCell::new(None) };
+}
+
+pub(crate) fn spline_csv(input: &str, offset: usize, limit: usize) -> Result<String, String> {
     use std::fmt::Write;
     if limit > 10_000 {
         return Err("每批采样最多 10000 行".into());
     }
-    let (_, m, start, end, step, total) = spline_model(i)?;
-    let stop = offset.saturating_add(limit).min(total);
-    let mut text = String::new();
-    for j in offset..stop {
-        let x = sample_x(start, end, step, total, j);
-        writeln!(text, "{x},{}", m.y_at_x(x)?).map_err(|_| "CSV 文本生成失败")?;
-    }
-    Ok(text)
+    SPLINE_EXPORT.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.as_ref().is_none_or(|(key, _)| key != input) {
+            let plan = spline_model(&Input::new(input)?)?;
+            *cache = Some((input.to_owned(), plan));
+        }
+        let &(_, ref m, start, end, step, total) = &cache.as_ref().unwrap().1;
+        let stop = offset.saturating_add(limit).min(total);
+        let mut text = String::new();
+        for j in offset..stop {
+            let x = sample_x(start, end, step, total, j);
+            writeln!(text, "{x},{}", m.y_at_x(x)?).map_err(|_| "CSV 文本生成失败")?;
+        }
+        Ok(text)
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn spline_csv_uses_the_requested_snapshot_across_chunks() {
+        let initial = r#"{"points":[[0,0],[2,2]],"step":1}"#;
+        let edited = r#"{"points":[[0,2],[2,4]],"step":0}"#;
+        assert_eq!(spline_csv(initial, 0, 1).unwrap(), "0,0\n");
+        let edited_input = Input::new(edited).unwrap();
+        assert_eq!(curve_value("bspline_interpolation", &edited_input, 1.).unwrap(), 3.);
+        assert!(spline_csv(edited, 0, 1).is_err());
+        assert_eq!(spline_csv(initial, 1, 10).unwrap(), "1,1\n2,2\n");
+        let edited = r#"{"points":[[0,2],[2,4]],"step":1}"#;
+        assert_eq!(spline_csv(edited, 2, 1).unwrap(), "2,4\n");
+        assert_eq!(spline_csv(initial, 2, 1).unwrap(), "2,2\n");
+    }
 
     #[test]
     fn curve_hover_uses_the_same_fit_and_spline_models() {

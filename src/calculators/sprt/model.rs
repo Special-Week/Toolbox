@@ -118,7 +118,8 @@ impl Sprt {
         finite(&[t])?;
         Ok(t)
     }
-    pub fn temperature(&self, r: f64) -> Result<f64, String> {
+    #[cfg(test)]
+    fn temperature(&self, r: f64) -> Result<f64, String> {
         self.temperature_branch(r, r >= self.rtp)
     }
     pub fn resistance(&self, t: f64) -> Result<f64, String> {

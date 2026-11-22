@@ -10,10 +10,16 @@ use eframe::egui::{self, CornerRadius, FontId, RichText, Stroke, Vec2};
 use std::ops::Range;
 
 mod chart;
-mod model;
+pub(super) mod model;
 use model::{CurveFit, FitKind, MAX_POINTS};
 
 const ROWS_PER_PAGE: usize = 10;
+const MODEL_NAMES: [&str; 4] = [
+    "一次（含常数项）",
+    "一次（过原点）",
+    "二次多项式",
+    "三次多项式",
+];
 // 示例以 x/y 成对保存，界面不限定浓度、吸光度等具体物理量。
 const EXAMPLE: [(&str, &str); 6] = [
     ("0", "0.197"),
@@ -116,7 +122,10 @@ fn optional_number(value: Option<f64>, missing: &str) -> String {
 
 fn copy_report(fit: &CurveFit, points: &[(f64, f64)], x_label: &str, y_label: &str) -> String {
     let mut report = format!(
-        "校准曲线拟合\n{}\n输入：{x_label}\n响应：{y_label}\n",
+        "校准曲线拟合\n软件版本：Toolbox Rust {}\n拟合模型：{}\n数值精度：保留计算精度。\n\n归一化预测式（用于复算）\n{}\n\n原坐标展开式（供参考）\n{}\n输入：{x_label}\n响应：{y_label}\n",
+        env!("CARGO_PKG_VERSION"),
+        MODEL_NAMES[fit.kind as usize],
+        fit.prediction_formula(),
         equation(fit, true)
     );
     for (power, value) in fit.coefficients.iter().enumerate() {
@@ -309,12 +318,7 @@ fn render_input(app: &mut ToolboxApp, ui: &mut egui::Ui, tool: &ToolDef) -> Curv
         tool,
         "model",
         "拟合模型",
-        &[
-            "一次（含常数项）",
-            "一次（过原点）",
-            "二次多项式",
-            "三次多项式",
-        ],
+        &MODEL_NAMES,
         0,
     ));
     egui::CollapsingHeader::new("坐标名称与单位（可选）")

@@ -15,15 +15,15 @@ import {
   watch,
 } from "vue";
 import type { Catalog, Result, State, Tool } from "./types";
-import { Engine } from "./engine";
+import { changePressureUnit, Engine } from "./engine";
 import { schema, initialize, adjust } from "./schema";
 import { decimal, display, download } from "./format";
-import { resultCsv } from "./export";
+import { calculationMetadata, resultCsv } from "./export";
 import { calculationNote } from "./notes";
 import CalculationProcess from "./components/CalculationProcess.vue";
 import FormulaText from "./components/FormulaText.vue";
 import { version } from "../package.json";
-import { INPUT_STORAGE_KEY, rememberedInputs } from "./input-history";
+import { readRememberedInputs, saveChangedInputs } from "./input-history";
 import FieldEditor from "./components/FieldEditor.vue";
 import QuickUncertainty from "./components/QuickUncertainty.vue";
 import ResultantComponents from "./components/ResultantComponents.vue";
@@ -231,7 +231,7 @@ const collapsed = ref(false);
 const expanded = reactive(new Set<string>());
 const states = reactive<Record<string, State>>({});
 const result = ref<Result | null>(null);
-let curveSnapshot: { tool: string; input: State } | null = null;
+let resultSnapshot: { tool: string; input: State } | null = null;
 const busy = ref(false);
 const error = ref("");
 const message = ref("");
@@ -349,7 +349,8 @@ const equation = computed(() => {
 const logo = import.meta.env.BASE_URL + "toolbox.svg";
 let timer: ReturnType<typeof setTimeout> | undefined;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
-let lastSavedInputs = "";
+const savedInputs = new Map<string, string>();
+let pressureChange = 0;
 let revision = 0;
 const inputGeneration = ref(0);
 
@@ -359,10 +360,11 @@ function open(tool: Tool | null, hash = true) {
     window.scrollTo({ top: 0, behavior: "instant" });
     return;
   }
+  ++pressureChange;
   selected.value = tool;
   inputScroll = null;
   result.value = null;
-  curveSnapshot = null;
+  resultSnapshot = null;
   error.value = "";
   message.value = "";
   mobileNav.value = false;
@@ -419,30 +421,17 @@ async function change(key: string, value: unknown) {
     )
   ) {
     const state = current.value;
-    const from = Number(state.pressureUnit);
-    const to = Number(value);
-    const names = [
-      "low",
-      "high",
-      "refLow",
-      "refHigh",
-      ...(selected.value.kind === "transmitter" && Number(state.direction) === 0
-        ? ["value"]
-        : []),
-    ].filter((k) => state[k] !== undefined && String(state[k]).trim());
+    const request = ++pressureChange;
+    const transmitter = selected.value.kind === "transmitter";
+    const isCurrent = () => request === pressureChange && state === current.value &&
+      (!transmitter || Number(state.family ?? 0) === 0);
     try {
-      const values = await engine.request<string[]>("convertPressure", {
-        source: from,
-        target: to,
-        values: names.map((k) => state[k]),
-      });
-      names.forEach((k, j) => (state[k] = values[j]));
-      state[key] = value;
-      return;
+      await changePressureUnit(state, value, transmitter, isCurrent,
+        (input) => engine.request<string[]>("convertPressure", input));
     } catch (e) {
-      message.value = e instanceof Error ? e.message : String(e);
-      return;
+      if (isCurrent()) message.value = e instanceof Error ? e.message : String(e);
     }
+    return;
   }
   current.value[key] = value;
   adjust(selected.value, current.value, key, catalog.value);
@@ -464,10 +453,7 @@ function saveNow() {
   clearTimeout(saveTimer);
   if (!catalog.value) return;
   try {
-    const text = JSON.stringify(rememberedInputs(catalog.value.tools, states));
-    if (text === lastSavedInputs) return;
-    localStorage.setItem(INPUT_STORAGE_KEY, text);
-    lastSavedInputs = text;
+    saveChangedInputs(catalog.value.tools, states, savedInputs, localStorage);
   } catch {
     /* 存储不可用时继续保留本次会话输入。 */
   }
@@ -499,14 +485,14 @@ watch(
           input,
         });
         if (version === revision) {
-          curveSnapshot = { tool: tool.id, input };
+          resultSnapshot = { tool: tool.id, input };
           result.value = value;
           error.value = "";
         }
       } catch (e) {
         if (version === revision) {
           result.value = null;
-          curveSnapshot = null;
+          resultSnapshot = null;
           error.value = e instanceof Error ? e.message : String(e);
         }
       } finally {
@@ -519,7 +505,7 @@ watch(
 );
 
 async function curveValue(x: number): Promise<number> {
-  const snapshot = curveSnapshot;
+  const snapshot = resultSnapshot;
   if (!snapshot) throw new Error("曲线数据不可用");
   return engine.request<number>("curveValue", { ...snapshot, x });
 }
@@ -534,7 +520,7 @@ function reset() {
     ++revision;
     ++inputGeneration.value;
     result.value = null;
-    curveSnapshot = null;
+    resultSnapshot = null;
     error.value = "";
     states[selected.value.id] = {};
     initialize(selected.value, states[selected.value.id], catalog.value);
@@ -551,16 +537,13 @@ function useCalibration(archive: CalibrationArchive) {
 function reload() {
   window.location.reload();
 }
-function report() {
-  if (!selected.value || !result.value) return "";
-  const r = result.value;
-  const lines = [
-    selected.value.name,
-    "",
-    `输入参数：${JSON.stringify(current.value)}`,
-    "",
-  ];
-  if (r.equation) lines.push("拟合方程：y = " + r.equation, "");
+function report(tool: Tool, r: Result, input: State) {
+  const note = calculationNote(tool, input);
+  const lines = calculationMetadata(tool, input).map(([label, value]) => `${label}：${value}`);
+  lines.push("");
+  if (r.prediction_formula)
+    lines.push("归一化预测式（用于复算）", r.prediction_formula, "");
+  if (r.equation) lines.push("原坐标展开式（供参考）：y = " + r.equation, "");
   for (const m of r.metrics)
     lines.push(
       `${m.label}\t${typeof m.value === "number" ? decimal(m.value) : (m.value ?? "未定义")}\t${m.unit}`,
@@ -594,19 +577,22 @@ function report() {
       ),
     );
   if (r.warnings.length) lines.push("", ...r.warnings);
-  lines.push("", "计算说明", activeNote.value.note);
-  if (activeNote.value.formula)
-    lines.push("", "详细公式与取值", activeNote.value.formula);
+  lines.push("", "计算说明", note.note);
+  if (note.formula)
+    lines.push("", "详细公式与取值", note.formula);
   return lines.join("\n");
 }
 async function copy() {
+  const tool = selected.value;
+  if (!tool || !result.value || busy.value || resultSnapshot?.tool !== tool.id) return;
+  const text = report(tool, result.value, resultSnapshot.input);
   try {
-    await navigator.clipboard.writeText(report());
+    await navigator.clipboard.writeText(text);
     message.value = "已复制结果。";
     showToast("已复制完整计算结果");
   } catch {
     download(
-      new Blob([report()], { type: "text/plain;charset=utf-8" }),
+      new Blob([text], { type: "text/plain;charset=utf-8" }),
       "toolbox-results.txt",
     );
     message.value = "无法复制，已下载结果文本。";
@@ -638,9 +624,12 @@ type PickerWindow = Window & {
   ) => Promise<{ createWritable(): Promise<WritableFile> }>;
 };
 async function exportCsv() {
-  if (!selected.value || !result.value || busy.value || exporting.value) return;
   const tool = selected.value;
-  const snapshot = JSON.parse(JSON.stringify(current.value));
+  if (
+    !tool || !result.value || busy.value || exporting.value ||
+    resultSnapshot?.tool !== tool.id
+  ) return;
+  const snapshot = resultSnapshot.input;
   const r = result.value;
   exporting.value = true;
   cancelled = false;
@@ -650,7 +639,7 @@ async function exportCsv() {
   try {
     if (tool.kind !== "spline") {
       download(
-        new Blob([resultCsv(tool, r, activeNote.value)], {
+        new Blob([resultCsv(tool, r, snapshot, calculationNote(tool, snapshot))], {
           type: "text/csv;charset=utf-8",
         }),
         tool.id + ".csv",
@@ -718,8 +707,11 @@ onMounted(async () => {
     const c = await engine.request<Catalog>("catalog");
     catalog.value = c;
     try {
-      const saved = JSON.parse(localStorage.getItem(INPUT_STORAGE_KEY) ?? "{}");
-      Object.assign(states, rememberedInputs(c.tools, saved));
+      const saved = readRememberedInputs(c.tools, localStorage);
+      for (const [id, state] of Object.entries(saved)) {
+        savedInputs.set(id, JSON.stringify(state));
+      }
+      Object.assign(states, saved);
     } catch {
       /* 损坏或旧版输入不阻碍网站启动。 */
     }

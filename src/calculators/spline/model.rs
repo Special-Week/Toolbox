@@ -448,6 +448,32 @@ fn invert(polynomial: Cubic, target: f64, mut lower: f64, mut upper: f64) -> Res
 }
 
 pub(crate) fn planned_sample_count(minimum: f64, maximum: f64, step: f64) -> Result<usize, String> {
+    bounded_sample_count(
+        minimum,
+        maximum,
+        step,
+        MAX_SAMPLE_COUNT,
+        "采样点最多为 5000000 个，请增大步进或缩小范围",
+    )
+}
+
+pub(crate) fn division_sample_count(minimum: f64, maximum: f64, step: f64) -> Result<usize, String> {
+    bounded_sample_count(
+        minimum,
+        maximum,
+        step,
+        50_000,
+        "分度表最多 50000 行，请增大步长",
+    )
+}
+
+fn bounded_sample_count(
+    minimum: f64,
+    maximum: f64,
+    step: f64,
+    limit: usize,
+    limit_error: &str,
+) -> Result<usize, String> {
     if !minimum.is_finite() || !maximum.is_finite() || !step.is_finite() {
         return Err("采样范围和步进必须是有限数值".to_owned());
     }
@@ -455,8 +481,8 @@ pub(crate) fn planned_sample_count(minimum: f64, maximum: f64, step: f64) -> Res
         return Err("采样范围无效或步进不大于 0".to_owned());
     }
     let intervals = (maximum - minimum) / step;
-    if !intervals.is_finite() {
-        return Err("采样点最多为 5000000 个，请增大步进或缩小范围".to_owned());
+    if !intervals.is_finite() || intervals > limit as f64 {
+        return Err(limit_error.to_owned());
     }
     let nearest = intervals.round();
     let intervals = if (intervals - nearest).abs() <= 8.0 * f64::EPSILON * intervals.max(1.0) {
@@ -464,13 +490,13 @@ pub(crate) fn planned_sample_count(minimum: f64, maximum: f64, step: f64) -> Res
     } else {
         intervals
     };
-    if intervals > (MAX_SAMPLE_COUNT - 1) as f64 {
-        return Err("采样点最多为 5000000 个，请增大步进或缩小范围".to_owned());
-    }
     let mut count = (intervals.ceil() as usize + 1).max(2);
     // The last regular sample can round to the forced endpoint.
     if count > 2 && sample_x(minimum, maximum, step, count, count - 2) >= maximum {
         count -= 1;
+    }
+    if count > limit {
+        return Err(limit_error.to_owned());
     }
     let resolution = (minimum.next_up() - minimum).max(maximum - maximum.next_down());
     let remainder = (minimum % resolution).abs();

@@ -143,7 +143,7 @@ void standardCouplePage(Page &p) {
                                        bounds);
     p.rightColumn();
     p.check();
-    double ce = model.emf(cold),
+    double ce = model.referenceEndEmf(cold),
            t = direction == 0 ? unit.celsiusInBounds(input, bounds) : model.temperature(input + ce),
            e = direction == 0 ? model.emf(t) - ce : input;
     auto slope = model.slope(t);

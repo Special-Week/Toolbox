@@ -105,15 +105,17 @@ onUnmounted(() => {
 });
 
 async function copy() {
-  if (!page.value?.report) return;
+  if (busy.value || !page.value?.report) return;
+  const { text } = page.value.report;
+  const filename = props.tool.id + ".txt";
   try {
-    await navigator.clipboard.writeText(page.value.report.text);
+    await navigator.clipboard.writeText(text);
     message.value = "已复制完整结果";
     emit("toast", "已复制量规完整结果");
   } catch {
     download(
-      new Blob([page.value.report.text], { type: "text/plain;charset=utf-8" }),
-      props.tool.id + ".txt",
+      new Blob([text], { type: "text/plain;charset=utf-8" }),
+      filename,
     );
     message.value = "无法复制，已下载结果文本。";
   }

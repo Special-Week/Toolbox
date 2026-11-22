@@ -65,8 +65,11 @@ Humidity humidity(double t, double p, int known, double value) {
         h.frost = 272.62 * z / (22.46 - z);
     }
     auto wetEquation = [&](double wet) { return saturation(wet) - .000662 * p * (t - wet); };
-    // 与 Rust 共用同一有效区间：湿球无连续解时整体报错，不返回不完整的计算结果。
-    h.wet = h.vapor == h.saturated ? t : inverse(wetEquation, h.vapor, -100, t);
+    if (h.vapor == h.saturated) {
+        h.wet = t;
+    } else if (h.vapor >= wetEquation(-100)) {
+        h.wet = inverse(wetEquation, h.vapor, -100, t);
+    }
     h.volumeFraction = h.vapor / p;
     h.ppm = h.vapor / (p - h.vapor) * 1e6;
     h.mass = h.ppm * 18.0152 / 28.959;
@@ -74,7 +77,7 @@ Humidity humidity(double t, double p, int known, double value) {
     h.normal = h.absolute * (t + 273.15) * 101325 / (273.15 * p);
     h.specific = h.mass / (1e6 + h.mass) * 1000;
     h.mixing = h.mass / 1000;
-    finite({*h.wet, h.dew.value_or(0), h.frost.value_or(0), h.ppm, h.mass, h.absolute, h.normal});
+    finite({h.wet.value_or(0), h.dew.value_or(0), h.frost.value_or(0), h.ppm, h.mass, h.absolute, h.normal});
     return h;
 }
 } // 命名空间 toolbox

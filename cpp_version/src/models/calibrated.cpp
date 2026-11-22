@@ -91,22 +91,25 @@ double StandardCouple::fixedSplit() const {
     require(kind == "S" || !points.empty(), "B 型需要校准点");
     return kind == "S" ? 400. : points.front().first - 300;
 }
+Values StandardCouple::fixedJoins() const {
+    Values joins{fixedSplit()};
+    for (const auto &segment : thermoSegments(kind)) joins.push_back(segment.maximum);
+    if (kind == "B") {
+        joins.push_back(23.);
+        for (std::size_t i = 0; i < std::min<std::size_t>(4, points.size()); ++i) {
+            joins.push_back(points[i].first + 30);
+            joins.push_back(points[i].first + 70);
+        }
+    }
+    std::sort(joins.begin(), joins.end());
+    joins.erase(std::unique(joins.begin(), joins.end()), joins.end());
+    return joins;
+}
 std::optional<std::array<double, 3>> StandardCouple::slope(double t) const {
     auto [low, high] = bounds();
     double a = std::max(t - .01, low), b = std::min(t + .01, high);
     if (!zone) {
-        Values joins{fixedSplit()};
-        for (const auto &segment : thermoSegments(kind)) {
-            joins.push_back(segment.maximum);
-        }
-        if (kind == "B") {
-            joins.push_back(23.);
-            for (std::size_t i = 0; i < std::min<std::size_t>(4, points.size()); ++i) {
-                joins.push_back(points[i].first + 30);
-                joins.push_back(points[i].first + 70);
-            }
-        }
-        for (double join : joins) {
+        for (double join : fixedJoins()) {
             if (join <= low || join >= high) {
                 continue;
             }
@@ -132,9 +135,6 @@ double StandardCouple::emf(double t) const {
     if (zone) {
         require(zone->minimum > 0 || zone->maximum < 0 || zone->coefficients.empty() || zone->coefficients.front() == 0,
                 "含 0 °C 的系数温区要求常数项 C0 为零");
-        if (t == 0) {
-            return 0;
-        }
         require(t >= zone->minimum && t <= zone->maximum, "温度超出所选系数温区");
         double e = polynomial(zone->coefficients, t);
         finite({e});
@@ -181,6 +181,45 @@ double StandardCouple::emf(double t) const {
     finite({e});
     return e;
 }
+double StandardCouple::referenceEndEmf(double t) const {
+    if (t == 0 && zone && (zone->minimum > 0 || zone->maximum < 0)) return 0;
+    return emf(t);
+}
+
+static Values fixedDerivative(const StandardCouple &model, const Values &offsets, double t) {
+    const auto &segments = thermoSegments(model.kind);
+    const auto segment = std::find_if(segments.begin(), segments.end(), [&](const auto &s) {
+        return s.minimum <= t && t <= s.maximum;
+    });
+    require(segment != segments.end(), "温度超出所选分度范围");
+    auto slope = derivative(segment->coefficients);
+    if (model.kind == "S") {
+        if (t < 400) {
+            slope[0] += offsets[0] / model.points[0].first;
+        } else {
+            for (std::size_t i = 0; i < offsets.size(); ++i) {
+                const double ti = model.points[i].first, tj = model.points[(i + 1) % 3].first,
+                             tk = model.points[(i + 2) % 3].first;
+                const double factor = offsets[i] / ((ti - tj) * (ti - tk));
+                slope[0] -= factor * (tj + tk);
+                slope[1] += 2 * factor;
+            }
+        }
+    } else if (t >= 23 && t < model.fixedSplit()) {
+        slope[0] += offsets[0] / (model.points[0].first - 23);
+    } else {
+        for (std::size_t i = 0; i + 1 < model.points.size(); ++i) {
+            const double p = model.points[i].first;
+            if (p + 30 < t && t < p + 70) {
+                slope[0] += (offsets[i + 1] - offsets[i]) / 40;
+                break;
+            }
+        }
+    }
+    finite(slope);
+    return slope;
+}
+
 double StandardCouple::temperature(double e) const {
     auto [lo, hi] = bounds();
     if (kind == "B") {
@@ -202,13 +241,40 @@ double StandardCouple::temperature(double e) const {
         return inverse(curve, e, lo, hi);
     }
     finite({e});
-    double split = fixedSplit();
-    if (!(lo < split && split <= hi)) {
-        return inverse(curve, e, lo, hi);
+    Values joins{lo};
+    for (double t : fixedJoins()) {
+        if (lo < t && t < hi) joins.push_back(t);
     }
-    // 两段校准偏差在切换点可能有跳变，分别检查它们能否反算。
+    joins.push_back(hi);
+    const auto multiple = "该热电势对应多个温度，请核对校准点或使用限定温区的系数换算";
     std::optional<double> solution;
-    const std::pair<double, double> intervals[]{{lo, std::nextafter(split, lo)}, {split, hi}};
+    auto record = [&](double root) {
+        require(!solution || std::abs(*solution - root) <= 1e-9, multiple);
+        if (!solution) solution = root;
+    };
+    for (double t : joins) {
+        if (emf(t) == e) record(t);
+    }
+    Values offsets;
+    for (auto [t, measured] : points) offsets.push_back(measured - thermoEmf(kind, t));
+    std::vector<std::pair<double, double>> intervals;
+    for (std::size_t i = 1; i < joins.size(); ++i) {
+        const double start = i == 1 ? lo : std::nextafter(joins[i - 1], hi);
+        const double end = i + 1 == joins.size() ? hi : std::nextafter(joins[i], lo);
+        if (start > end) continue;
+        Values boundaries{start};
+        if (start < end) {
+            auto slope = fixedDerivative(*this, offsets, start + (end - start) * .5);
+            require(!std::all_of(slope.begin(), slope.end(), [](double v) { return v == 0; }) ||
+                    emf(start) != e, multiple);
+            auto roots = polynomialZeros(slope, start, end);
+            boundaries.insert(boundaries.end(), roots.begin(), roots.end());
+        }
+        boundaries.push_back(end);
+        for (std::size_t j = 1; j < boundaries.size(); ++j) {
+            intervals.emplace_back(boundaries[j - 1], boundaries[j]);
+        }
+    }
     for (auto [start, end] : intervals) {
         double a = emf(start), b = emf(end);
         double target = e;
@@ -222,9 +288,7 @@ double StandardCouple::temperature(double e) const {
             }
         }
         double root = target == a ? start : target == b ? end : inverse(curve, e, start, end);
-        require(!solution || std::abs(*solution - root) <= 1e-9,
-                "该热电势对应多个温度，请核对校准点或使用限定温区的系数换算");
-        solution = root;
+        record(root);
     }
     require(solution.has_value(), "热电势超出有效范围或落在固定点分段间隙内");
     return *solution;
@@ -333,6 +397,13 @@ double PolynomialThermistor::temperature(double r) const {
     require(inv > 0, "绝对温度必须大于 0 K");
     double t = 1 / inv - 273.15;
     finite({t});
+    return t;
+}
+double PolynomialThermistor::temperatureInBounds(double r, double minimum, double maximum) const {
+    const double t = temperature(r);
+    const double roundoff = 4 * std::numeric_limits<double>::epsilon() * (t + 273.15);
+    if (t < minimum && minimum - t <= roundoff) return minimum;
+    if (t > maximum && t - maximum <= roundoff) return maximum;
     return t;
 }
 double PolynomialThermistor::resistance(double t) const {

@@ -192,8 +192,12 @@ impl Report {
         }
     }
     /// 复制为普通文本，数值与界面一致；不再提供量规 CSV 文件导出。
-    pub fn text(&self, explanation: &str, convention: &str) -> String {
-        let mut out = format!("{}\n", self.title);
+    pub fn text(&self, tool_id: &str, input: &str, explanation: &str, convention: &str) -> String {
+        let mut out = format!(
+            "{}\n工具标识：{tool_id}\n软件版本：Toolbox {}\n输入参数 (JSON)：{input}\n数值精度：计算尺寸按界面显示为五位小数。\n\n",
+            self.title,
+            env!("CARGO_PKG_VERSION")
+        );
         for (label, value) in &self.metrics {
             out.push_str(&format!("{label}：{}\n", value.display.replace('\n', " ")));
         }

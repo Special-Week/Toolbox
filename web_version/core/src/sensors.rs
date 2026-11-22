@@ -66,9 +66,7 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
 }
 
 fn thermocouple(i: &Input) -> Result<Output, String> {
-    let kinds = [
-        "B", "E", "J", "K", "N", "R", "S", "T", "C", "D", "G", "L", "LR", "U", "A",
-    ];
+    let kinds = tc::WORKING_KINDS;
     let kind = kinds[i.index("type", 3, kinds.len())?];
     let unit = i.unit()?;
     let direction = i.index("direction", 0, 2)?;
@@ -320,12 +318,13 @@ fn standard(i: &Input) -> Result<Output, String> {
     let dir = i.index("direction", 0, 2)?;
     let v = i.number("value", if dir == 0 { unit.display(1000.) } else { 9.587 })?;
     let cold = celsius_in_bounds(unit, i.number("cold", unit.display(0.0))?, bounds);
+    let cold_emf = m.reference_end_emf(cold)?;
     let corr = i.number("correction", 0.)?;
     let (t, e) = if dir == 0 {
         let t = celsius_in_bounds(unit, v, bounds);
-        (t, m.emf(t)? - m.emf(cold)? - corr)
+        (t, m.emf(t)? - cold_emf - corr)
     } else {
-        (m.temperature(v + corr + m.emf(cold)?)?, v)
+        (m.temperature(v + corr + cold_emf)?, v)
     };
     out.metric("温度", unit.display(t), unit.symbol());
     out.metric("测得热电势", e, "mV");
@@ -334,7 +333,7 @@ fn standard(i: &Input) -> Result<Output, String> {
         out.process.push(String::new());
         if let Some((lo, hi, coefficients)) = &m.zone {
             out.process.push(format!(
-                "{label}：系数温区 {}～{} °C，t = {} °C；E(t) = Σcᵢtⁱ，0 °C 特别规定为 0 mV。",
+                "{label}：系数温区 {}～{} °C，t = {} °C；E(t) = Σcᵢtⁱ。参考端在 0 °C 时电势为 0 mV。",
                 n(*lo),
                 n(*hi),
                 c(temp)
@@ -394,14 +393,14 @@ fn standard(i: &Input) -> Result<Output, String> {
                 c(m.emf(temp)?)
             ));
         }
-        out.process
-            .push(format!("{label}电势 = {} mV。", c(m.emf(temp)?)));
+        let emf = if label == "参考端" { cold_emf } else { m.emf(temp)? };
+        out.process.push(format!("{label}电势 = {} mV。", c(emf)));
     }
-    let reconstructed = m.emf(t)? - m.emf(cold)? - corr;
+    let reconstructed = m.emf(t)? - cold_emf - corr;
     out.process.push(format!(
         "测量电势 = E(热端) − E(参考端) − 修正量 = {} − {} − {} = {} mV。",
         c(m.emf(t)?),
-        c(m.emf(cold)?),
+        c(cold_emf),
         n(corr),
         c(reconstructed)
     ));
@@ -414,7 +413,7 @@ fn standard(i: &Input) -> Result<Output, String> {
     }
     let bounds = m.bounds();
     let slope = m.slope(t)?;
-    out.metric("参考端热电势", m.emf(cold)?, "mV");
+    out.metric("参考端热电势", cold_emf, "mV");
     out.optional(
         "微分热电势 dE/dt",
         slope.map(|(_, _, slope)| slope / unit.span()),
@@ -428,7 +427,7 @@ fn standard(i: &Input) -> Result<Output, String> {
         ),
     ));
     division(&mut out, i, bounds, "mV", |t| {
-        Ok(m.emf(t)? - m.emf(cold)? - corr)
+        Ok(m.emf(t)? - cold_emf - corr)
     }, Some(&|t| m.slope(t).map(|value| value.map(|(_, _, slope)| slope))))?;
     Ok(out)
 }
@@ -711,7 +710,19 @@ fn ntc(i: &Input) -> Result<Output, String> {
             let t = celsius_in_bounds(u, v, (min, max));
             (t, m.resistance(t)?)
         } else {
-            (m.temperature(v)?, v)
+            // β 模型单调递减，先用正算的电阻端点核验输入。无法表示的端点在有限电阻范围之外。
+            let inverse = m.temperature(v)?;
+            let upper_r = m.resistance(min).ok();
+            let lower_r = m.resistance(max).ok();
+            if upper_r.is_some_and(|r| v > r) || lower_r.is_some_and(|r| v < r) {
+                return Err("温度须处于有效校准温区内".into());
+            }
+            let t = match (upper_r == Some(v), lower_r == Some(v)) {
+                (true, false) => min,
+                (false, true) => max,
+                _ => inverse.clamp(min, max),
+            };
+            (t, v)
         };
         if t < min || t > max {
             return Err("温度须处于有效校准温区内".into());
@@ -824,7 +835,7 @@ fn ntc(i: &Input) -> Result<Output, String> {
         let t = celsius_in_bounds(u, v, (min, max));
         (t, m.resistance(t)?)
     } else {
-        (m.temperature(v)?, v)
+        (m.temperature_in_bounds(v, min, max)?, v)
     };
     if t < min || t > max {
         return Err("温度须处于有效校准温区内".into());
@@ -953,6 +964,24 @@ mod tests {
         assert_eq!(coeffs["a"].as_f64(), Some(0.0));
         assert_eq!(coeffs["b"].as_f64(), Some(0.0));
         assert_eq!(coeffs["c"].as_f64(), Some(0.0));
+    }
+
+    #[test]
+    fn beta_thermistor_round_trips_both_calibration_endpoints() {
+        let min = -19.9;
+        let max = 100.1;
+        for (endpoint, is_min) in [(min, true), (max, false)] {
+            let forward = ntc(&Input(json!({"family":1,"min":min,"max":max,"value":endpoint}))).unwrap();
+            let resistance = forward.metrics[1].value.as_f64().unwrap();
+            let reverse = |value| {
+                ntc(&Input(json!({"family":1,"direction":1,"min":min,"max":max,"value":value})))
+            };
+            assert_eq!(reverse(resistance).unwrap().metrics[0].value.as_f64(), Some(endpoint));
+            let outside = if is_min { resistance.next_up() } else { resistance.next_down() };
+            assert!(reverse(outside).is_err());
+        }
+        // 即便下限电阻超出可表示范围，温区内部的正常反算仍可用。
+        assert!(ntc(&Input(json!({"family":1,"direction":1,"min":-273.149,"value":10000}))).is_ok());
     }
 
     #[test]

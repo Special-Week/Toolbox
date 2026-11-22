@@ -18,11 +18,15 @@ struct ExtraReference {
 };
 const std::string &nistSource(const std::string &kind);
 const std::vector<ExtraReference> &extraReferences();
+inline constexpr std::array<const char *, 15> workingThermocoupleKinds{
+    "B", "E", "J", "K", "N", "R", "S", "T", "C", "D", "G", "L", "LR", "U", "A"};
 const std::vector<ThermoSegment> &thermoSegments(const std::string &kind);
 std::pair<double, double> thermoBounds(const std::string &kind);
 double thermoEmf(const std::string &kind, double t);
 double thermoSlope(const std::string &kind, double t);
 double thermoTemperature(const std::string &kind, double emf, double roundoff = 0);
+double thermoTemperatureFromMeasured(const std::string &kind, double measured, double coldEmf,
+                                     double correction = 0);
 struct Tolerance {
     std::wstring name, formula;
     double minimum, maximum;
@@ -69,7 +73,9 @@ struct StandardCouple {
     std::optional<ThermoZone> zone;
     std::pair<double, double> bounds() const;
     double fixedSplit() const;
+    Values fixedJoins() const;
     double emf(double temperature) const;
+    double referenceEndEmf(double temperature) const;
     double temperature(double emf) const;
     // 返回差分的两个温度和变化率，分段交界处为空。
     std::optional<std::array<double, 3>> slope(double temperature) const;
@@ -102,6 +108,7 @@ struct BetaThermistor {
 struct PolynomialThermistor {
     Values a, b;
     double temperature(double resistance) const;
+    double temperatureInBounds(double resistance, double minimum, double maximum) const;
     double resistance(double temperature) const;
     double slope(double temperature) const;
     static PolynomialThermistor fit(const std::vector<std::pair<double, double>> &points, int order, bool sh);

@@ -1,4 +1,35 @@
 /** 请求编号与界面版本分开处理，过期结果不会覆盖用户的新输入。 */
+import type { State } from "./types";
+
+export async function changePressureUnit(
+  state: State,
+  target: unknown,
+  transmitter: boolean,
+  isCurrent: () => boolean,
+  convert: (input: { source: number; target: number; values: unknown[] }) => Promise<string[]>,
+) {
+  const inputs = () => [
+    "low", "high", "refLow", "refHigh",
+    ...(transmitter && Number(state.direction) === 0 ? ["value"] : []),
+  ].flatMap((key) => state[key] !== undefined && String(state[key]).trim() ? [[key, state[key]] as const] : []);
+  while (isCurrent()) {
+    const source = state.pressureUnit;
+    const fields = inputs();
+    const snapshot = JSON.stringify(fields);
+    const converted = await convert({
+      source: Number(source),
+      target: Number(target),
+      values: fields.map(([, value]) => value),
+    }).catch((error: unknown) => ({ error }));
+    if (!isCurrent()) return;
+    if (source !== state.pressureUnit || snapshot !== JSON.stringify(inputs())) continue;
+    if (!Array.isArray(converted)) throw converted.error;
+    fields.forEach(([key], index) => (state[key] = converted[index]));
+    state.pressureUnit = target;
+    return;
+  }
+}
+
 export class Engine {
   private worker = new Worker(new URL("./engine.worker.ts", import.meta.url), {
     type: "module",

@@ -64,12 +64,14 @@ impl ToolboxApp {
                 })
                 .inner
             },
-            |ui, _app, response| {
+            |ui, app, response| {
                 panel(ui, |ui| {
                     ui.set_width(ui.available_width());
                     match response {
                         Ok(report) => {
-                            render_report_summary(ui, tool, &report);
+                            render_report_summary(ui, tool, &report, || {
+                                serde_json::json!(app.tool_inputs(tool)).to_string()
+                            });
                             process_report = Some(report);
                         }
                         Err(message) => render_error_message(ui, &message),
@@ -595,7 +597,12 @@ impl ToolboxApp {
     }
 }
 
-fn render_report_summary(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
+fn render_report_summary(
+    ui: &mut egui::Ui,
+    tool: &ToolDef,
+    report: &Report,
+    inputs: impl FnOnce() -> String,
+) {
     let p = crate::theme::palette(ui.ctx());
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new(&report.title).size(15.5).strong().color(p.ink));
@@ -605,6 +612,8 @@ fn render_report_summary(ui: &mut egui::Ui, tool: &ToolDef, report: &Report) {
             .clicked()
         {
             ui.ctx().copy_text(report.text(
+                tool.id,
+                &inputs(),
                 crate::calculators::explanations::for_tool(tool.kind),
                 &super::conventions::text(tool.kind),
             ));
@@ -1265,7 +1274,7 @@ mod tests {
                 },
                 |ctx| {
                     egui::CentralPanel::default().show(ctx, |ui| {
-                        render_report_summary(ui, tool, &report);
+                        render_report_summary(ui, tool, &report, || "{}".into());
                         render_report_tables(ui, tool, &report);
                     });
                 },

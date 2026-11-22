@@ -1,0 +1,32 @@
+name: Verify Toolbox
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web_version/package-lock.json
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-make
+      - name: Prepare Rust and Wasm
+        run: |
+          rustup update stable --no-self-update
+          rustup default stable
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli --version 0.2.114 --locked
+      - name: Verify all three implementations
+        env:
+          TOOLBOX_MINGW64_BIN: ${{ steps.msys2.outputs.msys2-location }}/mingw64/bin
+        run: ./verify.ps1 -BuildCpp

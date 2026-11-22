@@ -44,6 +44,7 @@ export interface Result {
   details: Record<string, unknown> | null;
   total: number;
   equation: string;
+  prediction_formula?: string;
 }
 export interface Tolerance {
   name: string;

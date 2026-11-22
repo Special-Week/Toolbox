@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-mod model;
+pub(super) mod model;
 use model::*;
 mod chart;
 use chart::draw_chart;

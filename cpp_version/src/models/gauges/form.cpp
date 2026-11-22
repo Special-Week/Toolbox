@@ -160,7 +160,11 @@ class Form {
                 available.push_back(v.first);
             }
             data.state["series"] = detected;
-            data.state["_lastSeries"] = detected;
+            // 改直径时的备选系列不覆盖用户选定的系列。
+            if (detected != "非标 / 自定义" &&
+                (changed == "tpi" || changed == "series" || data.state["_lastSeries"].empty())) {
+                data.state["_lastSeries"] = detected;
+            }
             choice("series", "螺纹系列", available, detected);
             auto grade = choice(ring ? "class.ring" : "class.plug", "工件公差等级",
                                 ring ? std::vector<std::string>{"1A", "2A", "3A"}

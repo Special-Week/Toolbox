@@ -22,6 +22,14 @@ fn average_count(i: &Input, key: &str) -> Result<Option<usize>, String> {
         _ => Err("取测量次数 n 须为正整数".into()),
     }
 }
+fn parse_dof(i: &Input, key: &str) -> Result<Option<f64>, String> {
+    match i.0.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) => u::parse_dof(text),
+        Some(Value::Number(number)) => u::parse_dof(&number.to_string()),
+        _ => Err("自由度须为大于 0 的数，留空表示 ∞".into()),
+    }
+}
 fn rounding(i: &Input, digits: &str, mode: &str) -> Result<u::Rounding, String> {
     let digits = match i.0.get(digits) {
         None => None,
@@ -316,6 +324,7 @@ fn component(v: &Value, depth: usize) -> Result<u::Component, String> {
         1 => u::Kind::TypeB {
             half_width: i.number("halfWidth", 0.01)?,
             distribution: i.index("distribution", 0, 6)?,
+            dof: parse_dof(&i, "dof")?,
         },
         _ => {
             if depth >= 4 {
@@ -345,11 +354,12 @@ fn component(v: &Value, depth: usize) -> Result<u::Component, String> {
     })
 }
 fn detail(d: &u::Detail) -> Value {
-    json!({"name":d.name,"rawStandard":d.raw_standard,"standard":d.standard,"formattedStandard":u::format_rounded(d.standard,d.rounding),"sensitivity":d.sensitivity,"contribution":d.contribution,"children":d.children.iter().map(detail).collect::<Vec<_>>()})
+    json!({"name":d.name,"rawStandard":d.raw_standard,"standard":d.standard,"formattedStandard":u::format_rounded(d.standard,d.rounding),"sensitivity":d.sensitivity,"contribution":d.contribution,"dof":u::format_dof(d.dof),"children":d.children.iter().map(detail).collect::<Vec<_>>()})
 }
 fn uncertainty(i: &Input) -> Result<Output, String> {
     let mut o = Output::default();
     let mut contributions = vec![];
+    let mut dof_terms = vec![];
     let mut details = vec![];
     if i.index("mode", 0, 2)? == 1 {
         let a = i.values("aValues", SAMPLES, 0, 50)?;
@@ -372,6 +382,11 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
             None => 0.0,
         };
         let sensitivity = i.number("aSensitivity", 1.)?;
+        let a_dof = if a.is_empty() {
+            u::DegreesOfFreedom::NotApplicable
+        } else {
+            u::DegreesOfFreedom::Finite((a.len() - 1) as f64)
+        };
         if !a.is_empty() {
             let item = u::Component {
                 name: "A 类重复测量".into(),
@@ -391,9 +406,20 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
         let a_contribution = ua * sensitivity;
         finite(&[a_contribution])?;
         contributions.push(a_contribution);
-        details.push(json!({"name":"A 类重复测量","rawStandard":raw_ua,"standard":ua,"formattedStandard":u::format_rounded(ua,a_rounding),"sensitivity":sensitivity,"contribution":a_contribution,"children":[]}));
+        if !a.is_empty() {
+            dof_terms.push((a_contribution, a_dof));
+        }
+        details.push(json!({"name":"A 类重复测量","rawStandard":raw_ua,"standard":ua,"formattedStandard":u::format_rounded(ua,a_rounding),"sensitivity":sensitivity,"contribution":a_contribution,"dof":u::format_dof(a_dof),"children":[]}));
         o.metric("A 类标准不确定度", raw_ua, "");
-        o.metric("A 类修约后标准不确定度", ua, "");
+        if a_rounding.and_then(|r| r.digits).is_some() {
+            o.metric(
+                "A 类修约后标准不确定度",
+                u::format_rounded(ua, a_rounding),
+                "",
+            );
+        } else {
+            o.metric("A 类修约后标准不确定度", ua, "");
+        }
         if let Some(nodes) = i.0.get("bComponents") {
             let nodes = nodes.as_array().ok_or("B 类分量数据无效")?;
             if nodes.len() > 50 {
@@ -410,6 +436,7 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
                 let d = item.calculate()?;
                 crate::calculators::uncertainty::process::component(&item, &d, "", &mut o.process);
                 contributions.push(d.contribution);
+                dof_terms.push((d.contribution, d.dof));
                 details.push(detail(&d));
             }
         } else {
@@ -423,6 +450,7 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
                     kind: u::Kind::TypeB {
                         half_width: v,
                         distribution,
+                        dof: None,
                     },
                     rounding: Some(u::Rounding {
                         digits: None,
@@ -432,6 +460,7 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
                 let d = item.calculate()?;
                 crate::calculators::uncertainty::process::component(&item, &d, "", &mut o.process);
                 contributions.push(d.contribution);
+                dof_terms.push((d.contribution, d.dof));
                 details.push(detail(&d));
             }
         }
@@ -450,14 +479,32 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
             let d = item.calculate()?;
             crate::calculators::uncertainty::process::component(&item, &d, "", &mut o.process);
             contributions.push(d.contribution);
+            dof_terms.push((d.contribution, d.dof));
             details.push(detail(&d));
         }
     }
-    let uc = u::combine(&contributions, i.index("combine", 0, 2)? == 1)?;
-    let k = i.number("coverage", 2.)?;
-    if k <= 0. {
-        return Err("包含因子 k 必须大于 0".into());
+    let maximum = i.index("combine", 0, 2)? == 1;
+    let uc = u::combine(&contributions, maximum)?;
+    let effective_dof = u::combine_dof(&dof_terms, maximum)?;
+    let coverage_mode = i.index("coverageMode", 0, 3)?;
+    let automatic_coverage = !matches!(effective_dof, u::DegreesOfFreedom::NotApplicable);
+    if !automatic_coverage && coverage_mode != 0 && i.flag("allowManualCoverageFallback") {
+        o.details = json!({"automaticCoverage":false,"manualCoverageRequired":true});
+        return Ok(o);
     }
+    let manual_k = if coverage_mode == 0 {
+        i.number("coverage", 2.)
+    } else {
+        Ok(2.0)
+    };
+    let k = match manual_k.and_then(|k| u::coverage_factor(coverage_mode, k, effective_dof)) {
+        Ok(k) => k,
+        Err(error) if i.flag("allowManualCoverageFallback") => {
+            o.details = json!({"automaticCoverage":automatic_coverage,"coverageError":error});
+            return Ok(o);
+        }
+        Err(error) => return Err(error),
+    };
     let expanded = uc * k;
     finite(&[expanded])?;
     let digits = i.index("digits", 1, 4)? + 1;
@@ -465,13 +512,20 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
     o.process.push(String::new());
     o.process.push(format!(
         "总合成方法：{}；u_c = {}。",
-        if i.index("combine", 0, 2)? == 1 {
+        if maximum {
             "取最大绝对贡献"
         } else {
             "各项贡献平方和根"
         },
         c(uc)
     ));
+    o.process.push(format!(
+        "有效自由度 ν_eff = {}。",
+        u::format_dof(effective_dof)
+    ));
+    if coverage_mode != 0 {
+        o.process.push(error_process::coverage(coverage_mode, k));
+    }
     error_process::combined(
         &mut o.process,
         uc,
@@ -483,10 +537,15 @@ fn uncertainty(i: &Input) -> Result<Output, String> {
     );
     o.metric("合成标准不确定度 uc", uc, "");
     o.metric("扩展不确定度 U", expanded, "");
+    match effective_dof {
+        u::DegreesOfFreedom::Finite(v) => o.metric("有效自由度 ν_eff", v, ""),
+        u::DegreesOfFreedom::Infinite => o.metric("有效自由度 ν_eff", "∞", ""),
+        u::DegreesOfFreedom::NotApplicable => o.metric("有效自由度 ν_eff", "不适用", ""),
+    }
     o.metric("包含因子 k", k, "");
     o.metric("修约后 uc", rounded, "");
     o.metric("修约后 U", ru, "");
-    o.details = json!({"budget":details});
+    o.details = json!({"budget":details,"automaticCoverage":automatic_coverage});
     Ok(o)
 }
 
@@ -642,5 +701,59 @@ mod tests {
         assert_eq!(rounded(quick_round.clone()), 2.4);
         quick_round["digits"] = json!(2);
         assert_eq!(rounded(quick_round), 2.45);
+    }
+
+    #[test]
+    fn computes_effective_dof_and_student_t_coverage_factors() {
+        let input = json!({
+            "coverageMode": 1,
+            "components": [
+                {"kind": 0, "method": 0, "values": [1, 2, 3, 4, 5], "sensitivity": 1},
+                {"kind": 1, "halfWidth": 2.0, "distribution": 4, "dof": "20", "sensitivity": 1}
+            ]
+        });
+        let out = result(input).unwrap();
+        let metric = |label: &str| {
+            out.metrics
+                .iter()
+                .find(|m| m.label == label)
+                .unwrap()
+                .value
+                .clone()
+        };
+        let uc = metric("合成标准不确定度 uc").as_f64().unwrap();
+        let dof = metric("有效自由度 ν_eff").as_f64().unwrap();
+        let k = metric("包含因子 k").as_f64().unwrap();
+        // s([1,2,3,4,5]) = sqrt(2.5), u_A = sqrt(2.5), ν_A = 4; u_B = 2, ν_B = 20
+        // uc^2 = 2.5 + 4 = 6.5 => ν_eff = 6.5^2 / (2.5^2/4 + 4^2/20) = 42.25 / (1.5625 + 0.8)
+        let expected_uc = 6.5_f64.sqrt();
+        let expected_dof = 42.25 / (1.5625 + 0.8);
+        assert!((uc - expected_uc).abs() < 1e-12);
+        assert!((dof - expected_dof).abs() < 1e-11);
+        assert!(k > 2.05 && k < 2.2);
+
+        // 最大绝对贡献模式拒绝自动 t_p
+        let max_err = result(json!({
+            "combine": 1,
+            "coverageMode": 1,
+            "components": [{"kind": 1, "halfWidth": 1, "distribution": 4}]
+        }));
+        assert!(max_err.is_err());
+
+        // B 类全无穷大时按 95% 自动得到正态分位数 1.95996398...
+        let inf_out = result(json!({
+            "coverageMode": 1,
+            "components": [{"kind": 1, "halfWidth": 1, "distribution": 4}]
+        }))
+        .unwrap();
+        let inf_k = inf_out
+            .metrics
+            .iter()
+            .find(|m| m.label == "包含因子 k")
+            .unwrap()
+            .value
+            .as_f64()
+            .unwrap();
+        assert!((inf_k - 1.959963984540054).abs() < 1e-12);
     }
 }

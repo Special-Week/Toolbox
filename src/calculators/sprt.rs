@@ -1,7 +1,5 @@
 //! 标准铂电阻页面；统一左输右显双栏布局，按子区间限制计算温区。
-mod curves;
-pub(crate) mod model;
-pub(crate) mod ranges;
+pub(crate) use toolbox_core::calculators::sprt::{curves, model, ranges};
 use crate::calculators::{calibration::TemperatureUnit, common::*};
 use crate::{app::ToolboxApp, catalog::ToolDef, theme};
 use eframe::egui::{self, RichText};

@@ -24,7 +24,7 @@ static void standardReferenceProcess(Page &p, const StandardCouple &model, doubl
     if (model.kind == "S") {
         if (t < 400) {
             correction = offsets[0] * t / model.points[0].first;
-            p.processSteps.push_back(L"S 型 t < 400 °C：偏差线性延伸 δ(t) = δ₀ × t/t₀ = " + p.processValue(offsets[0]) + L" × " + inputNumber(t) + L" / " + inputNumber(model.points[0].first) + L" = " + p.processValue(correction) + L" mV。");
+            p.processSteps.push_back(L"S 型 t < 400 °C：偏差线性延伸 δ(t) = δ₁t/t₁ = " + p.processValue(offsets[0]) + L" × " + inputNumber(t) + L" / " + inputNumber(model.points[0].first) + L" = " + p.processValue(correction) + L" mV。");
         } else {
             p.processSteps.push_back(L"S 型 t ≥ 400 °C：固定点偏差按拉格朗日二次插值，δ(t) = Σδᵢ ∏(t−tⱼ)/(tᵢ−tⱼ)。");
             for (int i = 0; i < 3; ++i) {
@@ -47,7 +47,7 @@ static void standardReferenceProcess(Page &p, const StandardCouple &model, doubl
             if (t <= point + 30) {
                 if (i == 0 && t < point - 300) {
                     correction = t >= 23 ? offsets[0] * (t - 23) / (point - 23) : 0;
-                    p.processSteps.push_back(t >= 23 ? L"B 型低温线性段：δ(t) = δ₀(t−23)/(t₀−23) = " + p.processValue(offsets[0]) + L" × (" + inputNumber(t) + L" − 23)/(" + inputNumber(point) + L" − 23) = " + p.processValue(correction) + L" mV。" : L"B 型 t < 23 °C：偏差为零。");
+                    p.processSteps.push_back(t >= 23 ? L"B 型低温线性段：δ(t) = δ₁(t−23)/(t₁−23) = " + p.processValue(offsets[0]) + L" × (" + inputNumber(t) + L" − 23)/(" + inputNumber(point) + L" − 23) = " + p.processValue(correction) + L" mV。" : L"B 型 t < 23 °C：偏差为零。");
                 } else {
                     correction = offsets[i];
                     p.processSteps.push_back(L"B 型固定点邻域：采用第 " + std::to_wstring(i + 1) + L" 点偏差。");

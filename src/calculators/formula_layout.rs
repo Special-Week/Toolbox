@@ -119,6 +119,7 @@ fn tex_operand(value: &str) -> String {
             '₈' => Some('8'),
             '₉' => Some('9'),
             'ᵢ' => Some('i'),
+            'ₖ' => Some('k'),
             'ₓ' => Some('x'),
             'ᵧ' => Some('y'),
             'ₙ' => Some('n'),

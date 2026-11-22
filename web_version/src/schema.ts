@@ -33,6 +33,7 @@ export function newBudget(name = "分量"): Budget {
     rounding: "1",
     halfWidth: "0.02",
     distribution: "0",
+    dof: "",
     combine: "0",
     children: [],
   };
@@ -107,7 +108,7 @@ const direction = () =>
   sel("direction", "计算方式", ["温度 → 电信号", "电信号 → 温度"]);
 const temp = (c: number, s: State) =>
   idx(s, "unit") === 1 ? c + 273.15 : idx(s, "unit") === 2 ? c * 1.8 + 32 : c;
-export function schema(t: Tool, s: State, c: Catalog): Section[] {
+export function schema(t: Tool, s: State, c: Catalog, automaticCoverage = true): Section[] {
   const kind = t.kind;
   const u = units[idx(s, "unit")] ?? "°C";
   const dir = idx(s, "direction");
@@ -357,7 +358,7 @@ export function schema(t: Tool, s: State, c: Catalog): Section[] {
             lows.map((t) => t + " °C"),
           ),
         );
-      if (hr === 0)
+      if (hr === 0 && idx(s, "deviation") === 0)
         fields.push(
           n("silver", "银点实测电阻 (Ω)", c.defaults.sprtFixed["961.78"]),
         );
@@ -483,9 +484,10 @@ export function schema(t: Tool, s: State, c: Catalog): Section[] {
         n("pressure", "大气绝对压力 (kPa)", 101.325),
         sel("known", "已知参数", [
           "相对湿度",
-          "露点 / 霜点",
+          "露点 / 霜点（按温度区分）",
           "湿球温度值",
           "混合比",
+          "露点（水面，含负温）",
         ]),
         n(
           "value",
@@ -494,8 +496,12 @@ export function schema(t: Tool, s: State, c: Catalog): Section[] {
             `露点 / 霜点 (${u})`,
             `湿球温度 (${u})`,
             "混合比 (g/kg)",
+            `水面露点 (${u})`,
           ][idx(s, "known")],
-          [50, temp(10, s), temp(15, s), 7.5][idx(s, "known")],
+          [50, temp(10, s), temp(15, s), 7.5, temp(10, s)][idx(s, "known")],
+          idx(s, "known") === 1
+            ? "温度 ≤ 0 °C 时按霜点处理。负温露点请选择水面露点。"
+            : undefined,
         ),
       ),
     ];
@@ -630,9 +636,20 @@ export function schema(t: Tool, s: State, c: Catalog): Section[] {
           })),
         },
       );
+    const maximum = idx(s, "combine") === 1;
+    f.push(sel("combine", "合成方法", ["平方和根", "最大绝对贡献"]));
+    const canUseAutomaticCoverage = !maximum && automaticCoverage;
+    if (canUseAutomaticCoverage) {
+      f.push(sel("coverageMode", "包含因子方式", [
+        "手动指定 k",
+        "t 分布近似（95%）",
+        "t 分布近似（99%）",
+      ]));
+    }
+    if (!canUseAutomaticCoverage || idx(s, "coverageMode") === 0) {
+      f.push(n("coverage", "包含因子 k", 2, canUseAutomaticCoverage ? undefined : "有效自由度不适用，使用手动包含因子。"));
+    }
     f.push(
-      sel("combine", "合成方法", ["平方和根", "最大绝对贡献"]),
-      n("coverage", "包含因子 k", 2),
       sel("digits", "合成有效数字", ["1 位", "2 位", "3 位", "4 位"], 1),
       sel("roundingV2", "合成修约方式", ["四舍六入", "进位"], 1),
     );
@@ -793,6 +810,7 @@ export function schema(t: Tool, s: State, c: Catalog): Section[] {
 
 /** 只为尚未输入的字段填默认值，保留空串、负号等正在编辑的文本。 */
 export function initialize(tool: Tool, state: State, catalog: Catalog) {
+  if (tool.kind === "uncertainty" && idx(state, "combine") === 1) state.coverageMode = "0";
   for (let pass = 0; pass < 2; pass++)
     // 折叠仅影响显示；其中的默认值和已保存输入仍正常参与页面状态。
     for (const section of schema(tool, state, catalog))

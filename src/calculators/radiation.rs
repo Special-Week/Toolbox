@@ -1,8 +1,6 @@
 //! 三个辐射页面共用左输右显双栏布局；mode=0/1/2 对应耳温计、源误差、示值修正。
 //! 有效波长法与 Planck 法的误差方向不同，结果标签和计算说明分别明确。
-pub(crate) mod model;
-mod process;
-pub(crate) mod website;
+pub(crate) use toolbox_core::calculators::radiation::{model, process, website};
 use crate::app::ToolboxApp;
 use crate::calculators::common::*;
 use crate::catalog::ToolDef;

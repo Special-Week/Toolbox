@@ -6,10 +6,12 @@ import path from "node:path";
 import { syncLicenses } from "./sync-licenses.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
-function run(command, args) {
+function run(command, args, capture = false) {
   const result = spawnSync(command, args, {
     cwd: root,
-    stdio: "inherit",
+    stdio: capture ? ["inherit", "pipe", "inherit"] : "inherit",
+    encoding: "utf8",
+    maxBuffer: 16 * 1024 * 1024,
     shell: false,
   });
   if (result.error) {
@@ -19,6 +21,7 @@ function run(command, args) {
     process.exit(1);
   }
   if (result.status !== 0) process.exit(result.status ?? 1);
+  return result.stdout;
 }
 mkdirSync(path.join(root, "pkg"), { recursive: true });
 const bindingVersion = spawnSync("wasm-bindgen", ["--version"], {
@@ -34,7 +37,7 @@ if (
   );
   process.exit(1);
 }
-run("cargo", [
+const messages = run("cargo", [
   "build",
   "--locked",
   "--release",
@@ -42,7 +45,20 @@ run("cargo", [
   "wasm32-unknown-unknown",
   "--manifest-path",
   "core/Cargo.toml",
-]);
+  "--message-format=json-render-diagnostics",
+], true);
+let wasm;
+for (const line of messages.split(/\r?\n/)) {
+  if (!line.startsWith("{")) continue;
+  const message = JSON.parse(line);
+  if (message.reason === "compiler-artifact" && message.target.name === "toolbox_web_core") {
+    wasm = message.filenames.find((file) => file.endsWith(".wasm"));
+  }
+}
+if (!wasm) {
+  console.error("Cargo 构建未报告 toolbox_web_core 的 Wasm 产物。");
+  process.exit(1);
+}
 run("wasm-bindgen", [
   "--target",
   "web",
@@ -50,6 +66,6 @@ run("wasm-bindgen", [
   "pkg",
   "--out-name",
   "toolbox_core",
-  "core/target/wasm32-unknown-unknown/release/toolbox_web_core.wasm",
+  wasm,
 ]);
 syncLicenses(root);

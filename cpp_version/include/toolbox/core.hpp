@@ -45,7 +45,8 @@ Statistics statistics(const Values &values);
 double rangeCoefficient(std::size_t count);
 double cvd(double t, double r0, double a, double b, double c);
 std::array<double, 3> fitCvd(double r0, const std::array<std::pair<double, double>, 3> &points);
-double atmosphereTemperature(double height);
+double atmosphereMolecularTemperature(double height);
+double atmosphereKineticTemperature(double height);
 double atmospherePressure(double height);
 double atmosphereAltitude(double pressure);
 

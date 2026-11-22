@@ -46,26 +46,6 @@ pub(crate) fn sample_points(start: f64, end: f64, step: f64) -> Result<Vec<f64>,
         .collect())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn division_row_limit_is_inclusive() {
-        assert_eq!(sample_points(0., 49_999., 1.).unwrap().len(), 50_000);
-        assert!(sample_points(0., 49_999.1, 1.).unwrap_err().contains("50000"));
-    }
-
-    #[test]
-    fn short_division_range_keeps_both_endpoints_and_allows_undefined_slope() {
-        let points = sample_points(100.0, 100.000000001, 1.0).unwrap();
-        assert_eq!(points, [100.0, 100.000000001]);
-        let mut csv = Vec::new();
-        write_rows(&mut csv, &points, "°C", "mV", |temperature| Ok((temperature, None))).unwrap();
-        assert!(String::from_utf8(csv).unwrap().ends_with("100,100,\n100.000000001,100.000000001,\n"));
-    }
-}
-
 impl ToolboxApp {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_division_table(
@@ -457,5 +437,25 @@ impl ToolboxApp {
                     }
                 });
             });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn division_row_limit_is_inclusive() {
+        assert_eq!(sample_points(0., 49_999., 1.).unwrap().len(), 50_000);
+        assert!(sample_points(0., 49_999.1, 1.).unwrap_err().contains("50000"));
+    }
+
+    #[test]
+    fn short_division_range_keeps_both_endpoints_and_allows_undefined_slope() {
+        let points = sample_points(100.0, 100.000000001, 1.0).unwrap();
+        assert_eq!(points, [100.0, 100.000000001]);
+        let mut csv = Vec::new();
+        write_rows(&mut csv, &points, "°C", "mV", |temperature| Ok((temperature, None))).unwrap();
+        assert!(String::from_utf8(csv).unwrap().ends_with("100,100,\n100.000000001,100.000000001,\n"));
     }
 }

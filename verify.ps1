@@ -39,6 +39,7 @@ if ($Release -and (!$Mingw32Bin -or !$Mingw64Bin)) {
 Push-Location $PSScriptRoot
 try {
     Invoke-Check cargo @('check', '--locked')
+    Invoke-Check cargo @('test', '--locked', '--manifest-path', 'crates/toolbox-core/Cargo.toml')
     Invoke-Check cargo @('test', '--locked')
     Invoke-Check cargo @('test', '--locked', '--manifest-path', 'web_version/core/Cargo.toml')
 

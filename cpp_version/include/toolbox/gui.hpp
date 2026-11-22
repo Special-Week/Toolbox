@@ -87,13 +87,16 @@ bool writeCalibrationJson(const std::wstring &path, const State &state);
 class InputHistory {
     std::wstring path_;
     State saved_;
-    bool pending_ = false;
+    std::set<std::string> dirty_, resets_, changedValues_, changedChoices_;
     ULONGLONG due_ = 0;
 
   public:
     explicit InputHistory(std::wstring path = {});
     void load(State &state);
-    void observe(const Tool &tool, const State &state);
+    bool reloadTool(const Tool &tool, State &state);
+    bool pending(const Tool &tool) const { return dirty_.count(tool.id) != 0; }
+    void observe(const Tool &tool, const State &state, bool reset = false);
+    void snapshot(const Tool &tool, const State &state);
     void flush(bool force = false);
 };
 struct Scene {
@@ -283,6 +286,7 @@ class App {
     ~App();
     int run(HINSTANCE instance, int show);
     void refresh();
+    void recordInputEdit();
     void open(int index);
     void homepage();
     void navigation();
@@ -301,6 +305,7 @@ void renderOther(Page &page);
 void renderPdfDownload(Page &page);
 void renderCurveFit(Page &page);
 void renderGauges(Page &page);
+void recordUnifiedGaugeEdit(State &state, const std::string &key);
 void clearGaugeCache(const std::string &id);
 void showLicenses(HWND owner, float dpi);
 } // 命名空间 toolbox

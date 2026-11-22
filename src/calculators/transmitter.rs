@@ -4,7 +4,7 @@ use crate::calculators::common::*;
 use crate::catalog::ToolDef;
 use crate::theme;
 use eframe::egui::{self, RichText};
-pub(super) mod model;
+pub(super) use toolbox_core::calculators::transmitter::model;
 use crate::calculators::pressure::model::Range;
 use model::Transmitter;
 
@@ -220,11 +220,9 @@ impl ToolboxApp {
                         {
                             return Err("温度量程不能低于绝对零度".to_owned());
                         }
-                        let transmitter = Transmitter::new(
-                            Range::new(low, high)?,
-                            Range::new(signal_low, signal_high)?,
-                            params.function == 1,
-                        );
+                        let process_range = Range::new(low, high)?;
+                        let signal_range = Range::new(signal_low, signal_high)?;
+                        let transmitter = Transmitter::new(process_range, signal_range, params.function == 1);
                         let (process_value, signal, fraction) = if params.mode == 0 {
                             let (signal, fraction) = transmitter.forward(input)?;
                             (input, signal, fraction)
@@ -282,8 +280,18 @@ impl ToolboxApp {
                             } else {
                                 format!("线性特性：信号比例 q = r = {}。", c(output_fraction))
                             });
-                            steps.push(if output_fraction == 1.0 {
+                            steps.push(if input == high {
                                 format!("信号比例为 1，输出信号直接取上限 {} {signal_symbol}。", n(signal))
+                            } else if params.function == 1 && model::crosses_zero(signal_range) {
+                                format!("信号量程跨零，开方正算用有理化保留近零差值。输出信号 = (信号跨度² × r − 信号下限²) / (信号跨度 × √r − 信号下限) = {} {signal_symbol}。", c(signal))
+                            } else if params.function == 0 && model::crosses_zero(signal_range) {
+                                format!("信号量程跨零，按上下限的加权和计算并补偿近零抵消：输出信号 = [(上限 − 输入) × 信号下限 + (输入 − 下限) × 信号上限] / 被测量跨度 = {} {signal_symbol}。", c(signal))
+                            } else if params.function == 0 && model::uses_midpoint(fraction) {
+                                format!("以量程中点为基准，输出信号 = 信号中点 + (输入 − 被测量中点) × (信号跨度 / 被测量跨度) = {} {signal_symbol}。", c(signal))
+                            } else if input > low && fraction < f64::MIN_POSITIVE {
+                                format!("归一化比例极小，合并二进制指数后计算信号跨度乘以 {}，再加信号下限，得到 {} {signal_symbol}。", if params.function == 1 { "√[(输入 − 被测量下限) / 被测量跨度]" } else { "(输入 − 被测量下限) / 被测量跨度" }, c(signal))
+                            } else if fraction > 0.5 {
+                                format!("以上限为基准，输出 = 信号上限 − (被测量上限 − 输入) × (信号跨度 / 被测量跨度){} = {} {signal_symbol}。", if params.function == 1 { " / (1 + √r)" } else { "" }, c(signal))
                             } else {
                                 format!("输出信号 = 下限 + q × 信号跨度 = {} + {} × {} = {} {signal_symbol}；程序使用融合乘加。", n(signal_low), c(output_fraction), c(signal_span), c(signal))
                             });
@@ -305,8 +313,18 @@ impl ToolboxApp {
                             } else {
                                 format!("线性特性：被测量比例 r = q = {}。", c(fraction))
                             });
-                            steps.push(if signal_fraction == 1.0 {
+                            steps.push(if input == signal_high {
                                 format!("信号比例为 1，被测量直接取上限 {} {unit_symbol}。", n(process_value))
+                            } else if params.function == 1 && model::crosses_zero(process_range) {
+                                format!("被测量范围跨零，平方反算合并分子并补偿舍入误差。被测量 = [信号跨度² × 被测量下限 + (输入 − 信号下限)² × 被测量跨度] / 信号跨度² = {} {unit_symbol}。", c(process_value))
+                            } else if params.function == 0 && model::crosses_zero(process_range) {
+                                format!("被测量范围跨零，按上下限的加权和计算并补偿近零抵消：被测量 = [(信号上限 − 输入) × 被测量下限 + (输入 − 信号下限) × 被测量上限] / 信号跨度 = {} {unit_symbol}。", c(process_value))
+                            } else if params.function == 0 && model::uses_midpoint(signal_fraction) {
+                                format!("以量程中点为基准，被测量 = 被测量中点 + (输入 − 信号中点) × (被测量跨度 / 信号跨度) = {} {unit_symbol}。", c(process_value))
+                            } else if input > signal_low && fraction < f64::MIN_POSITIVE {
+                                format!("归一化比例极小，合并二进制指数后计算被测量跨度乘以 {}，再加被测量下限，得到 {} {unit_symbol}。", if params.function == 1 { "[(输入 − 信号下限) / 信号跨度]²" } else { "(输入 − 信号下限) / 信号跨度" }, c(process_value))
+                            } else if signal_fraction > 0.5 {
+                                format!("以上限为基准，被测量 = 被测量上限 − (信号上限 − 输入) × (被测量跨度 / 信号跨度){} = {} {unit_symbol}。", if params.function == 1 { " × [2 − (信号上限 − 输入) / 信号跨度]" } else { "" }, c(process_value))
                             } else {
                                 format!("被测量 = 下限 + r × 被测量跨度 = {} + {} × {} = {} {}；程序使用融合乘加。", n(low), c(fraction), c(process_span), c(process_value), unit_symbol)
                             });

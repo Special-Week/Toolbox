@@ -125,6 +125,49 @@ void drawTable(Page &p, const gauges::Report &report, const gauges::Table &table
     p.y += 8;
 }
 } // 命名空间
+void recordUnifiedGaugeEdit(State &state, const std::string &key) {
+    const std::string prefix = "gauge_unified.gauge.";
+    if (key.compare(0, prefix.size(), prefix) != 0)
+        return;
+    const auto visible = gaugeCache.find("gauge_unified");
+    if (visible == gaugeCache.end())
+        return;
+    for (const auto &field : visible->second.fields) {
+        if (field.key != "size" && field.key != "tpi" && field.key != "series")
+            continue;
+        const auto fieldKey = prefix + field.key;
+        std::string value;
+        if (!field.select && key == fieldKey) {
+            value = utf8(state.values.at(key));
+        } else if (key == fieldKey + (field.select ? ".select" : ".suggestion")) {
+            const int index = state.choices.at(key) - (field.select ? 0 : 1);
+            if (index < 0 || std::size_t(index) >= field.options.size())
+                return;
+            value = field.options[std::size_t(index)].value;
+        } else {
+            continue;
+        }
+        const auto saved = prefix + "input.";
+        state.values[saved + field.key] = wide(value);
+        state.values[saved + "_threadChange"] = wide(field.key);
+        if (field.key == "tpi") {
+            const auto size = state.values.find(saved + "size");
+            if (size != state.values.end()) {
+                try {
+                    const auto series = gauges::unSeries(utf8(size->second), parse(value));
+                    if (!series.empty())
+                        state.values[saved + "_lastSeries"] = wide(series);
+                } catch (const std::exception &) {
+                    // 不完整的牙数暂时无法识别系列。
+                }
+            }
+        } else if (field.key == "series" && value != "非标 / 自定义") {
+            state.values[saved + "_lastSeries"] = wide(value);
+        }
+        return;
+    }
+}
+
 void renderGauges(Page &p) {
     auto type = typeOf(p.tool.kind);
     if (gaugeCache.find(p.tool.id) == gaugeCache.end()) {
@@ -138,7 +181,21 @@ void renderGauges(Page &p) {
     auto &previous = gaugeCache[p.tool.id];
     auto input = previous.state;
     std::string changed;
+    const auto pending = p.state.values.find(p.key("gauge.input._threadChange"));
+    const bool hasThreadEdit = type == GaugeType::Unified && pending != p.state.values.end();
+    if (hasThreadEdit) {
+        changed = utf8(pending->second);
+        p.state.values.erase(pending);
+        input.erase("_threadChange");
+        for (const auto *field : {"size", "tpi", "series", "_lastSeries"}) {
+            const auto value = p.state.values.find(p.key("gauge.input.") + field);
+            if (value != p.state.values.end())
+                input[field] = utf8(value->second);
+        }
+    }
     for (const auto &field : previous.fields) {
+        if (hasThreadEdit && (field.key == "size" || field.key == "tpi" || field.key == "series"))
+            continue;
         auto key = p.key("gauge." + field.key);
         const auto saved = input[field.key];
         if (field.select) {
@@ -156,6 +213,17 @@ void renderGauges(Page &p) {
         }
         if (input[field.key] != saved && changed.empty()) {
             changed = field.key;
+        }
+    }
+    // 旧记录可能同时存有尺寸和牙数的原始输入，却没有事件顺序。
+    if (!hasThreadEdit && type == GaugeType::Unified && changed == "size" &&
+        input["tpi"] != previous.state["tpi"]) {
+        try {
+            const auto series = gauges::unSeries(previous.state["size"], parse(input["tpi"]));
+            if (!series.empty())
+                input["_lastSeries"] = series;
+        } catch (const std::exception &) {
+            // 不完整的牙数继续沿用既有系列。
         }
     }
     if (!changed.empty())

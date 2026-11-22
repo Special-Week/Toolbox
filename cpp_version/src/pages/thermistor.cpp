@@ -132,6 +132,8 @@ void thermistorPage(Page &p) {
     const double bDerivative = polynomialSlope(model.b, 1 / kelvin).second;
     p.processSteps.push_back(L"令 x = 1/T，B′(x) = Σ i·B[i]·x^(i−1)；T = " + p.processValue(kelvin) + L" K，x = " + p.processValue(1 / kelvin) + L" K⁻¹，B′(x) = " + p.processValue(bDerivative) + L"，B 曲线电阻 R_B = " + p.processValue(bResistance) + L" Ω。");
     p.processSteps.push_back(L"链式法则：dR/dt = −R_B × B′(1/T) / T² = −" + p.processValue(bResistance) + L" × " + p.processValue(bDerivative) + L" / " + p.processValue(kelvin) + L"² = " + p.processValue(slope) + L" Ω/°C；按显示温标换算后 = " + p.processValue(slope / unit.span()) + L" Ω/" + unit.symbol() + L"。");
-    p.division("ntc", {lo, hi}, unit, L"Ω", [model](double t) { return model.resistance(t); });
+    p.division(
+        "ntc", {lo, hi}, unit, L"Ω", [model](double t) { return model.resistance(t); },
+        [model](double t) -> std::optional<double> { return model.slope(t); });
 }
 } // 命名空间 toolbox

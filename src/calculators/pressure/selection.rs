@@ -102,7 +102,7 @@ impl ToolboxApp {
                         ] {
                             let text = app.value(tool, key, "");
                             if let Ok(value) = parse_number(&text) {
-                                app.set_value(
+                                app.set_derived_value(
                                     tool,
                                     key,
                                     convert_unit(Dimension::Pressure, value, previous, index)?
@@ -111,7 +111,7 @@ impl ToolboxApp {
                             }
                         }
                     }
-                    app.set_value(tool, "selection.previous_unit", index.to_string());
+                    app.set_derived_value(tool, "selection.previous_unit", index.to_string());
                     let piston = !transmitter
                         && app.select_index(
                             ui,
@@ -334,6 +334,20 @@ impl ToolboxApp {
                     } else {
                         None
                     };
+                    if transmitter {
+                        model::transmitter(
+                            dut,
+                            dut,
+                            signal,
+                            da,
+                            fixed_accuracy.unwrap_or(0.01),
+                            reading,
+                            fixed,
+                            required,
+                        )?;
+                    } else if let Some(accuracy) = fixed_accuracy {
+                        model::verify(dut, dut, da, accuracy, required, piston)?;
+                    }
                     let duties = if mode == 1 {
                         vec![dut]
                     } else {

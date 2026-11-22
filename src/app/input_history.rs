@@ -1,9 +1,9 @@
 //! 本地输入续接：按工具隔离，停顿后原子写入，正常退出时补存最后一次编辑。
 use crate::catalog::{TOOLS, ToolDef};
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const DEBOUNCE: Duration = Duration::from_millis(700);
@@ -12,6 +12,8 @@ const MAX_BYTES: u64 = 8 * 1024 * 1024;
 pub(super) struct InputHistory {
     path: Option<PathBuf>,
     pub(super) values: HashMap<String, String>,
+    dirty: HashMap<&'static str, HashSet<String>>,
+    resets: HashSet<&'static str>,
     pending: Option<Instant>,
     pub(super) error: bool,
 }
@@ -31,42 +33,82 @@ impl InputHistory {
     }
 
     fn load(path: Option<PathBuf>) -> Self {
-        let values = (|| {
-            let mut text = String::new();
-            std::fs::File::open(path.as_ref()?)
-                .ok()?
-                .take(MAX_BYTES + 1)
-                .read_to_string(&mut text)
-                .ok()?;
-            if text.len() as u64 > MAX_BYTES {
-                return None;
-            }
-            let data: serde_json::Value = serde_json::from_str(&text).ok()?;
-            if data["version"].as_u64() != Some(1) {
-                return None;
-            }
-            let values = data["values"].as_object()?;
-            Some(
-                values
-                    .iter()
-                    .filter_map(|(key, value)| {
-                        let (id, _) = key.split_once('.')?;
-                        TOOLS.iter().find(|t| t.id == id && t.remembers_inputs())?;
-                        Some((key.clone(), value.as_str()?.to_owned()))
-                    })
-                    .collect(),
-            )
-        })()
-        .unwrap_or_default();
+        let values = path
+            .as_deref()
+            .and_then(|p| Self::read(p).ok())
+            .unwrap_or_default();
         Self {
             path,
             values,
+            dirty: HashMap::new(),
+            resets: HashSet::new(),
             pending: None,
             error: false,
         }
     }
 
+    fn read(path: &Path) -> io::Result<HashMap<String, String>> {
+        let file = match std::fs::File::open(path) {
+            Ok(file) => file,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(HashMap::new()),
+            Err(error) => return Err(error),
+        };
+        let mut bytes = Vec::new();
+        file.take(MAX_BYTES + 1).read_to_end(&mut bytes)?;
+        if bytes.len() as u64 > MAX_BYTES {
+            return Err(io::Error::other("输入历史超出大小上限"));
+        }
+        let data = serde_json::from_slice::<serde_json::Value>(&bytes).unwrap_or_default();
+        let values = data["values"]
+            .as_object()
+            .filter(|_| data["version"].as_u64() == Some(1));
+        Ok(values
+            .into_iter()
+            .flatten()
+            .filter_map(|(key, value)| {
+                let (id, _) = key.split_once('.')?;
+                TOOLS.iter().find(|t| t.id == id && t.remembers_inputs())?;
+                Some((key.clone(), value.as_str()?.to_owned()))
+            })
+            .collect())
+    }
+
+    pub(super) fn reload_tool(&mut self, tool: &ToolDef, inputs: &mut HashMap<String, String>) {
+        if self.dirty.contains_key(tool.id) || self.resets.contains(tool.id) {
+            return;
+        }
+        let Some(latest) = self.path.as_deref().and_then(|path| Self::read(path).ok()) else {
+            return;
+        };
+        let prefix = format!("{}.", tool.id);
+        inputs.retain(|key, _| !key.starts_with(&prefix));
+        self.values.retain(|key, _| !key.starts_with(&prefix));
+        for (key, value) in latest.into_iter().filter(|(key, _)| key.starts_with(&prefix)) {
+            inputs.insert(key.clone(), value.clone());
+            self.values.insert(key, value);
+        }
+    }
+
+    pub(super) fn reset(&mut self, tool: &ToolDef) {
+        if tool.remembers_inputs() {
+            let prefix = format!("{}.", tool.id);
+            self.values.retain(|key, _| !key.starts_with(&prefix));
+            self.dirty.remove(tool.id);
+            self.resets.insert(tool.id);
+            self.pending = Some(Instant::now() + DEBOUNCE);
+        }
+    }
+
     pub(super) fn observe(&mut self, tool: &ToolDef, inputs: &HashMap<String, String>) {
+        self.snapshot(tool, inputs, true);
+    }
+
+    pub(super) fn snapshot(
+        &mut self,
+        tool: &ToolDef,
+        inputs: &HashMap<String, String>,
+        edited: bool,
+    ) {
         if !tool.remembers_inputs() {
             return;
         }
@@ -83,10 +125,18 @@ impl InputHistory {
         if current == old {
             return;
         }
+        if edited {
+            let changed = self.dirty.entry(tool.id).or_default();
+            changed.extend(
+                current.keys().chain(old.keys())
+                    .filter(|key| current.get(*key) != old.get(*key))
+                    .map(|key| (*key).clone()),
+            );
+            self.pending = Some(Instant::now() + DEBOUNCE);
+        }
         self.values.retain(|key, _| !key.starts_with(&prefix));
         self.values
             .extend(current.into_iter().map(|(k, v)| (k.clone(), v.clone())));
-        self.pending = Some(Instant::now() + DEBOUNCE);
     }
 
     pub(super) fn remaining(&self) -> Option<Duration> {
@@ -101,6 +151,8 @@ impl InputHistory {
         match self.write() {
             Ok(()) => {
                 self.pending = None;
+                self.dirty.clear();
+                self.resets.clear();
                 self.error = false;
             }
             Err(_) => {
@@ -120,8 +172,57 @@ impl InputHistory {
             .parent()
             .ok_or_else(|| io::Error::other("本地数据目录无效"))?;
         std::fs::create_dir_all(parent)?;
+        // 锁住独立文件，正式 JSON 可以继续原子替换。
+        let lock = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path.with_extension("lock"))?;
+        lock.lock()?;
+        let mut values = Self::read(path)?;
+        values.retain(|key, _| {
+            key.split_once('.')
+                .is_none_or(|(id, _)| !self.resets.contains(id))
+        });
+        for (id, fields) in &self.dirty {
+            let mut fields = fields.clone();
+            if matches!(*id, "pressure_reference_selection" | "pressure_transmitter_reference_selection") {
+                let unit = format!("{id}.selection.unit");
+                let default_unit = crate::catalog::units_for(crate::catalog::Dimension::Pressure)
+                    .iter().position(|unit| unit.code == "MPa").unwrap_or(0).to_string();
+                let pressure: Vec<_> = [
+                    "selection.unit", "selection.previous_unit", "dut_low", "dut_high",
+                    "ref_low", "ref_high", "ref_pressure_low", "ref_pressure_high",
+                ].into_iter().map(|key| format!("{id}.{key}")).collect();
+                if values.get(&unit).unwrap_or(&default_unit)
+                    != self.values.get(&unit).unwrap_or(&default_unit)
+                    && pressure.iter().any(|key| fields.contains(key))
+                {
+                    // 一起保存单位与该单位下的量程，避免合并出不同单位的上下限。
+                    fields.extend(pressure);
+                }
+            } else if *id == "gauge_unified" {
+                let thread: Vec<_> = ["size", "tpi", "series", "preferred_series"]
+                    .into_iter().map(|key| format!("{id}.{key}")).collect();
+                if thread.iter().any(|key| fields.contains(key)) {
+                    fields.extend(thread);
+                }
+            }
+            for key in fields {
+                if let Some(value) = self.values.get(&key) {
+                    values.insert(key, value.clone());
+                } else {
+                    values.remove(&key);
+                }
+            }
+        }
+        let bytes = serde_json::to_vec(&json!({ "version": 1, "values": values }))?;
+        if bytes.len() as u64 > MAX_BYTES {
+            return Err(io::Error::other("输入历史超出大小上限"));
+        }
         let mut file = tempfile::NamedTempFile::new_in(parent)?;
-        serde_json::to_writer(&mut file, &json!({ "version": 1, "values": self.values }))?;
+        file.write_all(&bytes)?;
         file.flush()?;
         file.as_file().sync_all()?;
         file.persist(path).map_err(|e| e.error)?;
@@ -1664,7 +1765,7 @@ mod tests {
                     assert!(
                         boundary
                             .iter()
-                            .any(|s| s.contains("B 曲线在校准温区内取差分点"))
+                            .any(|s| s.contains("链式法则："))
                     );
                     app.set_value(tool, "ntc.b.3.false.0", "1".into());
                     app.set_value(tool, "ntc.b.3.false.1", "0".into());
@@ -1673,7 +1774,7 @@ mod tests {
                     app.set_value(tool, "ntc.temperature.0", "-273".into());
                     let cold = show(&mut app);
                     assert!(cold.iter().any(|s| s.contains("2.71828183")), "{cold:?}");
-                    assert!(cold.iter().any(|s| s.contains("在校准温区内取差分点")));
+                    assert!(cold.iter().any(|s| s.contains("链式法则：")));
                     app.set_value(tool, "ntc.range.min", "-20".into());
                     app.set_value(tool, "ntc.range.max", "100".into());
                     app.set_value(tool, "ntc.temperature.0", "25".into());
@@ -1992,9 +2093,9 @@ mod tests {
         let tool = TOOLS.iter().find(|tool| tool.id == "transmitter").unwrap();
         let size = [1220.0, 8000.0];
         for (direction, function, expected) in [
-            (0, 0, "输出信号 = 下限"),
+            (0, 0, "输出信号 = 信号中点"),
             (0, 1, "信号比例 q = √r"),
-            (1, 0, "被测量比例 r = q"),
+            (1, 0, "被测量 = 被测量中点"),
             (1, 1, "被测量比例 r = q²"),
         ] {
             let mut app = app_at(
@@ -3078,6 +3179,89 @@ mod tests {
     }
 
     #[test]
+    fn unified_thread_keeps_preferred_series_while_typing_a_fraction() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut app = app_at(dir.path().join("inputs.json"));
+        let tool = TOOLS.iter().find(|tool| tool.id == "gauge_unified").unwrap();
+        let ctx = context();
+        app.set_value(tool, "tpi", "28".into());
+        frame(&mut app, &ctx, tool.id, [1220.0, 820.0], vec![]);
+        let input_id = egui::Id::new((tool.id, "size", "input"));
+        let modifiers = egui::Modifiers {
+            ctrl: true,
+            command: true,
+            ..Default::default()
+        };
+        for value in ["3", "3/", "3/8"] {
+            ctx.memory_mut(|memory| memory.request_focus(input_id));
+            frame(
+                &mut app,
+                &ctx,
+                tool.id,
+                [1220.0, 820.0],
+                vec![
+                    egui::Event::Key {
+                        key: egui::Key::A,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    },
+                    egui::Event::Text(value.into()),
+                ],
+            );
+            assert_eq!(app.value(tool, "size", ""), value);
+        }
+        assert_eq!(app.value(tool, "series", ""), "UNF");
+        assert_eq!(app.value(tool, "tpi", ""), "24");
+    }
+
+    #[test]
+    fn another_window_editing_the_same_tool_only_updates_changed_fields() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("inputs.json");
+        let tool = TOOLS.iter().find(|t| t.id == "pressure_reference_selection").unwrap();
+        let key = |field| format!("{}.{field}", tool.id);
+        let mut first = InputHistory::load(Some(path.clone()));
+        first.observe(tool, &HashMap::from([(key("dut_high"), "250".into())]));
+        first.flush();
+        let mut second = InputHistory::load(Some(path.clone()));
+        first.observe(tool, &HashMap::from([(key("dut_high"), "300".into())]));
+        first.flush();
+        let mut inputs = second.values.clone();
+        inputs.insert(key("dut_low"), "-1".into());
+        second.observe(tool, &inputs);
+        second.flush();
+        let saved = InputHistory::read(&path).unwrap();
+        assert_eq!(saved[&key("dut_high")], "300");
+        assert_eq!(saved[&key("dut_low")], "-1");
+    }
+
+    #[test]
+    fn opening_a_remembered_tool_reads_latest_inputs_without_saving_defaults() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("inputs.json");
+        let tool = TOOLS.iter().find(|t| t.id == "gauge_unified").unwrap();
+        let mut first = app_at(path.clone());
+        let mut second = app_at(path.clone());
+        frame(&mut second, &context(), tool.id, [1220.0, 820.0], vec![]);
+        second.history.flush();
+        assert!(!path.exists());
+
+        first.set_value(tool, "size", "3/8".into());
+        first.set_value(tool, "tpi", "24".into());
+        frame(&mut first, &context(), tool.id, [1220.0, 820.0], vec![]);
+        first.history.flush();
+        let before = std::fs::read(&path).unwrap();
+        second.opened = None;
+        frame(&mut second, &context(), tool.id, [1220.0, 820.0], vec![]);
+        assert_eq!(second.value(tool, "tpi", ""), "24");
+        assert!(second.history.remaining().is_none());
+        second.history.flush();
+        assert_eq!(std::fs::read(path).unwrap(), before);
+    }
+
+    #[test]
     fn rendered_reset_button_clears_saved_rows_and_keeps_other_tools() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("inputs.json");
@@ -3216,6 +3400,31 @@ mod tests {
         )
         .unwrap();
         assert!(InputHistory::load(Some(path)).values.is_empty());
+    }
+
+    #[test]
+    fn merges_concurrent_saves_for_different_tools() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("inputs.json");
+        let fit = TOOLS.iter().find(|t| t.id == "calibration_curve_fit").unwrap();
+        let pressure = TOOLS.iter().find(|t| t.id == "pressure_reference_selection").unwrap();
+        let mut a = InputHistory::load(Some(path.clone()));
+        let mut b = InputHistory::load(Some(path.clone()));
+        let pressure_key = format!("{}.dut_high", pressure.id);
+        let fit_key = format!("{}.model", fit.id);
+        a.observe(pressure, &HashMap::from([(pressure_key.clone(), "250".into())]));
+        b.observe(fit, &HashMap::from([(fit_key.clone(), "2".into())]));
+        std::thread::scope(|scope| {
+            scope.spawn(|| a.flush());
+            scope.spawn(|| b.flush());
+        });
+        assert!(!a.error && !b.error);
+        assert_eq!(InputHistory::read(&path).unwrap(), HashMap::from([
+            (pressure_key, "250".into()), (fit_key.clone(), "2".into()),
+        ]));
+        a.observe(pressure, &HashMap::new());
+        a.flush();
+        assert_eq!(InputHistory::read(&path).unwrap(), HashMap::from([(fit_key, "2".into())]));
     }
 
     #[test]

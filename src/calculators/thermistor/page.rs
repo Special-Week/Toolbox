@@ -183,15 +183,7 @@ impl ToolboxApp {
                     if min <= -273.15 || min >= max || t < min || t > max {
                         return Err("校准温区须高于绝对零度、下限小于上限，且温度处于所填校准温区内".into());
                     }
-                    let mut lower = (t - 1.0).max(min);
-                    if lower <= -273.15 {
-                        lower = t;
-                    }
-                    let upper = (t + 1.0).min(max);
-                    let upper_resistance = model.resistance(upper)?;
-                    let lower_resistance = model.resistance(lower)?;
-                    let slope = (upper_resistance - lower_resistance) / (upper - lower);
-                    crate::calculators::numerics::finite(&[slope])?;
+                    let slope = model.slope(t)?;
                     let mut steps = vec![
                         format!(
                             "{} 阶{}；{}；校准温区 {}～{} °C。",
@@ -236,11 +228,11 @@ impl ToolboxApp {
                         }
                     }
                     let (prefix, coefficients, x) = if direction == 0 {
-                        steps.push("电阻 → 温度：1/T = Σ A[i]·ln(R)ⁱ；T 用 K，R 用 Ω。".to_owned());
+                        steps.push("电阻 → 温度：1/T = ΣAᵢ[ln(R)]ⁱ；T 用 K，R 用 Ω。".to_owned());
                         ("A", &model.a, r.ln())
                     } else {
                         steps.push(
-                            "温度 → 电阻：ln(R) = Σ B[i]·(1/T)ⁱ；T 用 K，R 用 Ω。".to_owned(),
+                            "温度 → 电阻：ln(R) = ΣBᵢ(1/T)ⁱ；T 用 K，R 用 Ω。".to_owned(),
                         );
                         ("B", &model.b, 1.0 / (t + 273.15))
                     };
@@ -270,19 +262,26 @@ impl ToolboxApp {
                             format!("变化率使用 B[{i}] = {}", format_process_number(*value))
                         }));
                     }
-                    if let Ok(at_temperature) = model.resistance(t) {
-                        steps.push(format!(
-                            "B 曲线在当前温度的电阻 = {} Ω。",
-                            format_process_computed(at_temperature)
-                        ));
-                    }
+                    let kelvin = t + 273.15;
+                    let b_resistance = model.resistance(t)?;
+                    let b_derivative =
+                        crate::calculators::calibration::polynomial_slope(&model.b, 1.0 / kelvin).1;
                     steps.push(format!(
-                        "B 曲线在校准温区内取差分点 {} °C 和 {} °C：dR/dt ≈ ({} − {}) / {} = {} Ω/°C；按显示温标换算后 = {} Ω/{}。",
-                        format_process_computed(lower),
-                        format_process_computed(upper),
-                        format_process_computed(upper_resistance),
-                        format_process_computed(lower_resistance),
-                        format_process_computed(upper - lower),
+                        "B 曲线在当前温度的电阻 = {} Ω。",
+                        format_process_computed(b_resistance)
+                    ));
+                    steps.push(format!(
+                        "令 x = 1/T，B′(x) = Σ i·B[i]·x^(i−1)；T = {} K，x = {} K⁻¹，B′(x) = {}，B 曲线电阻 R_B = {} Ω。",
+                        format_process_computed(kelvin),
+                        format_process_computed(1.0 / kelvin),
+                        format_process_computed(b_derivative),
+                        format_process_computed(b_resistance),
+                    ));
+                    steps.push(format!(
+                        "链式法则：dR/dt = −R_B × B′(1/T) / T² = −{} × {} / {}² = {} Ω/°C；按显示温标换算后 = {} Ω/{}。",
+                        format_process_computed(b_resistance),
+                        format_process_computed(b_derivative),
+                        format_process_computed(kelvin),
                         format_process_computed(slope),
                         format_process_computed(slope / unit.span()),
                         unit.symbol()
@@ -349,7 +348,17 @@ impl ToolboxApp {
             },
         );
         if let Some((m, u, min, max)) = table {
-            self.render_division_table(ui, tool, "ntc", (min, max), u, "Ω", |t| m.resistance(t), None);
+            let slope_fn = |t: f64| Ok(Some(m.slope(t)?));
+            self.render_division_table(
+                ui,
+                tool,
+                "ntc",
+                (min, max),
+                u,
+                "Ω",
+                |t| m.resistance(t),
+                Some(&slope_fn),
+            );
         }
         if let Some(lines) = &process {
             calculation_process(ui, "thermistor_polynomial_process", lines);

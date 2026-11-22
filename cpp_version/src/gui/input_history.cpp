@@ -310,19 +310,24 @@ class Reader {
     }
 };
 
-bool readJson(const std::wstring &path, State &state, bool filter = true) {
+bool readJson(const std::wstring &path, State &state, bool filter = true, bool *retry = nullptr) {
     File file;
     file.value = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr,
                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file.value == INVALID_HANDLE_VALUE)
+    if (file.value == INVALID_HANDLE_VALUE) {
+        const DWORD error = GetLastError();
+        if (retry) *retry = error != ERROR_FILE_NOT_FOUND && error != ERROR_PATH_NOT_FOUND;
         return false;
+    }
     LARGE_INTEGER size{};
-    if (!GetFileSizeEx(file.value, &size) || size.QuadPart <= 0 || size.QuadPart > maximumBytes)
+    if (retry) *retry = true;
+    if (!GetFileSizeEx(file.value, &size) || size.QuadPart > maximumBytes)
         return false;
     std::string text(std::size_t(size.QuadPart), '\0');
     DWORD read = 0;
     if (!ReadFile(file.value, text.data(), DWORD(text.size()), &read, nullptr) || read != text.size())
         return false;
+    if (retry) *retry = false;
     // 接受常见编辑器生成的 UTF-8 BOM，但不接受损坏的 UTF-8 字节。
     if (text.compare(0, 3, "\xef\xbb\xbf") == 0)
         text.erase(0, 3);
@@ -442,24 +447,130 @@ void InputHistory::load(State &state) {
     state.choices.insert(loaded.choices.begin(), loaded.choices.end());
 }
 
-void InputHistory::observe(const Tool &tool, const State &state) {
+bool InputHistory::reloadTool(const Tool &tool, State &state) {
+    if (path_.empty() || pending(tool))
+        return false;
+    State loaded;
+    bool retry = false;
+    readJson(path_, loaded, true, &retry);
+    if (retry)
+        return false;
+    const auto current = toolInputs(tool, loaded);
+    replaceTool(tool, current, state);
+    replaceTool(tool, current, saved_);
+    return true;
+}
+
+void InputHistory::observe(const Tool &tool, const State &state, bool reset) {
     if (!remembersInputs(tool))
         return;
     const auto current = toolInputs(tool, state), previous = toolInputs(tool, saved_);
-    if (current.values == previous.values && current.choices == previous.choices)
+    if (!reset && current.values == previous.values && current.choices == previous.choices)
         return;
+    const auto markChanges = [](const auto &before, const auto &after, auto &fields) {
+        for (const auto &[key, value] : before)
+            if (after.find(key) == after.end())
+                fields.insert(key);
+        for (const auto &[key, value] : after) {
+            const auto old = before.find(key);
+            if (old == before.end() || old->second != value)
+                fields.insert(key);
+        }
+    };
+    if (reset)
+        resets_.insert(tool.id);
+    markChanges(previous.values, current.values, changedValues_);
+    markChanges(previous.choices, current.choices, changedChoices_);
     replaceTool(tool, current, saved_);
-    pending_ = true;
+    dirty_.insert(tool.id);
     due_ = GetTickCount64() + 700;
 }
 
+void InputHistory::snapshot(const Tool &tool, const State &state) {
+    if (remembersInputs(tool))
+        replaceTool(tool, toolInputs(tool, state), saved_);
+}
+
 void InputHistory::flush(bool force) {
-    if (!pending_ || (!force && GetTickCount64() < due_))
+    if (dirty_.empty() || (!force && GetTickCount64() < due_))
         return;
     due_ = GetTickCount64() + 5000;
     try {
-        if (writeJson(path_, saved_))
-            pending_ = false;
+        const auto separator = path_.find_last_of(L"\\/");
+        if (separator == std::wstring::npos || !ensureDirectory(path_.substr(0, separator)))
+            return;
+        File lock;
+        lock.value = CreateFileW((path_ + L".lock").c_str(), GENERIC_READ | GENERIC_WRITE,
+                                 FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                                 FILE_ATTRIBUTE_NORMAL, nullptr);
+        OVERLAPPED range{};
+        if (lock.value == INVALID_HANDLE_VALUE || !LockFileEx(lock.value, LOCKFILE_EXCLUSIVE_LOCK, 0, 1, 0, &range))
+            return;
+        State merged;
+        bool retry = false;
+        readJson(path_, merged, true, &retry);
+        if (retry)
+            return;
+        for (const auto &tool : tools())
+            if (resets_.count(tool.id))
+                replaceTool(tool, toolInputs(tool, saved_), merged);
+        auto valueFields = changedValues_, choiceFields = changedChoices_;
+        for (const auto &tool : tools()) {
+            if (!pending(tool))
+                continue;
+            const auto prefix = tool.id + ".";
+            if (tool.kind == Kind::PressureReference || tool.kind == Kind::TransmitterReference) {
+                auto unit = prefix + "selection.unit";
+                const auto &pressureUnits = units(Dimension::Pressure);
+                const auto mpa = std::find_if(pressureUnits.begin(), pressureUnits.end(),
+                    [](const auto &entry) { return entry.code == L"MPa"; });
+                const int defaultUnit = mpa == pressureUnits.end() ? 0 : int(mpa - pressureUnits.begin());
+                const auto getUnit = [&](const State &state) {
+                    auto it = state.choices.find(unit);
+                    return it == state.choices.end() ? defaultUnit : it->second;
+                };
+                const std::vector<std::string> fields{
+                    prefix + "dut_low", prefix + "dut_high", prefix + "ref_low", prefix + "ref_high",
+                };
+                if (getUnit(saved_) != getUnit(merged) &&
+                    (choiceFields.count(unit) || std::any_of(fields.begin(), fields.end(),
+                        [&](const auto &key) { return valueFields.count(key) != 0; }))) {
+                    valueFields.insert(fields.begin(), fields.end());
+                    choiceFields.insert(unit);
+                    choiceFields.insert(prefix + "previous.unit");
+                }
+            } else if (tool.kind == Kind::GaugeUnified) {
+                const std::vector<std::string> fields{
+                    prefix + "gauge.input.size", prefix + "gauge.input.tpi",
+                    prefix + "gauge.input.series", prefix + "gauge.input._lastSeries",
+                    prefix + "gauge.input._threadChange",
+                    prefix + "gauge.size", prefix + "gauge.tpi",
+                };
+                if (std::any_of(fields.begin(), fields.end(),
+                        [&](const auto &key) { return valueFields.count(key) != 0; }) ||
+                    choiceFields.count(prefix + "gauge.series.select")) {
+                    valueFields.insert(fields.begin(), fields.end());
+                    choiceFields.insert(prefix + "gauge.series.select");
+                }
+            }
+        }
+        const auto applyChanges = [](const auto &fields, const auto &source, auto &destination) {
+            for (const auto &key : fields) {
+                const auto value = source.find(key);
+                if (value == source.end())
+                    destination.erase(key);
+                else
+                    destination.insert_or_assign(key, value->second);
+            }
+        };
+        applyChanges(valueFields, saved_.values, merged.values);
+        applyChanges(choiceFields, saved_.choices, merged.choices);
+        if (writeJson(path_, merged)) {
+            dirty_.clear();
+            resets_.clear();
+            changedValues_.clear();
+            changedChoices_.clear();
+        }
     } catch (const std::exception &) {
         // 保存失败保留待存输入，稍后重试，不中断当前计算。
     }

@@ -10,10 +10,10 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
     match kind {
         ToolKind::HumidityConversion => {
             let u = i.unit()?;
-            let known = i.index("known", 0, 4)?;
+            let known = i.index("known", 0, 5)?;
             let t = u.celsius(i.number("temperature", u.display(20.))?);
-            let mut v = i.number("value", [50., u.display(10.), u.display(15.), 7.5][known])?;
-            if known == 1 || known == 2 {
+            let mut v = i.number("value", [50., u.display(10.), u.display(15.), 7.5, u.display(10.)][known])?;
+            if matches!(known, 1 | 2 | 4) {
                 v = u.celsius(v)
             }
             let pressure = i.number("pressure", 101.325)? * 1000.;
@@ -270,30 +270,41 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
             o.metric("等效水柱（4 °C）", delta / 9.806_38, "mmH₂O");
         }
         ToolKind::AltitudePressure => {
-            let (h, p) = if i.index("direction", 0, 2)? == 0 {
+            let direction = i.index("direction", 0, 2)?;
+            let mut displayed_endpoint = None;
+            let (h, p) = if direction == 0 {
                 let h = i.number("value", 1000.)?;
-                let p = math::isa_pressure(h).ok_or("高度须在 −1000～86000 m 内")?;
+                let p = math::isa_pressure(h).ok_or("高度须在 −1000～84852 m 内")?;
                 (h, p)
             } else {
-                let p = i.number("value", 89874.56)?;
-                let h = math::isa_altitude(p).ok_or("绝对气压超出标准大气模型范围")?;
-                (h, p)
+                let input = i.number("value", 89874.56)?;
+                // 与 src/format.ts 的结果显示精度一致。
+                let result = math::isa_altitude_from_display(input, 1.0, |value| format!("{value:.10e}"))
+                    .ok_or("绝对气压超出标准大气模型范围")?;
+                if input != result.1 {
+                    displayed_endpoint = Some(input);
+                }
+                result
             };
             o.metric("位势高度", h, "m");
             o.metric("绝对气压", p, "Pa");
             o.metric("绝对气压", p / 1000., "kPa");
             o.metric("绝对气压", p / 100., "hPa");
-            let temperature = math::isa_temperature(h);
+            let temperature = math::isa_molecular_temperature(h);
+            let kinetic = math::isa_kinetic_temperature(h);
             o.process = vec![format!(
                 "按 1976 标准大气的分层恒温或恒温度梯度方程{}：位势高度 = {} m，绝对气压 = {} Pa。",
-                if i.index("direction", 0, 2)? == 0 {
+                if direction == 0 {
                     "正算"
                 } else {
-                    "在 −1000～86000 m 二分反算"
+                    "在 −1000～84852 m 二分反算"
                 },
                 crate::calculators::common::format_process_computed(h),
                 crate::calculators::common::format_process_computed(p)
             )];
+            if let Some(input) = displayed_endpoint {
+                o.process.insert(0, format!("输入气压 {input} Pa 与边界显示值一致，按该端点的模型气压反算。"));
+            }
             let _ = math::isa_pressure_with_steps(h, |base, end, temp, lapse, start, result| {
                 o.process.push(String::new());
                 o.process.extend(pressure::process::atmosphere_layer(
@@ -301,11 +312,12 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
                 ));
             });
             o.process.push(format!(
-                "标准大气温度 T = {} K；空气密度 ρ = p/(287.05287T) = {} kg/m³。",
+                "动力学温度 T = Tₘ × (M/M₀) = {} K，分子尺度温度 Tₘ = {} K；空气密度 ρ = p/(287.05287Tₘ) = {} kg/m³。",
+                crate::calculators::common::format_process_computed(kinetic),
                 crate::calculators::common::format_process_computed(temperature),
                 crate::calculators::common::format_process_computed(p / (287.05287 * temperature))
             ));
-            o.metric("标准大气温度", temperature - 273.15, "°C");
+            o.metric("标准大气温度", kinetic - 273.15, "°C");
             o.metric("空气密度", p / (287.052_87 * temperature), "kg/m³");
         }
         ToolKind::Transmitter => {
@@ -320,6 +332,25 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
                 ["Pa", "°C", "%RH", "°C", "g/m³"][family]
             };
             let p = Range::new(i.number("low", 0.)?, i.number("high", 100.)?)?;
+            match family {
+                1 | 3 => {
+                    let abs_zero = match i.unit()?.0 {
+                        1 => 0.0,
+                        2 => -459.67,
+                        _ => -273.15,
+                    };
+                    if p.low < abs_zero {
+                        return Err("温度量程下限不能低于绝对零度".into());
+                    }
+                }
+                2 if p.low < 0.0 || p.high > 100.0 => {
+                    return Err("相对湿度量程须在 0～100 %RH 之间".into());
+                }
+                4 if p.low < 0.0 => {
+                    return Err("绝对湿度量程下限不能为负数".into());
+                }
+                _ => {}
+            }
             let signal = Range::new(i.number("signalLow", 4.)?, i.number("signalHigh", 20.)?)?;
             let square_root = i.index("characteristic", 0, 2)? == 1;
             let m = transmitter::model::Transmitter::new(p, signal, square_root);
@@ -343,12 +374,54 @@ pub(crate) fn calculate(kind: ToolKind, i: &Input) -> Result<Output, String> {
                     signal.high,
                     c(signal.span)
                 ),
-                if f == 1.0 {
+                if v == if inverse { signal.high } else { p.high } {
                     if inverse {
                         format!("信号比例为 1，过程量直接取上限 {} {symbol}。", c(result))
                     } else {
                         format!("被测量比例为 1，输出信号直接取上限 {} {signal_symbol}。", c(result))
                     }
+                } else if square_root && transmitter::model::crosses_zero(if inverse { p } else { signal }) {
+                    if inverse {
+                        format!("过程量范围跨零，平方反算合并分子并补偿舍入误差。过程量 = [信号跨度² × 过程量下限 + (输入 − 信号下限)² × 过程量跨度] / 信号跨度² = {} {symbol}。", c(result))
+                    } else {
+                        format!("过程量比例 r = (输入 − 过程量下限) / 过程量跨度 = {}。信号量程跨零，开方正算用有理化保留近零差值。输出 = (信号跨度² × r − 信号下限²) / (信号跨度 × √r − 信号下限) = {} {signal_symbol}。", c(f), c(result))
+                    }
+                } else if !square_root && transmitter::model::crosses_zero(if inverse { p } else { signal }) {
+                    if inverse {
+                        format!("过程量范围跨零，按上下限的加权和计算并补偿近零抵消：过程量 = [(信号上限 − 输入) × 过程量下限 + (输入 − 信号下限) × 过程量上限] / 信号跨度 = {} {symbol}。", c(result))
+                    } else {
+                        format!("信号量程跨零，按上下限的加权和计算并补偿近零抵消：输出 = [(过程量上限 − 输入) × 信号下限 + (输入 − 过程量下限) × 信号上限] / 过程量跨度 = {} {signal_symbol}。", c(result))
+                    }
+                } else if !square_root && transmitter::model::uses_midpoint(f) {
+                    if inverse {
+                        format!("以量程中点为基准，过程量 = 过程量中点 + (输入 − 输出中点) × (过程量跨度 / 输出跨度) = {} {symbol}。", c(result))
+                    } else {
+                        format!("以量程中点为基准，输出 = 输出中点 + (输入 − 过程量中点) × (输出跨度 / 过程量跨度) = {} {signal_symbol}。", c(result))
+                    }
+                } else if v > if inverse { signal.low } else { p.low } && f < f64::MIN_POSITIVE {
+                    let increment = match (inverse, square_root) {
+                        (false, false) => "输出跨度 × (输入 − 过程量下限) / 过程量跨度",
+                        (false, true) => "输出跨度 × √[(输入 − 过程量下限) / 过程量跨度]",
+                        (true, false) => "过程量跨度 × (输入 − 输出下限) / 输出跨度",
+                        (true, true) => "过程量跨度 × [(输入 − 输出下限) / 输出跨度]²",
+                    };
+                    format!(
+                        "归一化比例极小，合并二进制指数后计算增量 {increment}，结果 = 下限 + 增量 = {} {}。",
+                        c(result),
+                        if inverse { symbol } else { signal_symbol }
+                    )
+                } else if inverse && (v - signal.low) / signal.span > 0.5 {
+                    format!(
+                        "以上限为基准，过程量 = 过程量上限 − (输出上限 − 输入) × (过程量跨度 / 输出跨度){} = {} {symbol}。",
+                        if square_root { " × [2 − (输出上限 − 输入) / 输出跨度]" } else { "" },
+                        c(result)
+                    )
+                } else if !inverse && f > 0.5 {
+                    format!(
+                        "以上限为基准，输出 = 输出上限 − (过程量上限 − 输入) × (输出跨度 / 过程量跨度){} = {} {signal_symbol}。",
+                        if square_root { " / (1 + √f)" } else { "" },
+                        c(result)
+                    )
                 } else if inverse {
                     format!(
                         "信号比例 s = (输入 − 输出下限)/输出跨度 = ({} − {})/{}；{}，过程量 = 下限 + f × 跨度 = {} {}。",
@@ -493,6 +566,12 @@ fn selection(kind: ToolKind, i: &Input) -> Result<Output, String> {
             )
         })
         .collect::<Result<Vec<_>, String>>()?;
+    // 无论目录是否命中，先按相同口径预校验核心参数，防止非法负值在 0 组推荐时静默放行。
+    if transmitter && !legacy {
+        m::transmitter(dut, dut, signal, da, if mode == 2 { ra } else { 0.01 }, reading, fixed, required)?;
+    } else {
+        m::verify(dut, dut, da, if mode == 2 { ra } else { 0.01 }, required, piston)?;
+    }
     let duties = if mode == 1 {
         vec![dut]
     } else {

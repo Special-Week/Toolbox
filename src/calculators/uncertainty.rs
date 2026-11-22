@@ -1,6 +1,5 @@
 //! 可嵌套不确定度预算表；递归深度和分量数量设有上限，控制页面与计算规模。
-pub(crate) mod model;
-mod process;
+pub(crate) use toolbox_core::calculators::uncertainty::{model, process};
 use crate::calculators::common::*;
 use crate::{app::ToolboxApp, catalog::ToolDef};
 use eframe::egui;
@@ -156,9 +155,20 @@ impl ToolboxApp {
                     "区间半宽"
                 };
                 self.input(ui, tool, &hk, label, "0.02", "须非负");
+                let dof_key = format!("{key}.dof");
+                self.input(
+                    ui,
+                    tool,
+                    &dof_key,
+                    "自由度 ν（选填）",
+                    "",
+                    "留空表示 ∞（完全可靠）",
+                );
                 Kind::TypeB {
                     half_width: self.number(tool, &hk, "0.02")?,
                     distribution,
+                    dof: model::parse_dof(&self.value(tool, &dof_key, ""))
+                        .map_err(|e| format!("{name}：{e}"))?,
                 }
             }
         };
@@ -222,10 +232,15 @@ impl ToolboxApp {
                 }
                 Kind::Combined { children, maximum }
             }
-            _ => Kind::TypeB {
-                half_width: self.number(tool, &format!("{key}.half_width"), "0.02")?,
-                distribution: idx(self, "distribution", "0"),
-            },
+            _ => {
+                let comp_name = self.value(tool, &format!("{key}.name"), "分量");
+                Kind::TypeB {
+                    half_width: self.number(tool, &format!("{key}.half_width"), "0.02")?,
+                    distribution: idx(self, "distribution", "0"),
+                    dof: model::parse_dof(&self.value(tool, &format!("{key}.dof"), ""))
+                        .map_err(|e| format!("{comp_name}：{e}"))?,
+                }
+            }
         };
         Ok(Component {
             name: self.value(tool, &format!("{key}.name"), "分量"),
@@ -289,6 +304,7 @@ impl ToolboxApp {
         balanced_columns(ui, "uncertainty_component_columns", count, |ui, i| {
             results.push(self.uncertainty_component_card(ui, tool, i));
         });
+        let results = results.into_iter().collect::<Result<Vec<_>, _>>();
 
         let mut process_lines = None;
         split_workspace(
@@ -313,7 +329,30 @@ impl ToolboxApp {
                         &["平方和根", "最大绝对贡献"],
                         0,
                     ) == 1;
-                    app.input(ui, tool, "budget.k", "包含因子 k", "2", "须大于 0");
+                    let effective_dof = results.as_ref().map_err(String::clone).and_then(|rows| {
+                        let terms: Vec<_> =
+                            rows.iter().map(|(_, d)| (d.contribution, d.dof)).collect();
+                        model::combine_dof(&terms, maximum)
+                    });
+                    let needs_manual = maximum
+                        || matches!(effective_dof, Ok(model::DegreesOfFreedom::NotApplicable));
+                    let coverage_mode = if needs_manual {
+                        app.set_derived_value(tool, "budget.coverage_mode", "0".into());
+                        ui.label("有效自由度不适用，使用手动包含因子。");
+                        0
+                    } else {
+                        app.select_index(
+                            ui,
+                            tool,
+                            "budget.coverage_mode",
+                            "包含因子方式",
+                            &["手动指定 k", "t 分布近似（95%）", "t 分布近似（99%）"],
+                            0,
+                        )
+                    };
+                    if coverage_mode == 0 {
+                        app.input(ui, tool, "budget.k", "包含因子 k", "2", "须大于 0");
+                    }
                     let digits = app.select_index(
                         ui,
                         tool,
@@ -330,34 +369,32 @@ impl ToolboxApp {
                         &["四舍六入", "进位"],
                         1,
                     ) == 1;
-                    (maximum, digits, carry)
+                    (maximum, coverage_mode, digits, carry, effective_dof)
                 })
                 .inner
             },
-            |ui, app, (maximum, digits, carry)| {
+            |ui, app, (maximum, coverage_mode, digits, carry, effective_dof)| {
                 panel(ui, |ui| {
                     ui.set_width(ui.available_width());
-                    let mut details_out = None;
                     let result = (|| {
-                        let (components, details): (Vec<_>, Vec<_>) = results
-                            .into_iter()
-                            .collect::<Result<Vec<_>, _>>()?
-                            .into_iter()
-                            .unzip();
-                        let k = app.number(tool, "budget.k", "2")?;
-                        if k <= 0.0 {
-                            return Err("包含因子须大于 0".into());
-                        }
+                        let rows = results.as_ref().map_err(String::clone)?;
                         let uc = model::combine(
-                            &details.iter().map(|d| d.contribution).collect::<Vec<_>>(),
+                            &rows.iter().map(|(_, d)| d.contribution).collect::<Vec<_>>(),
                             maximum,
                         )?;
+                        let effective_dof = effective_dof?;
+                        let manual_k = if coverage_mode == 0 {
+                            app.number(tool, "budget.k", "2")?
+                        } else {
+                            2.0
+                        };
+                        let k = model::coverage_factor(coverage_mode, manual_k, effective_dof)?;
                         let expanded = uc * k;
                         super::numerics::finite(&[expanded])?;
                         let (rounded, rounded_expanded) =
                             model::rounded_combined(uc, k, digits, carry)?;
                         let mut steps = Vec::new();
-                        for (component, detail) in components.iter().zip(&details) {
+                        for (component, detail) in rows {
                             process::component(component, detail, "", &mut steps);
                         }
                         steps.push(String::new());
@@ -370,6 +407,13 @@ impl ToolboxApp {
                             },
                             format_process_computed(uc)
                         ));
+                        steps.push(format!(
+                            "有效自由度 ν_eff = {}。",
+                            model::format_dof(effective_dof)
+                        ));
+                        if coverage_mode != 0 {
+                            steps.push(super::error_process::coverage(coverage_mode, k));
+                        }
                         super::error_process::combined(
                             &mut steps,
                             uc,
@@ -380,26 +424,28 @@ impl ToolboxApp {
                             rounded_expanded,
                         );
                         process_lines = Some(steps);
-                        details_out = Some(details);
                         Ok(vec![
                             ("合成标准不确定度 u_c", format_number(uc)),
                             ("扩展不确定度 U", format_number(expanded)),
                             ("修约后标准不确定度", format_number(rounded)),
                             ("修约后扩展不确定度", format_number(rounded_expanded)),
+                            ("有效自由度 ν_eff", model::format_dof(effective_dof)),
                             ("包含因子 k", format_number(k)),
                         ])
                     })();
+                    let success = result.is_ok();
                     show_result_or_error(ui, "不确定度结果", result);
-                    if let Some(details) = details_out {
+                    if success && let Ok(rows) = &results {
                         fn show(ui: &mut egui::Ui, items: &[Detail]) {
                             for d in items {
                                 ui.label(format!(
-                                    "{}：u={}，修约后 u={}，c={}，贡献={}",
+                                    "{}：u={}，修约后 u={}，c={}，贡献={}，ν={}",
                                     d.name,
                                     format_number(d.raw_standard),
                                     model::format_rounded(d.standard, d.rounding),
                                     format_number(d.sensitivity),
-                                    format_number(d.contribution)
+                                    format_number(d.contribution),
+                                    model::format_dof(d.dof)
                                 ));
                                 if !d.children.is_empty() {
                                     ui.indent(&d.name, |ui| show(ui, &d.children));
@@ -407,7 +453,11 @@ impl ToolboxApp {
                             }
                         }
                         ui.add_space(6.0);
-                        ui.collapsing("分量计算明细", |ui| show(ui, &details));
+                        ui.collapsing("分量计算明细", |ui| {
+                            for (_, detail) in rows {
+                                show(ui, std::slice::from_ref(detail));
+                            }
+                        });
                     }
                 });
             },

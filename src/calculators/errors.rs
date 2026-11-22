@@ -543,6 +543,7 @@ impl ToolboxApp {
         let mut a_rounding = None;
         let mut b_widths = Vec::new();
         let mut b_rounding = Vec::new();
+        let mut b_dofs = Vec::new();
         balanced_columns(ui, "quick_uncertainty_columns", 1 + b_count, |ui, index| {
             panel(ui, |ui| {
                 ui.set_width(ui.available_width());
@@ -597,6 +598,19 @@ impl ToolboxApp {
                         &format!("quick.b.{i}"),
                         "",
                     ));
+                    let dof_key = format!("quick.b.{i}.dof");
+                    self.input(
+                        ui,
+                        tool,
+                        &dof_key,
+                        "自由度 ν（选填）",
+                        "",
+                        "留空表示 ∞",
+                    );
+                    b_dofs.push(
+                        super::uncertainty::model::parse_dof(&self.value(tool, &dof_key, ""))
+                            .map_err(|e| format!("B 类分量 {}：{e}", i + 1)),
+                    );
                 }
             });
         });
@@ -611,7 +625,17 @@ impl ToolboxApp {
                     ui.set_width(ui.available_width());
                     ui.label(RichText::new("合成设置").size(14.5).strong().color(p.ink));
                     ui.add_space(8.0);
-                    app.input(ui, tool, "coverage", "包含因子 k", "2", "");
+                    let coverage_mode = app.select_index(
+                        ui,
+                        tool,
+                        "quick.coverage_mode",
+                        "包含因子方式",
+                        &["手动指定 k", "t 分布近似（95%）", "t 分布近似（99%）"],
+                        0,
+                    );
+                    if coverage_mode == 0 {
+                        app.input(ui, tool, "coverage", "包含因子 k", "2", "");
+                    }
                     let digits = app.select_index(
                         ui,
                         tool,
@@ -628,11 +652,11 @@ impl ToolboxApp {
                         &["四舍六入", "进位"],
                         1,
                     ) == 1;
-                    (digits, carry)
+                    (coverage_mode, digits, carry)
                 })
                 .inner
             },
-            |ui, app, (digits, carry)| {
+            |ui, app, (coverage_mode, digits, carry)| {
                 panel(ui, |ui| {
                     ui.set_width(ui.available_width());
                     let a_values = a_values.unwrap_or_else(|| Err("A 类数据未能读取".to_owned()));
@@ -700,13 +724,46 @@ impl ToolboxApp {
                                 ))
                             })
                             .collect::<Result<Vec<_>, String>>()?;
-                        let u_b = rss(b_values.iter().map(|(_, rounded, _)| *rounded))?;
+                        let b_dofs = b_dofs.into_iter().collect::<Result<Vec<_>, _>>()?;
                         let b_sensitivity = app.number(tool, "b_sensitivity", "1")?;
-                        let k = app.number(tool, "coverage", "2")?;
-                        if k <= 0.0 {
-                            return Err("包含因子必须大于 0".to_owned());
+                        let u_b = rss(b_values.iter().map(|(_, rounded, _)| *rounded)).ok();
+                        let mut contributions = vec![a_sensitivity * u_a];
+                        for (_, rounded, _) in &b_values {
+                            contributions.push(b_sensitivity * rounded);
                         }
-                        let combined = rss([a_sensitivity * u_a, b_sensitivity * u_b])?;
+                        let combined = rss(contributions)?;
+                        let mut dof_terms = Vec::new();
+                        if !data.is_empty() {
+                            dof_terms.push((
+                                a_sensitivity * u_a,
+                                super::uncertainty::model::DegreesOfFreedom::Finite(
+                                    (data.len() - 1) as f64,
+                                ),
+                            ));
+                        }
+                        for ((_, rounded, _), dof) in b_values.iter().zip(&b_dofs) {
+                            dof_terms.push((
+                                b_sensitivity * rounded,
+                                match dof {
+                                    Some(v) => {
+                                        super::uncertainty::model::DegreesOfFreedom::Finite(*v)
+                                    }
+                                    None => super::uncertainty::model::DegreesOfFreedom::Infinite,
+                                },
+                            ));
+                        }
+                        let effective_dof =
+                            super::uncertainty::model::combine_dof(&dof_terms, false)?;
+                        let manual_k = if coverage_mode == 0 {
+                            app.number(tool, "coverage", "2")?
+                        } else {
+                            2.0
+                        };
+                        let k = super::uncertainty::model::coverage_factor(
+                            coverage_mode,
+                            manual_k,
+                            effective_dof,
+                        )?;
                         finite(&[k * combined])?;
                         let (rounded, rounded_expanded) =
                             super::uncertainty::model::rounded_combined(
@@ -729,15 +786,16 @@ impl ToolboxApp {
                                 format_process_computed(raw_u_a)
                             ));
                             steps.push(format!(
-                                "{}；修约后 uA = {}。",
+                                "{}；修约后 uA = {}；自由度 ν = m − 1 = {}。",
                                 super::error_process::rounding(a_rounding),
-                                format_process_rounded(u_a, a_rounding.and_then(|r| r.digits))
+                                format_process_rounded(u_a, a_rounding.and_then(|r| r.digits)),
+                                data.len() - 1
                             ));
                         } else {
                             steps.push("未使用 A 类数据，uA = 0。".to_owned());
                         }
-                        for (i, (width, (raw, rounded_value, rounding))) in
-                            b_widths.iter().zip(&b_values).enumerate()
+                        for (i, ((width, (raw, rounded_value, rounding)), dof)) in
+                            b_widths.iter().zip(&b_values).zip(&b_dofs).enumerate()
                         {
                             steps.push(String::new());
                             let distribution_name = [
@@ -751,6 +809,10 @@ impl ToolboxApp {
                             .get(distribution)
                             .copied()
                             .unwrap_or("反正弦分布");
+                            let b_dof = match dof {
+                                Some(v) => super::uncertainty::model::DegreesOfFreedom::Finite(*v),
+                                None => super::uncertainty::model::DegreesOfFreedom::Infinite,
+                            };
                             steps.push(format!(
                                 "B 类分量 {}：{}，{} = {}，除数 d = {}；u = 输入值/d = {} / {} = {}。",
                                 i + 1,
@@ -767,24 +829,39 @@ impl ToolboxApp {
                                 format_process_computed(*raw)
                             ));
                             steps.push(format!(
-                                "{}；修约后 u = {}。",
+                                "{}；修约后 u = {}；自由度 ν = {}。",
                                 super::error_process::rounding(Some(*rounding)),
-                                format_process_rounded(*rounded_value, rounding.digits)
+                                format_process_rounded(*rounded_value, rounding.digits),
+                                super::uncertainty::model::format_dof(b_dof)
                             ));
                         }
                         steps.push(String::new());
+                        if let Some(u_b_val) = u_b {
+                            steps.push(format!(
+                                "B 类合成 uB = √Σuᵢ² = {}；程序使用 hypot 逐项累加。",
+                                format_process_computed(u_b_val)
+                            ));
+                            steps.push(format!(
+                                "u_c = √[(cA·uA)² + (cB·uB)²] = √[({} × {})² + ({} × {})²] = {}。",
+                                format_process_number(a_sensitivity),
+                                format_process_rounded(u_a, a_rounding.and_then(|r| r.digits)),
+                                format_process_number(b_sensitivity),
+                                format_process_computed(u_b_val),
+                                format_process_computed(combined)
+                            ));
+                        } else {
+                            steps.push(format!(
+                                "B 类各项先乘灵敏系数再与 A 类按平方和根合成：u_c = {}。",
+                                format_process_computed(combined)
+                            ));
+                        }
                         steps.push(format!(
-                            "B 类合成 uB = √Σuᵢ² = {}；程序使用 hypot 逐项累加。",
-                            format_process_computed(u_b)
+                            "有效自由度 ν_eff = {}。",
+                            super::uncertainty::model::format_dof(effective_dof)
                         ));
-                        steps.push(format!(
-                            "u_c = √[(cA·uA)² + (cB·uB)²] = √[({} × {})² + ({} × {})²] = {}。",
-                            format_process_number(a_sensitivity),
-                            format_process_rounded(u_a, a_rounding.and_then(|r| r.digits)),
-                            format_process_number(b_sensitivity),
-                            format_process_computed(u_b),
-                            format_process_computed(combined)
-                        ));
+                        if coverage_mode != 0 {
+                            steps.push(super::error_process::coverage(coverage_mode, k));
+                        }
                         super::error_process::combined(
                             &mut steps,
                             combined,
@@ -796,7 +873,12 @@ impl ToolboxApp {
                         );
                         process_lines = Some(steps);
                         if !b_values.is_empty() {
-                            b_details = Some(b_values);
+                            b_details = Some(
+                                b_values
+                                    .into_iter()
+                                    .zip(b_dofs)
+                                    .collect::<Vec<_>>(),
+                            );
                         }
                         Ok(vec![
                             ("A 类标准不确定度", format_number(raw_u_a)),
@@ -804,11 +886,18 @@ impl ToolboxApp {
                                 "A 类修约后标准不确定度",
                                 super::uncertainty::model::format_rounded(u_a, a_rounding),
                             ),
-                            ("B 类合成标准不确定度", format_number(u_b)),
+                            (
+                                "B 类合成标准不确定度",
+                                u_b.map_or_else(|| "超出双精度范围".to_owned(), format_number),
+                            ),
                             ("合成标准不确定度 u_c", format_number(combined)),
                             ("扩展不确定度 U", format_number(k * combined)),
                             ("修约后标准不确定度", format_number(rounded)),
                             ("修约后扩展不确定度", format_number(rounded_expanded)),
+                            (
+                                "有效自由度 ν_eff",
+                                super::uncertainty::model::format_dof(effective_dof),
+                            ),
                             ("包含因子 k", format_number(k)),
                         ])
                     })();
@@ -816,15 +905,20 @@ impl ToolboxApp {
                     if let Some(b_values) = b_details {
                         ui.add_space(6.0);
                         ui.collapsing("B 类分量修约明细", |ui| {
-                            for (i, (raw, rounded, rounding)) in b_values.iter().enumerate() {
+                            for (i, ((raw, rounded, rounding), dof)) in b_values.iter().enumerate() {
+                                let b_dof = match dof {
+                                    Some(v) => super::uncertainty::model::DegreesOfFreedom::Finite(*v),
+                                    None => super::uncertainty::model::DegreesOfFreedom::Infinite,
+                                };
                                 ui.label(format!(
-                                    "B 类分量 {}：u={}，修约后 u={}",
+                                    "B 类分量 {}：u={}，修约后 u={}，ν={}",
                                     i + 1,
                                     format_number(*raw),
                                     super::uncertainty::model::format_rounded(
                                         *rounded,
                                         Some(*rounding)
-                                    )
+                                    ),
+                                    super::uncertainty::model::format_dof(b_dof)
                                 ));
                             }
                         });

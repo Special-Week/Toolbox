@@ -122,11 +122,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "toolbox-core"
+version = "2026.11.20"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "toolbox-web-core"
 version = "2026.11.20"
 dependencies = [
  "serde",
  "serde_json",
+ "toolbox-core",
  "wasm-bindgen",
 ]
 

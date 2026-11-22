@@ -1,6 +1,7 @@
 // 误差统计和不确定度预算。折叠只控制展示，已隐藏的分量仍参与合成。
 #include "toolbox/gui.hpp"
 #include "toolbox/card_columns.hpp"
+#include <exception>
 namespace toolbox {
 static const Values sampleDefaults{10.02, 10.01, 10.03, 10.02, 10.01};
 static const std::vector<std::wstring> distributions{L"均匀分布", L"三角分布", L"正态 k=2",
@@ -16,7 +17,7 @@ static void sampleProcess(Page &p, const Values &values, const Statistics &s, bo
     if (s.centered)
         p.processSteps.push_back(L"以首个测量值 x₀ = " + inputNumber(s.origin) + L" 为基准；中心化均值 d̄ = Σ(xᵢ − x₀)/n = " + p.processValue(s.deltaMean) + L"。");
     else
-        p.processSteps.push_back(L"为避免中间值溢出或下溢，程序在缩放后的数据上计算均值和标准差。下列残差以原单位表示。");
+        p.processSteps.push_back(L"均值从原始测量值补偿求和，必要时先缩放。标准差用缩放后的残差计算，下列残差以原单位表示。");
     for (std::size_t i = 0; i < values.size(); ++i) {
         if (separate)
             p.processSteps.push_back(L"");
@@ -27,7 +28,7 @@ static void sampleProcess(Page &p, const Values &values, const Statistics &s, bo
             p.processSteps.push_back(L"测量点 " + std::to_wstring(i + 1) + L"：残差 vᵢ = xᵢ − x̄ = " + inputNumber(values[i]) + L" − " + inputNumber(s.mean) + L" = " + p.processValue(s.residuals[i]) + L"。");
         }
     }
-    p.processSteps.push_back(L"样本标准差 s = √[Σvᵢ²/(n − 1)] = " + p.processValue(s.sd) + (s.centered ? L"；程序使用中心化均值、补偿求和及 hypot 累积。" : L"；程序使用缩放均值、补偿求和及 hypot 累积。"));
+    p.processSteps.push_back(L"样本标准差 s = √[Σvᵢ²/(n − 1)] = " + p.processValue(s.sd) + (s.centered ? L"；程序使用中心化均值、补偿求和及 hypot 累积。" : L"；程序使用缩放残差、补偿求和及 hypot 累积。"));
 }
 static void uncertaintyComponentProcess(Page &p, const Component &component, const UncertaintyDetail &detail, const std::wstring &parent) {
     const auto path = parent.empty() ? component.name : parent + L" / " + component.name;
@@ -44,14 +45,25 @@ static void uncertaintyComponentProcess(Page &p, const Component &component, con
             p.processSteps.push_back(L"贝塞尔法：取测量次数 n = " + std::to_wstring(count) + (component.averageCount ? L"" : L"（留空默认 1 次）") + L"（此 n 可不同于上方估计 s 的测量值个数）；u = s/√n = " + p.processValue(stats.sd) + L" / √" + std::to_wstring(count) + L" = " + p.processValue(detail.rawStandard) + L"。");
         }
     } else if (component.kind == 1) {
-        p.processSteps.push_back(L"B 类" + distributions[std::size_t(component.distribution)] + L"：" + (component.distribution == 2 || component.distribution == 3 ? L"证书扩展不确定度" : L"区间半宽") + L" = " + inputNumber(component.halfWidth) + L"，除数 d = " + inputNumber(distributionDivisor(component.distribution)) + L"；u = 输入/d = " + inputNumber(component.halfWidth) + L" / " + inputNumber(distributionDivisor(component.distribution)) + L" = " + p.processValue(detail.rawStandard) + L"。");
+        p.processSteps.push_back(L"B 类" + distributions[std::size_t(component.distribution)] + L"：" + (component.distribution == 2 || component.distribution == 3 ? L"证书扩展不确定度" : L"区间半宽") + L" = " + inputNumber(component.halfWidth) + L"，除数 d = " + inputNumber(distributionDivisor(component.distribution)) + L"；u = 输入值/d = " + inputNumber(component.halfWidth) + L" / " + inputNumber(distributionDivisor(component.distribution)) + L" = " + p.processValue(detail.rawStandard) + L"。");
     } else {
         p.processSteps.push_back(component.maximum ? L"子分量合成方法：最大绝对贡献。" : L"子分量合成方法：贡献平方和根。");
         for (std::size_t i = 0; i < component.children.size(); ++i)
             uncertaintyComponentProcess(p, component.children[i], detail.children[i], path);
         p.processSteps.push_back(L"子分量合成后的标准不确定度 = " + p.processValue(detail.rawStandard) + L"。");
     }
-    p.processSteps.push_back(roundingDescription(component.rounding) + L"；修约前 u = " + p.processValue(detail.rawStandard) + L"；修约后 u = " + roundedProcess(p, detail.standard, component.rounding.digits) + L"；贡献 q = 灵敏系数 × 修约后 u = " + inputNumber(detail.sensitivity) + L" × " + roundedProcess(p, detail.standard, component.rounding.digits) + L" = " + p.processValue(detail.contribution) + L"。");
+    p.processSteps.push_back(roundingDescription(component.rounding) + L"；修约前 u = " + p.processValue(detail.rawStandard) + L"；修约后 u = " + roundedProcess(p, detail.standard, component.rounding.digits) + L"；贡献 q = 灵敏系数 × 修约后 u = " + inputNumber(detail.sensitivity) + L" × " + roundedProcess(p, detail.standard, component.rounding.digits) + L" = " + p.processValue(detail.contribution) + L"；自由度 ν = " + formatDegreesOfFreedom(detail.dof) + L"。");
+}
+static std::optional<double> dofInput(Page &p, const std::string &key, const std::wstring &owner) {
+    const auto text = p.textInput(key, L"自由度 ν（选填）", L"");
+    p.note(L"留空表示 ∞（完全可靠）。");
+    try {
+        return parseDegreesOfFreedom(text);
+    } catch (const std::exception &e) {
+        if (p.inputError.empty())
+            p.inputError = (owner.empty() ? L"" : owner + L"：") + wide(e.what());
+        return std::nullopt;
+    }
 }
 static std::optional<std::size_t> averageCountInput(Page &p, const std::string &key) {
     const auto text = p.textInput(key, L"取测量次数 n", L"");
@@ -125,6 +137,7 @@ static Component component(Page &p, const std::string &key, int depth) {
         c.halfWidth =
             p.number(key + ".width",
                      c.distribution == 2 || c.distribution == 3 ? L"证书扩展不确定度 U" : L"区间半宽", .02);
+        c.dof = dofInput(p, key + ".dof", c.name);
     } else {
         c.maximum = p.select(key + ".method", L"合成方法", {L"平方和根", L"最大绝对贡献"}) == 1;
         int n = p.count(key + ".children", L"子分量", 2, 1, 12);
@@ -149,10 +162,12 @@ static void showDetails(Page &p, const std::vector<UncertaintyDetail> &items, in
     for (auto &d : items) {
         p.note(std::wstring(std::size_t(depth) * 2, L' ') + d.name + L"：u=" + format(d.rawStandard) +
                L"，修约后 u=" + formatRoundedUncertainty(d.standard, d.digits) + L"，c=" +
-               format(d.sensitivity) + L"，贡献=" + format(d.contribution));
+               format(d.sensitivity) + L"，贡献=" + format(d.contribution) + L"，ν=" +
+               formatDegreesOfFreedom(d.dof));
         showDetails(p, d.children, depth + 1);
     }
 }
+static const std::vector<std::wstring> coverageModes{L"手动指定 k", L"t 分布近似（95%）", L"t 分布近似（99%）"};
 static void uncertainty(Page &p) {
     p.beginSplit(0.54f);
     p.heading(L"不确定度参数与分量");
@@ -166,6 +181,7 @@ static void uncertainty(Page &p) {
         double ac = 1;
         UncertaintyRounding aRounding;
         std::vector<UncertaintyRounding> bRounding;
+        std::vector<std::optional<double>> bDofs;
         componentCards(p, 1 + bn, p.app.uncertaintyColumns[1], [&](Page &card, int index) {
             if (index == 0) {
                 card.heading(L"A 类评定数据");
@@ -183,17 +199,18 @@ static void uncertainty(Page &p) {
                 bv.push_back(card.number("quick.b.value." + std::to_string(i), label,
                                          i == 0 ? .02 : (i == 1 ? .03 : 0)));
                 bRounding.push_back(roundingInput(card, "quick.b." + std::to_string(i)));
+                bDofs.push_back(dofInput(card, "quick.b.dof." + std::to_string(i), L"B 类分量 " + std::to_wstring(i + 1)));
             }
         });
         p.heading(L"合成设置");
-        double k = p.number("quick.k", L"包含因子 k", 2);
+        int coverageMode = p.select("quick.coverage_mode", L"包含因子方式", coverageModes, 0);
+        double manualK = coverageMode == 0 ? p.number("quick.k", L"包含因子 k", 2) : 2;
         int digits =
             p.select("quick.result.digits", L"合成有效数字", {L"1 位", L"2 位", L"3 位", L"4 位"}, 1) + 1;
         bool carry = p.select("quick.result.rounding", L"合成修约方式", {L"四舍六入", L"进位"}, 1) == 1;
         p.rightColumn();
         p.check();
         require(an + bn > 0, "至少需要一组 A 类数据或一个 B 类分量");
-        require(k > 0, "包含因子须大于 0");
         double ua = 0;
         if (!av.empty()) {
             auto s = statistics(av);
@@ -210,36 +227,64 @@ static void uncertainty(Page &p) {
             bRaw.push_back(b);
             b = roundSignificant(b, bRounding[i]);
         }
-        double ub = rss(bv), uc = std::hypot(ac * ua, bc * ub);
+        std::optional<double> ub;
+        try {
+            ub = rss(bv);
+        } catch (const std::exception &) {
+            ub = std::nullopt;
+        }
+        Values allContributions{ac * ua};
+        for (double b : bv)
+            allContributions.push_back(bc * b);
+        double uc = rss(allContributions);
+        std::vector<std::pair<double, DegreesOfFreedom>> dofTerms;
+        if (!av.empty())
+            dofTerms.push_back({ac * ua, DegreesOfFreedom::finite(double(av.size() - 1))});
+        for (std::size_t i = 0; i < bv.size(); ++i) {
+            dofTerms.push_back({bc * bv[i], bDofs[i] ? DegreesOfFreedom::finite(*bDofs[i])
+                                                     : DegreesOfFreedom::infinite()});
+        }
+        DegreesOfFreedom effectiveDof = combineDegreesOfFreedom(dofTerms, false);
+        double k = coverageFactor(coverageMode, manualK, effectiveDof);
         finite({uc, k * uc});
         auto [rounded, roundedExpanded] = roundedCombinedUncertainty(uc, k, digits, carry);
         if (!bv.empty() && p.collapse("quick.details", L"B 类分量修约明细")) {
-            for (std::size_t i = 0; i < bv.size(); ++i)
+            for (std::size_t i = 0; i < bv.size(); ++i) {
+                DegreesOfFreedom bDof = bDofs[i] ? DegreesOfFreedom::finite(*bDofs[i]) : DegreesOfFreedom::infinite();
                 p.note(L"B 类分量 " + std::to_wstring(i + 1) + L"：u=" + format(bRaw[i]) + L"，修约后 u=" +
-                       formatRoundedUncertainty(bv[i], bRounding[i].digits));
+                       formatRoundedUncertainty(bv[i], bRounding[i].digits) + L"，ν=" + formatDegreesOfFreedom(bDof));
+            }
         }
         p.metrics(L"不确定度结果",
                   {{L"A 类标准不确定度", format(rawUa)},
                    {L"A 类修约后标准不确定度", formatRoundedUncertainty(ua, aRounding.digits)},
-                   {L"B 类合成标准不确定度", format(ub)},
+                   {L"B 类合成标准不确定度", ub ? format(*ub) : L"超出双精度范围"},
                    {L"合成标准不确定度 u_c", format(uc)},
                    {L"扩展不确定度 U", format(k * uc)},
                    {L"修约后标准不确定度", format(rounded)},
                    {L"修约后扩展不确定度", format(roundedExpanded)},
+                   {L"有效自由度 ν_eff", formatDegreesOfFreedom(effectiveDof)},
                    {L"包含因子 k", format(k)}});
         if (!av.empty()) {
             p.processSteps.push_back(L"A 类分量：");
             auto stats = statistics(av);
             sampleProcess(p, av, stats, false);
-            p.processSteps.push_back(L"取测量次数 n = " + std::to_wstring(averageCount.value_or(1)) + (averageCount ? L"" : L"（留空默认 1 次）") + L"（此 n 可不同于上方估计 s 的测量值个数）；uA = s/√n = " + p.processValue(stats.sd) + L" / √" + std::to_wstring(averageCount.value_or(1)) + L" = " + p.processValue(rawUa) + L"；" + roundingDescription(aRounding) + L"；修约后 uA = " + roundedProcess(p, ua, aRounding.digits) + L"。");
+            p.processSteps.push_back(L"取测量次数 n = " + std::to_wstring(averageCount.value_or(1)) + (averageCount ? L"" : L"（留空默认 1 次）") + L"（此 n 可不同于上方估计 s 的测量值个数）；uA = s/√n = " + p.processValue(stats.sd) + L" / √" + std::to_wstring(averageCount.value_or(1)) + L" = " + p.processValue(rawUa) + L"；" + roundingDescription(aRounding) + L"；修约后 uA = " + roundedProcess(p, ua, aRounding.digits) + L"；自由度 ν = m − 1 = " + std::to_wstring(av.size() - 1) + L"。");
         }
         for (std::size_t i = 0; i < bv.size(); ++i) {
+            DegreesOfFreedom bDof = bDofs[i] ? DegreesOfFreedom::finite(*bDofs[i]) : DegreesOfFreedom::infinite();
             p.processSteps.push_back(L"");
-            p.processSteps.push_back(L"B 类分量 " + std::to_wstring(i + 1) + L"：" + distributions[std::size_t(distribution)] + L"；" + (distribution == 2 || distribution == 3 ? L"证书扩展不确定度" : L"区间半宽") + L" = " + inputNumber(bInputs[i]) + L"；u = 输入 / 除数 = " + inputNumber(bInputs[i]) + L" / " + inputNumber(distributionDivisor(distribution)) + L" = " + p.processValue(bRaw[i]) + L"；" + roundingDescription(bRounding[i]) + L"，修约后 = " + roundedProcess(p, bv[i], bRounding[i].digits) + L"。");
+            p.processSteps.push_back(L"B 类分量 " + std::to_wstring(i + 1) + L"：" + distributions[std::size_t(distribution)] + L"；" + (distribution == 2 || distribution == 3 ? L"证书扩展不确定度" : L"区间半宽") + L" = " + inputNumber(bInputs[i]) + L"；u = 输入值/d = " + inputNumber(bInputs[i]) + L" / " + inputNumber(distributionDivisor(distribution)) + L" = " + p.processValue(bRaw[i]) + L"；" + roundingDescription(bRounding[i]) + L"，修约后 = " + roundedProcess(p, bv[i], bRounding[i].digits) + L"；自由度 ν = " + formatDegreesOfFreedom(bDof) + L"。");
         }
         p.processSteps.push_back(L"");
-        p.processSteps.push_back(L"B 类合成 uB = √Σuᵢ² = " + p.processValue(ub) + L"；u_c = √[(cA·uA)² + (cB·uB)²] = √[(" + inputNumber(ac) + L" × " + p.processValue(ua) + L")² + (" + inputNumber(bc) + L" × " + p.processValue(ub) + L")²] = " + p.processValue(uc) + L"。");
-        p.processSteps.push_back(L"扩展不确定度 U = k × u_c = " + inputNumber(k) + L" × " + p.processValue(uc) + L" = " + p.processValue(k * uc) + L"；按 u_c 和 U 的较大值确定修约位数，保留 " + std::to_wstring(digits) + L" 位有效数字，" + (carry ? L"进位" : L"四舍六入、五成双") + L"；修约后 u_c = " + p.processValue(rounded) + L"，修约后 U = k × 修约后 u_c = " + p.processValue(roundedExpanded) + L"。");
+        if (ub)
+            p.processSteps.push_back(L"B 类合成 uB = √Σuᵢ² = " + p.processValue(*ub) + L"；u_c = √[(cA·uA)² + (cB·uB)²] = √[(" + inputNumber(ac) + L" × " + p.processValue(ua) + L")² + (" + inputNumber(bc) + L" × " + p.processValue(*ub) + L")²] = " + p.processValue(uc) + L"。");
+        else
+            p.processSteps.push_back(L"B 类各项先乘灵敏系数再与 A 类按平方和根合成：u_c = " + p.processValue(uc) + L"。");
+        p.processSteps.push_back(L"有效自由度 ν_eff = " + formatDegreesOfFreedom(effectiveDof) + L"。");
+        if (coverageMode != 0)
+            p.processSteps.push_back(L"以 t 分布近似 " + std::to_wstring(coverageMode == 1 ? 95 : 99) + L"% 覆盖区间，双侧分位数 k = t_p(ν_eff) = " + p.processValue(k) + L"。适用于统计独立的分量且 t 分布近似合理的情况。");
+        p.processSteps.push_back(L"扩展不确定度 U = k × u_c = " + inputNumber(k) + L" × " + p.processValue(uc) + L" = " + p.processValue(k * uc) + L"。u_c 和 U 各自修约，保留 " + std::to_wstring(digits) + L" 位有效数字，" + (carry ? L"进位" : L"四舍六入、五成双") + L"。修约后 u_c = " + p.processValue(rounded) + L"，修约后 U = " + p.processValue(roundedExpanded) + L"。");
         return;
     }
     int n = p.count("budget.count", L"不确定度分量", 2, 1, 20);
@@ -249,19 +294,38 @@ static void uncertainty(Page &p) {
         data.push_back(component(card, "budget." + std::to_string(i), 0));
     });
     bool maximum = p.select("budget.method", L"总合成方法", {L"平方和根", L"最大绝对贡献"}) == 1;
-    double k = p.number("budget.k", L"包含因子 k", 2);
+    Values contributions;
+    std::vector<UncertaintyDetail> details;
+    DegreesOfFreedom effectiveDof = DegreesOfFreedom::notApplicable();
+    std::exception_ptr calculationError;
+    try {
+        std::vector<std::pair<double, DegreesOfFreedom>> dofTerms;
+        for (const auto &c : data) {
+            details.push_back(c.calculate());
+            contributions.push_back(details.back().contribution);
+            dofTerms.push_back({details.back().contribution, details.back().dof});
+        }
+        effectiveDof = combineDegreesOfFreedom(dofTerms, maximum);
+    } catch (const std::exception &) {
+        calculationError = std::current_exception();
+    }
+    int coverageMode = 0;
+    if (maximum || (!calculationError && effectiveDof.kind == DofKind::NotApplicable)) {
+        p.state.choices[p.key("budget.coverage_mode")] = 0;
+        p.note(L"有效自由度不适用，使用手动包含因子。");
+    } else {
+        coverageMode = p.select("budget.coverage_mode", L"包含因子方式", coverageModes, 0);
+    }
+    double manualK = coverageMode == 0 ? p.number("budget.k", L"包含因子 k", 2) : 2;
     int digits = p.select("budget.digits", L"合成结果有效数字", {L"1 位", L"2 位", L"3 位", L"4 位"}, 1) + 1;
     bool carry = p.select("budget.round_v2", L"合成结果修约方式", {L"四舍六入", L"进位"}, 1) == 1;
     p.rightColumn();
     p.check();
-    require(k > 0, "包含因子须大于 0");
-    Values contributions;
-    std::vector<UncertaintyDetail> details;
-    for (auto &c : data) {
-        details.push_back(c.calculate());
-        contributions.push_back(details.back().contribution);
-    }
-    double uc = combineUncertainty(contributions, maximum), expanded = k * uc;
+    if (calculationError)
+        std::rethrow_exception(calculationError);
+    double uc = combineUncertainty(contributions, maximum);
+    double k = coverageFactor(coverageMode, manualK, effectiveDof);
+    double expanded = k * uc;
     finite({expanded});
     auto [rounded, roundedExpanded] = roundedCombinedUncertainty(uc, k, digits, carry);
     if (p.collapse("budget.details", L"分量计算明细")) {
@@ -271,12 +335,16 @@ static void uncertainty(Page &p) {
                                 {L"扩展不确定度 U", format(expanded)},
                                 {L"修约后标准不确定度", format(rounded)},
                                 {L"修约后扩展不确定度", format(roundedExpanded)},
+                                {L"有效自由度 ν_eff", formatDegreesOfFreedom(effectiveDof)},
                                 {L"包含因子 k", format(k)}});
     for (std::size_t i = 0; i < data.size(); ++i)
         uncertaintyComponentProcess(p, data[i], details[i], L"");
     p.processSteps.push_back(L"");
     p.processSteps.push_back((maximum ? L"总合成方法：取各分量绝对贡献的最大值；u_c = " : L"总合成方法：各分量贡献平方和根；u_c = ") + p.processValue(uc) + L"。");
-    p.processSteps.push_back(L"扩展不确定度 U = k × u_c = " + inputNumber(k) + L" × " + p.processValue(uc) + L" = " + p.processValue(expanded) + L"；按 u_c 和 U 的较大值确定修约位数，保留 " + std::to_wstring(digits) + L" 位有效数字，" + (carry ? L"进位" : L"四舍六入、五成双") + L"；修约后 u_c = " + p.processValue(rounded) + L"，修约后 U = k × 修约后 u_c = " + p.processValue(roundedExpanded) + L"。");
+    p.processSteps.push_back(L"有效自由度 ν_eff = " + formatDegreesOfFreedom(effectiveDof) + L"。");
+    if (coverageMode != 0)
+        p.processSteps.push_back(L"以 t 分布近似 " + std::to_wstring(coverageMode == 1 ? 95 : 99) + L"% 覆盖区间，双侧分位数 k = t_p(ν_eff) = " + p.processValue(k) + L"。适用于统计独立的分量且 t 分布近似合理的情况。");
+    p.processSteps.push_back(L"扩展不确定度 U = k × u_c = " + inputNumber(k) + L" × " + p.processValue(uc) + L" = " + p.processValue(expanded) + L"。u_c 和 U 各自修约，保留 " + std::to_wstring(digits) + L" 位有效数字，" + (carry ? L"进位" : L"四舍六入、五成双") + L"。修约后 u_c = " + p.processValue(rounded) + L"，修约后 U = " + p.processValue(roundedExpanded) + L"。");
 }
 void renderErrors(Page &p) {
     if (p.tool.kind == Kind::Uncertainty) {
@@ -361,7 +429,9 @@ void renderErrors(Page &p) {
         auto reference = p.textInput("reference", L"引用值（选填）", L"");
         p.rightColumn();
         p.check();
-        double ref = reference.empty() ? truth : parse(utf8(reference)), delta = measured - truth;
+        const auto refFirst = reference.find_first_not_of(L" \t\r\n\f\v");
+        const bool refBlank = refFirst == std::wstring::npos;
+        double ref = refBlank ? truth : parse(utf8(reference)), delta = measured - truth;
         finite({delta});
         auto percent = [&](double base) {
             if (base == 0) {
@@ -379,7 +449,7 @@ void renderErrors(Page &p) {
         p.processSteps.push_back(L"绝对误差 Δ = 测量值 − 真值 = " + inputNumber(measured) + L" − " + inputNumber(truth) + L" = " + p.processValue(delta) + L"；误差绝对值 |Δ| = " + p.processValue(std::abs(delta)) + L"。");
         p.processSteps.push_back(L"");
         p.processSteps.push_back(truth == 0 ? L"真值为 0，相对误差无定义。" : L"相对误差 = Δ/真值 × 100 = " + p.processValue(delta) + L" / " + inputNumber(truth) + L" × 100 = " + p.processValue(delta / truth * 100) + L"%。");
-        const std::wstring baseDescription = reference.empty() ? L"引用值留空，使用真值；" : L"";
+        const std::wstring baseDescription = refBlank ? L"引用值留空，使用真值；" : L"";
         p.processSteps.push_back(baseDescription + (ref == 0 ? L"引用值为 0，引用误差无定义。" : std::wstring(L"引用误差 = Δ/引用值 × 100 = ") + p.processValue(delta) + L" / " + inputNumber(ref) + L" × 100 = " + p.processValue(delta / ref * 100) + L"%。"));
         return;
     }

@@ -114,7 +114,7 @@ function texNumber(value: string): string {
 function fractionOperand(value: string): string {
   if (/^-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$/u.test(value)) return texNumber(value);
   const symbols: Record<string, string> = {
-    "Δ": String.raw`\Delta `, "Σ": String.raw`\sum `,
+    "Δ": String.raw`\Delta `, "Σ": String.raw`\sum `, "π": String.raw`\pi `,
     "²": "^2", "³": "^3", "−": "-", "×": String.raw`\times `,
   };
   const subscripts: Record<string, string> = { "₀": "0", "₁": "1", "₂": "2", "₃": "3", "₄": "4", "₅": "5", "₆": "6", "₇": "7", "₈": "8", "₉": "9", "ₖ": "k", "ᵢ": "i", "ₓ": "x", "ᵧ": "y", "ₙ": "n" };

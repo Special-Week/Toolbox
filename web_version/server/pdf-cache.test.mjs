@@ -189,10 +189,17 @@ test("超过原 50 MB 上限的 PDF 可下载、解析及缓存复用", async (t
     cacheDirectory: await temporary(t),
     fetchImpl: remote.fetchImpl,
   });
-  const first = await cache.get(LINK);
+  const first = await cache.get(LINK, { stream: true });
   assert.equal(first.cache, "MISS");
   assert.equal(first.pages, 2);
-  assert.deepEqual(first.data, data);
+  assert.equal(first.size, data.length);
+  let offset = 0;
+  for await (const chunk of first.stream) {
+    assert.ok(chunk.length <= 64 * 1024);
+    assert.ok(chunk.equals(data.subarray(offset, offset + chunk.length)));
+    offset += chunk.length;
+  }
+  assert.equal(offset, data.length);
   const second = await cache.get(LINK);
   assert.equal(second.cache, "HIT");
   assert.equal(second.pages, 2);

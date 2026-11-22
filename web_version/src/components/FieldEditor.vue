@@ -12,7 +12,7 @@ const p = defineProps<{
   catalog: Catalog;
   budgetDetails?: BudgetDetail[];
 }>();
-const emit = defineEmits<{ "update:modelValue": [value: unknown] }>();
+const emit = defineEmits<{ "update:modelValue": [value: unknown, replace?: boolean] }>();
 const masonry = ref<InstanceType<typeof MasonryCards>>();
 const page = ref(1);
 const pasteOpen = ref(false);
@@ -64,7 +64,7 @@ function paste() {
     pasteError.value = `请粘贴 ${p.field.min ?? 1}～${p.field.max ?? 50} ${p.field.type === "points" ? "行，每行两列数值" : "个有效数值"}`;
     return;
   }
-  emit("update:modelValue", parsed);
+  emit("update:modelValue", parsed, true);
   page.value = 1;
   pasteOpen.value = false;
 }

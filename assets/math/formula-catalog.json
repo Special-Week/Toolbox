@@ -103,5 +103,15 @@
   ["p₂ = p₁ × exp[−g₀(h₂−h₁)/(R T₁)]", "p_2=p_1\\exp\\left[-\\frac{g_0(h_2-h_1)}{R T_1}\\right]"],
   ["p₂ = p₁ × [(T₁ + L(h₂−h₁))/T₁]^(−g₀/(R L))", "p_2=p_1\\left[\\frac{T_1+L(h_2-h_1)}{T_1}\\right]^{-\\frac{g_0}{RL}}"],
   ["p = p₀ × exp[−g(h−h₀)/(R T₀)]", "p=p_0\\exp\\left[-\\frac{g(h-h_0)}{R T_0}\\right]"],
-  ["p = p₀ × [(T₀+L(h−h₀))/T₀]^(−g/(R L))", "p=p_0\\left[\\frac{T_0+L(h-h_0)}{T_0}\\right]^{-\\frac{g}{RL}}"]
+  ["p = p₀ × [(T₀+L(h−h₀))/T₀]^(−g/(R L))", "p=p_0\\left[\\frac{T_0+L(h-h_0)}{T_0}\\right]^{-\\frac{g}{RL}}"],
+  ["B′(x) = Σ i·B[i]·x^(i−1)", "B'(x)=\\sum_i i\\,B_i\\,x^{i-1}"],
+  ["dR/dt = −R_B × B′(1/T) / T²", "\\frac{dR}{dt}=-\\frac{R_B\\,B'(1/T)}{T^2}"],
+  ["νeff=uc⁴/Σ(qᵢ⁴/νᵢ)", "\\nu_{\\mathrm{eff}}=\\frac{u_c^4}{\\sum_i (q_i^4/\\nu_i)}"],
+  ["t_p(νeff)", "t_p(\\nu_{\\mathrm{eff}})"],
+  ["k = t_p(ν_eff)", "k=t_p(\\nu_{\\mathrm{eff}})"],
+  ["√[(cA·uA)² + (cB·uB)²]", "\\sqrt{(c_A u_A)^2+(c_B u_B)^2}"],
+  ["u = R/(d₂√m)", "u=\\frac{R}{d_2\\sqrt{m}}"],
+  ["√Σqᵢ²", "\\sqrt{\\sum_i q_i^2}"],
+  ["Σ|qᵢ|", "\\sum_i |q_i|"],
+  ["Δ/参考值×100%", "\\frac{\\Delta}{\\text{参考值}}\\times 100\\%"]
 ]

@@ -93,6 +93,7 @@ export interface Budget {
   rounding?: string;
   halfWidth: string;
   distribution: string;
+  dof?: string;
   combine: string;
   children: Budget[];
 }
@@ -103,5 +104,6 @@ export interface BudgetDetail {
   formattedStandard: string;
   sensitivity: number;
   contribution: number;
+  dof?: string;
   children: BudgetDetail[];
 }

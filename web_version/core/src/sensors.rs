@@ -710,17 +710,24 @@ fn ntc(i: &Input) -> Result<Output, String> {
             let t = celsius_in_bounds(u, v, (min, max));
             (t, m.resistance(t)?)
         } else {
-            // β 模型单调递减，先用正算的电阻端点核验输入。无法表示的端点在有限电阻范围之外。
-            let inverse = m.temperature(v)?;
+            // β 模型单调递减；端点相同表示双精度下无法区分温区内的电阻。
             let upper_r = m.resistance(min).ok();
             let lower_r = m.resistance(max).ok();
+            if upper_r == Some(v) && lower_r == Some(v) {
+                return Err("校准温区两端电阻在双精度下无法区分，不能唯一反算温度".into());
+            }
+            let inverse = m.temperature(v)?;
             if upper_r.is_some_and(|r| v > r) || lower_r.is_some_and(|r| v < r) {
                 return Err("温度须处于有效校准温区内".into());
             }
-            let t = match (upper_r == Some(v), lower_r == Some(v)) {
-                (true, false) => min,
-                (false, true) => max,
-                _ => inverse.clamp(min, max),
+            // 端点溢出时，只吸收反算温度的微小舍入误差。
+            let roundoff = 4.0 * f64::EPSILON * (inverse + 273.15).abs().max(1.0);
+            let t = if upper_r == Some(v) || (inverse < min && min - inverse <= roundoff) {
+                min
+            } else if lower_r == Some(v) || (inverse > max && inverse - max <= roundoff) {
+                max
+            } else {
+                inverse
             };
             (t, v)
         };
@@ -770,8 +777,7 @@ fn ntc(i: &Input) -> Result<Output, String> {
                 c(t)
             ));
         }
-        let slope = -r * i.number("beta", 3950.)? / (t + 273.15).powi(2);
-        crate::calculators::numerics::finite(&[slope])?;
+        let slope = m.slope_at_resistance(t, r)?;
         out.process.push(format!(
             "电阻变化率 dR/dt = −Rβ/T² = −{} × {} / {}² = {} Ω/°C；按显示温标换算后为 {} Ω/{}。",
             c(r),
@@ -782,7 +788,14 @@ fn ntc(i: &Input) -> Result<Output, String> {
             u.symbol()
         ));
         out.metric("电阻变化率", slope / u.span(), &format!("Ω/{}", u.symbol()));
-        division(&mut out, i, (min, max), "Ω", |t| m.resistance(t), None)?;
+        division(
+            &mut out,
+            i,
+            (min, max),
+            "Ω",
+            |t| m.resistance(t),
+            Some(&|t| Ok(Some(m.slope(t)?))),
+        )?;
         return Ok(out);
     }
     let order = i.index("order", 0, 4)? + 3;
@@ -876,10 +889,10 @@ fn ntc(i: &Input) -> Result<Output, String> {
             format!("温度 = 1/(多项式值) − 273.15 = {} °C", c(t))
         }
     ));
-    let lo = (t - 1.).max(min);
-    let hi = (t + 1.).min(max);
-    let slope = (m.resistance(hi)? - m.resistance(lo)?) / (hi - lo);
-    out.process.push(format!("差分点限制在校准温区 {}～{} °C：t低 = max(t−1, 下限) = {} °C，t高 = min(t+1, 上限) = {} °C。", n(min), n(max), c(lo), c(hi)));
+    let slope = m.slope(t)?;
+    let kelvin = t + 273.15;
+    let b_resistance = m.resistance(t)?;
+    let b_derivative = crate::calculators::calibration::polynomial_slope(&m.b, 1. / kelvin).1;
     if dir != 0 {
         out.process.push("变化率使用温度 → 电阻的 B 系数：".into());
         out.process.extend(
@@ -888,7 +901,22 @@ fn ntc(i: &Input) -> Result<Output, String> {
                 .map(|(j, v)| format!("B[{j}] = {}。", n(*v))),
         );
     }
-    out.process.push(format!("变化率采用有限差分：[R({}) − R({})]/({} − {}) = ({} − {})/({} − {}) = {} Ω/°C；按显示温标换算后 = {} Ω/{}。",c(hi),c(lo),c(hi),c(lo),c(m.resistance(hi)?),c(m.resistance(lo)?),c(hi),c(lo),c(slope),c(slope/u.span()),u.symbol()));
+    out.process.push(format!(
+        "令 x = 1/T，B′(x) = Σ i·B[i]·x^(i−1)；T = {} K，x = {} K⁻¹，B′(x) = {}，B 曲线电阻 R_B = {} Ω。",
+        c(kelvin),
+        c(1. / kelvin),
+        c(b_derivative),
+        c(b_resistance),
+    ));
+    out.process.push(format!(
+        "链式法则：dR/dt = −R_B × B′(1/T) / T² = −{} × {} / {}² = {} Ω/°C；按显示温标换算后 = {} Ω/{}。",
+        c(b_resistance),
+        c(b_derivative),
+        c(kelvin),
+        c(slope),
+        c(slope / u.span()),
+        u.symbol()
+    ));
     out.metric("电阻变化率", slope / u.span(), &format!("Ω/{}", u.symbol()));
     out.details
         .as_object_mut()
@@ -896,7 +924,14 @@ fn ntc(i: &Input) -> Result<Output, String> {
     if out.details.is_null() {
         out.details = json!({"coefficients":{"A":m.a,"B":m.b}})
     }
-    division(&mut out, i, (min, max), "Ω", |t| m.resistance(t), None)?;
+    division(
+        &mut out,
+        i,
+        (min, max),
+        "Ω",
+        |t| m.resistance(t),
+        Some(&|t| Ok(Some(m.slope(t)?))),
+    )?;
     Ok(out)
 }
 
@@ -980,8 +1015,9 @@ mod tests {
             let outside = if is_min { resistance.next_up() } else { resistance.next_down() };
             assert!(reverse(outside).is_err());
         }
-        // 即便下限电阻超出可表示范围，温区内部的正常反算仍可用。
-        assert!(ntc(&Input(json!({"family":1,"direction":1,"min":-273.149,"value":10000}))).is_ok());
+        // 即便下限电阻超出可表示范围，温区内部的正常反算仍可用；超出上限对应电阻的输入必须拒绝。
+        assert!(ntc(&Input(json!({"family":1,"direction":1,"min":-273.149,"max":100,"value":10000}))).is_ok());
+        assert!(ntc(&Input(json!({"family":1,"direction":1,"min":-273.149,"max":100,"value":100}))).is_err());
     }
 
     #[test]

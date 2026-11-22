@@ -338,7 +338,7 @@ impl CalibrationArchives {
         ui: &mut egui::Ui,
         tool: &str,
         values: &mut HashMap<String, String>,
-    ) -> Option<SaveRequest> {
+    ) -> (Option<SaveRequest>, bool) {
         if self.last_tool.as_deref() != Some(tool) {
             self.last_tool = Some(tool.into());
             self.dialog = None;
@@ -429,6 +429,7 @@ impl CalibrationArchives {
                     })
                 });
             });
+        let applied = chosen.is_some();
         if let Some(name) = chosen {
             self.apply(tool, &name, values);
         }
@@ -446,7 +447,7 @@ impl CalibrationArchives {
         }
         ui.label(RichText::new("保存当前模型、温区及对应证书参数，不保存待换算数值。调用档案会替换当前证书参数；其他温区需另存。").size(12.0).color(MUTED));
         ui.add_space(8.0);
-        self.show_dialog(ui.ctx(), tool)
+        (self.show_dialog(ui.ctx(), tool), applied)
     }
 
     fn show_dialog(&mut self, ctx: &egui::Context, tool: &str) -> Option<SaveRequest> {

@@ -260,36 +260,17 @@ pub(crate) fn text_input(
     response
 }
 
-pub(crate) fn input_row(ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str) {
+pub(crate) fn input_row(ui: &mut egui::Ui, label: &str, value: &mut String, hint: &str) -> bool {
     form_row(ui, label, |ui| {
-        text_input(ui, value, ui.available_width(), hint);
-    });
+        text_input(ui, value, ui.available_width(), hint).changed()
+    })
 }
 
 pub(crate) use super::format::{format_number, format_unit, parse_number};
-
-/// 用可还原 f64 的最短十进制表示展示复核所需的输入和中间值。
-pub(crate) fn format_process_number(value: f64) -> String {
-    if value.is_finite() {
-        value.to_string()
-    } else {
-        "—".to_owned()
-    }
-}
-
-/// 标记已计算的数值，既可整理默认显示，也可还原完整双精度。
-pub(crate) fn format_process_computed(value: f64) -> String {
-    format!("\u{2063}{}\u{2063}", format_process_number(value))
-}
-
-/// 保留用户指定的高位数修约结果，其他计算值按默认显示精度整理。
-pub(crate) fn format_process_rounded(value: f64, digits: Option<usize>) -> String {
-    if digits.is_some_and(|digits| digits > 13) {
-        format_process_number(value)
-    } else {
-        format_process_computed(value)
-    }
-}
+pub(crate) use toolbox_core::calculators::common::{
+    format_process_computed, format_process_number, format_process_rounded,
+    temperature_conversion_note,
+};
 
 /// 对明显的浮点尾数适当减少显示位数，不改变实际计算。
 fn format_process_result(value: f64) -> String {
@@ -438,14 +419,6 @@ fn compact_process_line(
     }
     out.push_str(&line[offset..]);
     out
-}
-
-pub(crate) fn temperature_conversion_note(symbol: &str) -> &'static str {
-    match symbol {
-        "°F" => "温标换算：t(°C) = [t(°F) − 32] / 1.8；温差只除以 1.8。",
-        "K" => "温标换算：t(°C) = T(K) − 273.15；开尔文温差与摄氏温差数值相同。",
-        _ => "参考函数中的温度 t 使用摄氏度 °C。",
-    }
 }
 
 pub(crate) fn show_result_or_error(ui: &mut egui::Ui, title: &str, result: Results) {
@@ -733,20 +706,14 @@ pub(crate) fn info_note_mode(ui: &mut egui::Ui, kind: ToolKind, mode: usize) {
             );
             note_paragraph(ui, &formula);
             if matches!(kind, ToolKind::Uncertainty) {
-                ui.add(egui::Label::new(RichText::new("贝塞尔法先用全部测量值计算样本标准差 s，再按 u=s/√n 计算；取测量次数 n 留空时默认为 1。")
-                    .size(12.0).color(p.ink)).wrap());
-                ui.add(egui::Label::new(RichText::new("分量填写有效数字后先按所选方式修约，再乘灵敏系数参与合成；留空保留原始计算精度。四舍六入按五成双处理。")
-                    .size(12.0).color(p.ink)).wrap());
+                note_paragraph(
+                    ui,
+                    "分量填写有效数字后先按所选方式修约，再乘灵敏系数参与合成；留空保留原始计算精度。四舍六入按五成双处理。",
+                );
                 if mode == 1 {
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(
-                                "合成结果按 uc 和 U 较大值确定修约位数；修约后 U=k×修约后的 uc。",
-                            )
-                            .size(12.0)
-                            .color(p.ink),
-                        )
-                        .wrap(),
+                    note_paragraph(
+                        ui,
+                        "先用原始 uc 计算 U=k×uc，再分别对 uc 和 U 按所选有效数字修约。",
                     );
                 }
             }

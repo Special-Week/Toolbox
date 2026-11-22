@@ -5,8 +5,8 @@ import NumericInput from "./NumericInput.vue";
 
 const props = defineProps<{ values: unknown; sensitivities: unknown }>();
 const emit = defineEmits<{
-  "update:values": [value: unknown[]];
-  "update:sensitivities": [value: unknown[]];
+  "update:values": [value: unknown[], replace?: boolean];
+  "update:sensitivities": [value: unknown[], replace?: boolean];
 }>();
 const values = computed(() =>
   Array.isArray(props.values) ? props.values : [],
@@ -69,9 +69,9 @@ function paste() {
       pasteError.value = `灵敏系数需要 ${values.value.length} 项，与误差分量数量一致`;
       return;
     }
-    emit("update:sensitivities", parsed);
+    emit("update:sensitivities", parsed, true);
   } else {
-    emit("update:values", parsed);
+    emit("update:values", parsed, true);
   }
   page.value = 1;
   pasteColumn.value = null;

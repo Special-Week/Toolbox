@@ -147,6 +147,7 @@ impl ToolboxApp {
         choices: &[String],
     ) {
         let mut value = self.value(tool, key, default);
+        let initial = value.clone();
         ui.push_id((tool.id, key, "field"), |ui| {
             ui.label(RichText::new(label).size(12.).color(MUTED));
             ui.horizontal(|ui| {
@@ -242,7 +243,10 @@ impl ToolboxApp {
                 }
             });
         });
-        self.set_value(tool, key, value);
+        if value != initial {
+            self.mark_input_edited(tool);
+        }
+        self.set_derived_value(tool, key, value);
     }
 
     fn gauge_choice(
@@ -262,6 +266,7 @@ impl ToolboxApp {
         } else {
             options.first().cloned().unwrap_or_default()
         };
+        let initial = value.clone();
         let draw_combo = |ui: &mut egui::Ui, value: &mut String| {
             ui.scope(|ui| {
                 ui.spacing_mut().interact_size.y = 36.;
@@ -288,8 +293,11 @@ impl ToolboxApp {
             draw_combo(ui, &mut value);
         });
         // 输入清空、负号等编辑中间态没有可选公差带时，不抹掉此前选择。
+        if value != initial {
+            self.mark_input_edited(tool);
+        }
         if !options.is_empty() {
-            self.set_value(tool, key, value.clone());
+            self.set_derived_value(tool, key, value.clone());
         }
         value
     }
@@ -416,9 +424,17 @@ impl ToolboxApp {
         let sizes = imperial::un_sizes();
         let previous_size = self.value(tool, "size", "1/4");
         let previous_tpi = self.value(tool, "tpi", "20");
-        let previous_series = parse_number(&previous_tpi)
+        let detected_previous = parse_number(&previous_tpi)
             .ok()
             .and_then(|tpi| imperial::un_series_class(&previous_size, tpi));
+        let preferred_series = self.value(
+            tool,
+            "preferred_series",
+            detected_previous.as_deref().unwrap_or(""),
+        );
+        if !preferred_series.is_empty() {
+            self.set_derived_value(tool, "preferred_series", preferred_series.clone());
+        }
         self.gauge_edit(
             ui,
             tool,
@@ -432,16 +448,17 @@ impl ToolboxApp {
         if size != previous_size {
             let default_tpi = variants
                 .iter()
-                .find(|(series, _)| Some(series) == previous_series.as_ref())
+                .find(|(series, _)| *series == preferred_series)
                 .or_else(|| variants.first())
                 .map(|(_, tpi)| *tpi);
             if let Some(tpi) = default_tpi {
-                self.set_value(tool, "tpi", tpi.to_string());
+                self.set_derived_value(tool, "tpi", tpi.to_string());
             }
         }
         let mut tpis = variants.iter().map(|(_, tpi)| *tpi).collect::<Vec<_>>();
         tpis.sort_by(|a, b| b.total_cmp(a));
         tpis.dedup_by(|a, b| same(*a, *b));
+        let tpi_before_edit = self.value(tool, "tpi", "20");
         self.gauge_edit(
             ui,
             tool,
@@ -467,13 +484,19 @@ impl ToolboxApp {
                 series_options.push(series.clone());
             }
         }
-        self.set_value(tool, "series", detected.into());
-        let selected = self.gauge_choice(ui, tool, "series", "螺纹系列", &series_options, detected);
-        if selected != detected
-            && let Some((_, tpi)) = variants.iter().find(|(series, _)| *series == selected)
-        {
-            self.set_value(tool, "tpi", tpi.to_string());
-            ui.ctx().request_repaint();
+        if imperial::un_diameter(&size).is_ok() {
+            if detected != custom && self.value(tool, "tpi", "20") != tpi_before_edit {
+                self.set_derived_value(tool, "preferred_series", detected.into());
+            }
+            self.set_derived_value(tool, "series", detected.into());
+            let selected = self.gauge_choice(ui, tool, "series", "螺纹系列", &series_options, detected);
+            if selected != detected
+                && let Some((_, tpi)) = variants.iter().find(|(series, _)| *series == selected)
+            {
+                self.set_derived_value(tool, "preferred_series", selected);
+                self.set_derived_value(tool, "tpi", tpi.to_string());
+                ui.ctx().request_repaint();
+            }
         }
         let class = self.gauge_options(
             ui,

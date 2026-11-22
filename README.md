@@ -20,7 +20,7 @@
 | 量规计算（6） | 公制普通螺纹 M、梯形螺纹 Tr、美制统一螺纹 UN、R/NPT 管螺纹、钢筋直螺纹、光滑量规 |
 | 其他工具（4） | 变送器、三次均匀 B 样条插值、校准曲线拟合、计量规范 PDF 下载 |
 
-单位换算包含 257 项单位；温标工具支持双向换算、校准拟合、适用型号的等级允差和分度表。不确定度支持 A/B 类分量、分量的分布与灵敏系数、分组预算；校准曲线支持一次、过原点一次、二次和三次拟合，并输出系数、相关性和残差。
+单位换算包含 257 项单位；温标工具支持双向换算、校准拟合、适用型号的等级允差和分度表。不确定度支持 A/B 类分量、分量的分布、自由度与灵敏系数、分组预算，以及 Welch–Satterthwaite 有效自由度与 95%/99% t 分布包含因子；校准曲线支持一次、过原点一次、二次和三次拟合，并输出系数、相关性和残差。
 
 49 个计算工具可展开“计算过程”，查看本次输入、公式和代入步骤；“计算说明”介绍模型、适用条件和单位约定。较复杂且已接入的公式由数学排版引擎绘制，未识别的表达式保留为文本。
 
@@ -28,7 +28,7 @@
 
 ## 构建与运行
 
-需要支持 Rust 2024 Edition 的工具链。Windows 使用 MSVC 工具链时，还需安装 C++ 构建工具和 Windows SDK。在项目根目录执行：
+需要 Rust 1.89 或更新版本。Windows 使用 MSVC 工具链时，还需安装 C++ 构建工具和 Windows SDK。在项目根目录执行：
 
 ```powershell
 # 开发运行
@@ -48,7 +48,7 @@ Windows 下准备 Rust、Node.js 24、PATH 中的 MinGW 工具链，以及 [Web/
 powershell -NoProfile -ExecutionPolicy Bypass -File .\verify.ps1
 ```
 
-脚本检查 Rust 桌面和 Web 核心、构建 Web 站点、运行 Web 测试和当前 MinGW 架构的 C++ 数值测试，并核对公式目录与量规数据副本。三个版本共享 [边界用例](tests/boundaries.json)。加 `-BuildCpp` 可同时构建当前架构的 C++ 桌面程序，GitHub Actions 在 Windows x64 上使用该选项。
+脚本检查共享计算库 `toolbox-core`（含全量往返不变量测试）、Rust 桌面和 Web 核心、构建 Web 站点、运行 Web 测试和当前 MinGW 架构的 C++ 数值测试，并核对公式目录与量规数据副本。三个版本共享 [边界用例](tests/boundaries.json)。加 `-BuildCpp` 可同时构建当前架构的 C++ 桌面程序，GitHub Actions 在 Windows x64 上使用该选项。
 
 发布前可追加 `-Release -Mingw32Bin <32 位工具链 bin 路径> -Mingw64Bin <64 位工具链 bin 路径>`，以构建 Rust 发布程序及 C++ x86/x64 程序并验证两种 C++ 架构。两个 bin 路径也可以分别用 `TOOLBOX_MINGW32_BIN` 和 `TOOLBOX_MINGW64_BIN` 环境变量提供。
 
@@ -74,7 +74,16 @@ Toolbox/
 ├── build.rs                  # 构建时嵌入 Windows 图标和版本信息
 ├── build.ps1                 # 生成带版本号的 Windows Rust 发布程序
 ├── LICENSE                   # MIT 许可证
+├── .gitattributes            # 跨平台行尾与二进制文件规则
 ├── .gitignore                # 构建产物与本地文件的忽略规则
+├── crates/toolbox-core/      # 桌面端与 Web/Wasm 端共用的纯计算库（零 UI 依赖）
+│   ├── Cargo.toml / Cargo.lock
+│   ├── src/
+│   │   ├── lib.rs            # 纯计算库入口
+│   │   ├── catalog.rs        # 分类、工具名称、简介及页面映射
+│   │   ├── units/            # 22 类单位类型、换算系数与约定
+│   │   └── calculators/      # 温标、压力、湿度、辐射、误差、不确定度、拟合、样条与量规纯模型
+│   └── tests/invariants.rs   # 跨模型往返不变量与数值属性测试
 ├── src/
 │   ├── main.rs               # 程序入口、窗口配置与界面主题
 │   ├── app.rs                # 应用状态、输入保存、页面调度与后台任务
@@ -83,56 +92,26 @@ Toolbox/
 │   ├── app/calibration_archive.rs # 标准热电偶和标准铂电阻的系数档案
 │   ├── app/pdf_download.rs   # 规范 PDF 下载页面、警告及保存提示
 │   ├── pdf_download.rs       # 规范目录搜索、网站请求及 PDF 校验
-│   ├── catalog.rs            # 分类、工具名称、简介及页面映射
 │   ├── navigation.rs         # 侧栏导航、分类折叠与工具选择
 │   ├── fonts.rs              # 中文和数学符号的字体配置
 │   ├── icon.rs               # 窗口图标及页眉图片加载
-│   ├── units/
-│   │   ├── mod.rs            # 单位类型、换算及输入校验
-│   │   ├── data.rs           # 单位名称、符号和换算系数
-│   │   └── notes.rs          # 各类单位的换算约定
 │   └── calculators/
-│       ├── mod.rs            # 计算模块声明
+│       ├── mod.rs            # 桌面计算页面模块声明与纯模型重导出
 │       ├── common.rs         # 共用输入控件、结果卡片和说明展示
-│       ├── explanations.rs   # 各工具的计算说明及详细公式
 │       ├── formula_layout.rs / formula_layout/ # 行内公式识别、数学排版与绘制
 │       ├── math_notation.rs  # 计算过程中的符号显示整理
-│       ├── error_process.rs  # 统计和不确定度计算过程
-│       ├── format.rs         # 数值解析与普通小数格式化
-│       ├── numerics.rs       # 稳定统计、平方和根及有限值检查
-│       ├── calibration.rs    # 多项式、区间反算和 QR 拟合
-│       ├── math.rs           # CVD 基函数、方程求解和标准大气模型
 │       ├── axis.rs           # 曲线坐标轴、刻度及标签
 │       ├── division_table.rs # 分度表、分页预览与 CSV 导出
-│       ├── range_method.rs   # 极差法系数与测量次数校验
 │       ├── its90.rs          # 工业热电偶、CVD 拟合及 β 模型页面
 │       ├── errors.rs         # 重复性、极差法、误差及快速不确定度页面
-│       ├── thermocouple.rs / thermocouple/  # 热电偶曲线、标准热电偶及允差
-│       ├── rtd.rs / rtd/                    # 工业热电阻曲线、换算及允差
-│       ├── sprt.rs / sprt/                  # 标准铂电阻分区、参考函数及校准
-│       ├── thermistor.rs / thermistor/      # 热敏电阻多项式、拟合及页面
-│       ├── pressure.rs / pressure/          # 标准器选型、压力合成与高差修正
-│       ├── humidity.rs / humidity/          # 湿度换算页面与湿空气模型
-│       ├── radiation.rs / radiation/        # 发射率误差与辐射温度修正
-│       ├── transmitter.rs / transmitter/    # 变送器量程、线性及开方换算
-│       ├── uncertainty.rs / uncertainty/    # 不确定度分量树、预算及合成
-│       ├── curve_fit.rs / curve_fit/        # 校准曲线拟合、统计量及图表
-│       ├── spline.rs / spline/              # B 样条插值、曲线及采样导出
-│       └── gauges/
-│           ├── mod.rs        # 量规模块入口与共用计算组织
-│           ├── page.rs       # 参数表单和结果表格
-│           ├── lookup.rs     # 数据表加载、分档查询与缺失值处理
-│           ├── specs.rs      # 常用规格建议
-│           ├── thread.rs     # M、Tr 螺纹及钢筋量规尺寸计算
-│           ├── imperial.rs   # 英寸解析、UN 系列及公差查询
-│           ├── un_data.rs    # UN 内置系列与制造公差数据读取
-│           ├── unified.rs   # UN 工作量规与校对规计算
-│           ├── unified/product.rs  # UN 工件等级、公差及旋合长度
-│           ├── pipe.rs       # R/NPT 管螺纹量规
-│           ├── smooth.rs     # 光滑塞规、环规和卡规
-│           ├── report.rs     # 结果组织、尺寸格式与报告文本
-│           ├── conventions.rs  # 各类量规的技术口径
-│           └── api.rs        # 无界面计算接口
+│       ├── regression.rs     # 共享边界用例回归测试
+│       ├── thermocouple.rs / thermocouple/standard_page.rs # 标准热电偶页面
+│       ├── thermistor.rs / thermistor/page.rs              # 热敏电阻页面
+│       ├── pressure.rs / pressure/                         # 压力选型、压力合成与高差修正页面
+│       ├── curve_fit.rs / curve_fit/chart.rs               # 校准曲线页面与图表
+│       ├── spline.rs / spline/chart.rs                     # B 样条页面、图表与采样导出
+│       ├── rtd.rs / sprt.rs / humidity.rs / radiation.rs / transmitter.rs / uncertainty.rs # 各桌面计算页面
+│       └── gauges/           # 量规桌面页面入口与表单表格（page.rs）
 ├── data/
 │   ├── thermocouple/         # B、E、J、K、N、R、S、T 型参考函数系数
 │   ├── standards/catalog.json # 内置计量规范目录
@@ -174,7 +153,7 @@ Rust 的编译缓存位于 `target/`，发布包位于根目录 `dist/`；C++ �
 - **温标与校准**：按各型号的有效温区和允差等级计算；证书系数、固定点数据应按实际证书填写。SPRT 的 Rtp 为水三相点电阻，热敏电阻多项式使用 K 和 Ω。参考系数来源与核对范围见 [温标数据说明](data/thermocouple/README.md)。
 - **压力与湿度**：高度差以被检表高于标准器为正；气压高度采用标准大气模型。混合比以干空气质量为分母，比湿以湿空气总质量为分母，标准状态含水量按 0 °C、101.325 kPa 表示。
 - **辐射修正**：根据仪表响应选择有效波长或 Planck 模型，误差和修正量的正负方向以结果标签为准。
-- **统计与不确定度**：重复性使用样本标准差；平方和根合成按分量不相关处理，扩展不确定度按所选包含因子计算。
+- **统计与不确定度**：重复性使用样本标准差；平方和根合成按分量不相关处理，支持按 Welch–Satterthwaite 公式计算有效自由度，并可选手动包含因子 $k$ 或 95%/99% 置信概率对应的双侧 $t$ 分布包含因子。
 - **曲线拟合**：对输入数据采用等权最小二乘法；r 为原始数据的 Pearson 相关系数，R² 为决定系数。
 - **结果复算**：Web 通用结果 CSV 和复制报告附带软件版本、计算时的输入及修约说明。三端量规报告保留输入与取值约定。校准曲线拟合报告与 Web CSV 给出归一化预测式，可用其中的基准、尺度和系数复算大基准上的拟合结果。
 - **B 样条**：支持 2～500 个 Q 点，x 须严格递增；采用自然端点条件，支持端点外推和最多 500 万点采样。预览为部分数据，CSV 导出全部采样点。

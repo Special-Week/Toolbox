@@ -1,7 +1,6 @@
 // 限定规范网站来源，校验 PDF 内容并在本地缓存，供下载接口复用。
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, open, readFile, rename, stat, unlink } from "node:fs/promises";
-import { Readable } from "node:stream";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import * as pdfjs from "./vendor/pdfjs/pdf.min.mjs";
@@ -300,7 +299,9 @@ async function atomicWrite(target, data) {
     await file.sync();
     await file.close();
     file = null;
+    const written = await stat(temporary, { bigint: true });
     await rename(temporary, target);
+    return written;
   } finally {
     if (file) await file.close();
     await unlink(temporary).catch((error) => {
@@ -319,6 +320,11 @@ export function createPdfCache({
   let queue = Promise.resolve();
   const fileVersion = (info) =>
     [info.dev, info.ino, info.size, info.mtimeNs, info.ctimeNs].join(":");
+  function rememberVersion(key, version, pages) {
+    verified.delete(key);
+    verified.set(key, { version, pages });
+    if (verified.size > 128) verified.delete(verified.keys().next().value);
+  }
   async function readCache(standard) {
     const pdf = path.join(directory, standard.key + ".pdf");
     try {
@@ -347,9 +353,7 @@ export function createPdfCache({
           throw error;
         }
       }
-      verified.delete(standard.key);
-      verified.set(standard.key, { version, pages });
-      if (verified.size > 128) verified.delete(verified.keys().next().value);
+      rememberVersion(standard.key, version, pages);
       let name = "";
       try {
         const metaPath = path.join(directory, standard.key + ".json");
@@ -404,8 +408,18 @@ export function createPdfCache({
           2,
         ),
       );
-      await atomicWrite(path.join(directory, standard.key + ".pdf"), data);
-      return { ...result, cache: "MISS" };
+      const pdf = path.join(directory, standard.key + ".pdf");
+      const written = await atomicWrite(pdf, data);
+      const info = await stat(pdf, { bigint: true });
+      if (info.dev !== written.dev || info.ino !== written.ino ||
+          info.size !== written.size || info.mtimeNs !== written.mtimeNs) {
+        const replaced = await readCache(standard);
+        if (replaced) return replaced;
+        throw new PdfError("缓存文件正在更新，请重试。", 503);
+      }
+      const version = fileVersion(info);
+      rememberVersion(standard.key, version, meta.pages);
+      return { ...meta, pdf, version, size: Number(info.size), cache: "MISS" };
     });
     queue = job.then(() => {}, () => {});
     return job;
@@ -428,12 +442,7 @@ export function createPdfCache({
     async get(input, { stream = false } = {}) {
       const standard = parseDetailLink(input);
       for (let attempt = 0; attempt < 2; attempt++) {
-        const { pdf, version, size, data, ...meta } = await prepareOnce(standard);
-        if (data) {
-          return stream
-            ? { ...meta, size: data.length, stream: Readable.from([data]) }
-            : { ...meta, data };
-        }
+        const { pdf, version, size, ...meta } = await prepareOnce(standard);
         let file;
         try {
           file = await open(pdf, "r");

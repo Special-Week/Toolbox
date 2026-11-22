@@ -10,7 +10,7 @@ use eframe::egui::{self, CornerRadius, FontId, RichText, Stroke, Vec2};
 use std::ops::Range;
 
 mod chart;
-pub(super) mod model;
+pub(super) use toolbox_core::calculators::curve_fit::model;
 use model::{CurveFit, FitKind, MAX_POINTS};
 
 const ROWS_PER_PAGE: usize = 10;

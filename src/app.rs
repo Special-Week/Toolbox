@@ -31,6 +31,7 @@ pub(crate) struct ToolboxApp {
     // 保留用户输入的原始文本，允许编辑中的空串、负号等暂时无效状态。
     values: HashMap<String, String>,
     history: InputHistory,
+    edited_inputs: HashSet<&'static str>,
     archives: CalibrationArchives,
     prefs: UiPrefs,
     pub(super) favorites: Vec<String>,
@@ -78,6 +79,7 @@ impl Default for ToolboxApp {
             selected_group: None,
             values: history.values.clone(),
             history,
+            edited_inputs: HashSet::new(),
             archives,
             prefs,
             favorites,
@@ -285,7 +287,11 @@ impl ToolboxApp {
         ui: &mut egui::Ui,
         tool: &ToolDef,
     ) -> Option<calibration_archive::SaveRequest> {
-        self.archives.show(ui, tool.id, &mut self.values)
+        let (request, applied) = self.archives.show(ui, tool.id, &mut self.values);
+        if applied {
+            self.mark_input_edited(tool);
+        }
+        request
     }
 
     pub(crate) fn finish_calibration_save(
@@ -1126,7 +1132,11 @@ impl ToolboxApp {
             return;
         };
         if self.opened != Some(id) {
-            if !tool.remembers_inputs() {
+            if tool.remembers_inputs() {
+                if !self.edited_inputs.contains(id) {
+                    self.history.reload_tool(tool, &mut self.values);
+                }
+            } else {
                 self.clear_tool_inputs(tool);
             }
             self.opened = Some(id);
@@ -1212,6 +1222,8 @@ impl ToolboxApp {
                                     .clicked()
                                 {
                                     self.clear_tool_inputs(tool);
+                                    self.history.reset(tool);
+                                    self.mark_input_edited(tool);
                                     if matches!(tool.kind, ToolKind::PdfDownload) {
                                         self.pdf_download.clear();
                                     }
@@ -1278,7 +1290,11 @@ impl ToolboxApp {
                         ui.add_space(28.0);
                     });
             });
-        self.history.observe(tool, &self.values);
+        if self.edited_inputs.remove(id) {
+            self.history.observe(tool, &self.values);
+        } else {
+            self.history.snapshot(tool, &self.values, false);
+        }
         if toggle_fav {
             self.toggle_favorite(ui.ctx(), tool.id);
         }
@@ -1317,7 +1333,18 @@ impl ToolboxApp {
     }
 
     pub(crate) fn set_value(&mut self, tool: &ToolDef, key: &str, value: String) {
+        self.set_derived_value(tool, key, value);
+        self.mark_input_edited(tool);
+    }
+
+    pub(crate) fn set_derived_value(&mut self, tool: &ToolDef, key: &str, value: String) {
         self.values.insert(Self::storage_key(tool, key), value);
+    }
+
+    pub(crate) fn mark_input_edited(&mut self, tool: &ToolDef) {
+        if tool.remembers_inputs() {
+            self.edited_inputs.insert(tool.id);
+        }
     }
 
     pub(crate) fn input(
@@ -1334,7 +1361,9 @@ impl ToolboxApp {
             .values
             .entry(storage_key)
             .or_insert_with(|| default.to_owned());
-        input_row(ui, label, value, hint);
+        if input_row(ui, label, value, hint) {
+            self.mark_input_edited(tool);
+        }
     }
 
     pub(crate) fn inline_input(
@@ -1351,7 +1380,11 @@ impl ToolboxApp {
             .values
             .entry(storage_key)
             .or_insert_with(|| default.to_owned());
-        text_input(ui, value, width.max(52.0), hint).changed()
+        let changed = text_input(ui, value, width.max(52.0), hint).changed();
+        if changed {
+            self.mark_input_edited(tool);
+        }
+        changed
     }
 
     /// 调整项目数量时保留已有字段值；重新增加项目可恢复本次运行中的输入。
@@ -1373,6 +1406,7 @@ impl ToolboxApp {
             .entry(count_key.clone())
             .or_insert_with(|| default.to_string());
         let mut count = stored.parse::<usize>().unwrap_or(default).clamp(min, max);
+        let initial_count = count;
         ui.horizontal_wrapped(|ui| {
             ui.label(
                 RichText::new(format!("{label}  ·  {count} 项"))
@@ -1396,6 +1430,9 @@ impl ToolboxApp {
             }
         });
         self.values.insert(count_key, count.to_string());
+        if count != initial_count {
+            self.mark_input_edited(tool);
+        }
         count
     }
 
@@ -1420,7 +1457,7 @@ impl ToolboxApp {
                 .values
                 .entry(storage_key)
                 .or_insert_with(|| defaults.get(index).copied().unwrap_or("0").to_owned());
-            input_row(ui, &format!("{label} {}", index + 1), value, hint);
+            let changed = input_row(ui, &format!("{label} {}", index + 1), value, hint);
             match parse_number(value) {
                 Ok(number) => values.push(number),
                 Err(error) => {
@@ -1429,6 +1466,9 @@ impl ToolboxApp {
                     }
                     values.push(0.0);
                 }
+            }
+            if changed {
+                self.mark_input_edited(tool);
             }
         }
         first_error.map_or(Ok(values), Err)
@@ -1453,6 +1493,7 @@ impl ToolboxApp {
             .parse::<usize>()
             .unwrap_or(default)
             .min(labels.len() - 1);
+        let initial_index = index;
         form_row(ui, label, |ui| {
             ui.spacing_mut().interact_size.y = 36.0;
             egui::ComboBox::from_id_salt(format!("{}-{key}", tool.id))
@@ -1468,6 +1509,9 @@ impl ToolboxApp {
                 });
         });
         *value = index.to_string();
+        if index != initial_index {
+            self.mark_input_edited(tool);
+        }
         index
     }
 
@@ -1490,12 +1534,16 @@ impl ToolboxApp {
             .parse::<usize>()
             .unwrap_or(default)
             .min(labels.len() - 1);
+        let initial_index = index;
         form_row(ui, label, |ui| {
             ui.push_id((tool.id, key), |ui| {
                 index = segmented_control(ui, labels, index);
             });
         });
         *value = index.to_string();
+        if index != initial_index {
+            self.mark_input_edited(tool);
+        }
         index
     }
 
@@ -1507,7 +1555,7 @@ impl ToolboxApp {
             .map(|unit| format!("{} · {}", unit.name, unit.code))
             .collect::<Vec<_>>();
         let mut process = None;
-        let mut switch_source_to: Option<(usize, String)> = None;
+        let mut switch_source_to: Option<usize> = None;
         let mut copied_text: Option<String> = None;
 
         // 宽屏左输右显双栏工作台，窄屏自动回退为上下单栏。
@@ -1781,7 +1829,7 @@ impl ToolboxApp {
                                                         .interact_pointer_pos()
                                                         .is_some_and(|pos| swap_rect.contains(pos))
                                                 {
-                                                    switch_source_to = Some((unit_idx, formatted));
+                                                    switch_source_to = Some(unit_idx);
                                                 } else {
                                                     copied_text = Some(formatted);
                                                 }
@@ -1798,9 +1846,8 @@ impl ToolboxApp {
             },
         );
 
-        if let Some((next_unit, next_val)) = switch_source_to {
+        if let Some(next_unit) = switch_source_to {
             self.set_value(tool, "source_unit", next_unit.to_string());
-            self.set_value(tool, "value", next_val);
             theme::toast_info(
                 ui.ctx(),
                 format!("已切换输入单位为 {}", units[next_unit].name),

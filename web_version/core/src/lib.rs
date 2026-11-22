@@ -2,15 +2,11 @@
 #![allow(dead_code, unused_imports)]
 
 mod api;
-mod calculators;
-#[path = "../../../src/catalog.rs"]
-mod catalog;
 mod curves;
 mod engineering;
 mod sensors;
 mod statistics;
-#[path = "../../../src/units/mod.rs"]
-mod units;
+pub(crate) use toolbox_core::{calculators, catalog, units};
 
 use api::{Input, Output};
 use catalog::{TOOLS, ToolKind};
@@ -158,6 +154,28 @@ mod explanation_catalog_tests {
             )
             .is_err()
         );
+        // 变送器物理量程校验与压力推荐无覆盖量程时的非法参数拦截
+        assert!(
+            calculate_inner(
+                "transmitter",
+                &json!({"family":1,"unit":0,"low":-500,"high":100,"value":0}).to_string()
+            )
+            .is_err()
+        );
+        assert!(
+            calculate_inner(
+                "transmitter",
+                &json!({"family":2,"low":-10,"high":120,"value":50}).to_string()
+            )
+            .is_err()
+        );
+        assert!(
+            calculate_inner(
+                "pressure_reference_selection",
+                &json!({"mode":2,"low":0,"high":0.0001,"accuracy":-1,"refAccuracy":0.05,"ratio":3}).to_string()
+            )
+            .is_err()
+        );
         for (kind, state) in [
             (catalog::GaugeKind::Metric, json!({"side":"塞规（内螺纹）"})),
             (catalog::GaugeKind::Metric, json!({"side":"环规（外螺纹）"})),
@@ -178,6 +196,34 @@ mod explanation_catalog_tests {
             assert!(text.contains("中径"));
             assert!(text.contains("工作"));
         }
+    }
+
+    #[test]
+    fn transmitter_physical_range_bounds_respect_fahrenheit_absolute_zero() {
+        let ok = calculate_inner(
+            "transmitter",
+            &json!({"family": 1, "unit": 2, "low": -459.67, "high": 100.0, "value": 0.0}).to_string(),
+        );
+        assert!(
+            ok.is_ok(),
+            "华氏度精确绝对零度 -459.67 °F 应允许: {}",
+            ok.err().unwrap_or_default()
+        );
+        let below = calculate_inner(
+            "transmitter",
+            &json!({"family": 1, "unit": 2, "low": -459.68, "high": 100.0, "value": 0.0}).to_string(),
+        );
+        assert!(below.is_err(), "低于绝对零度应拒绝");
+        let rh_err = calculate_inner(
+            "transmitter",
+            &json!({"family": 2, "low": 0.0, "high": 105.0, "value": 50.0}).to_string(),
+        );
+        assert!(rh_err.is_err(), "相对湿度超 100% 应拒绝");
+        let ah_err = calculate_inner(
+            "transmitter",
+            &json!({"family": 4, "low": -1.0, "high": 20.0, "value": 5.0}).to_string(),
+        );
+        assert!(ah_err.is_err(), "绝对湿度负下限应拒绝");
     }
 }
 

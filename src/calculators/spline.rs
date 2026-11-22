@@ -15,7 +15,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::thread;
 
-pub(super) mod model;
+pub(super) use toolbox_core::calculators::spline::model;
 use model::*;
 mod chart;
 use chart::draw_chart;
@@ -501,7 +501,7 @@ fn write_csv(
     {
         let mut writer = BufWriter::with_capacity(256 * 1024, temporary.as_file_mut());
         writer
-            .write_all(b"x,y\r\n")
+            .write_all(b"\xEF\xBB\xBFx,y\r\n")
             .map_err(|error| format!("写入 CSV 标题失败：{error}"))?;
         let mut previous_x = None;
         for index in 0..count {
@@ -516,7 +516,7 @@ fn write_csv(
                 return Err("采样步进导致 x 重复，请增大步进".to_owned());
             }
             let y = spline.y_at_x(x)?;
-            writeln!(writer, "{x},{y}").map_err(|error| format!("写入 CSV 数据失败：{error}"))?;
+            write!(writer, "{x},{y}\r\n").map_err(|error| format!("写入 CSV 数据失败：{error}"))?;
             previous_x = Some(x);
         }
         if cancelled.load(Ordering::Relaxed) {

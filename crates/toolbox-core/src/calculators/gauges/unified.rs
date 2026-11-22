@@ -1,0 +1,184 @@
+//! 美制统一螺纹：按工件等级自动计算中径极限，再生成对应工作量规与校对规。
+use super::{
+    imperial::{INCH, band, un_diameter, un_series_class},
+    lookup::*,
+    report::*,
+    thread::{self, Gauge},
+    un_data,
+};
+mod product;
+use product::ThreadClass;
+
+/// UN 的工件极限由等级模型生成，不接受手填中径或大径上下限。
+pub struct Input<'a> {
+    pub size: &'a str,
+    pub tpi: f64,
+    pub class: &'a str,
+}
+
+pub fn calculate(input: &Input<'_>) -> Result<Report, String> {
+    if !input.tpi.is_finite() || input.tpi <= 0. {
+        return Err("TPI 须大于零".into());
+    }
+    let d_in = un_diameter(input.size)?;
+    let class = ThreadClass::parse(input.class)?;
+    let series = un_series_class(input.size, input.tpi);
+    let product = product::calculate(d_in, input.tpi, series.as_deref(), class)?;
+    let d = d_in * INCH;
+    let p = INCH / input.tpi;
+    let d2 = product.basic_pitch_mm;
+    let d1 = d - 5. * 3_f64.sqrt() / 8. * p;
+    let root = d - 17. * 3_f64.sqrt() / 24. * p;
+    positive_geometry(d, p, d2, root)?;
+    let (lo, hi) = (product.lower_mm, product.upper_mm);
+    let major = product.external_major_max_mm;
+    let db = &database()["DATA"]["un"];
+    let mut out = Report::new(format!(
+        "UN {}-{} {}-{}",
+        input.size.trim(),
+        input.tpi,
+        series.as_deref().unwrap_or("非标"),
+        input.class,
+    ));
+    // 自动生成的工件极限置于摘要区，基本几何与查表明细随后列出。
+    out.metric("工件公差等级", input.class);
+    out.metric("工件中径下限 (mm)", lo);
+    out.metric("工件中径上限 (mm)", hi);
+    out.metric("工件中径公差 (mm)", product.tolerance_mm);
+    out.metric("工件容隙 (mm)", product.allowance_mm);
+    out.metric("旋合长度 Le (mm)", product.engagement_mm);
+    geometry(&mut out, d, p, d2, d1, 60., 1);
+    {
+        use crate::calculators::common::{
+            format_process_computed as c, format_process_number as n,
+        };
+        let pitch_in = 1.0 / input.tpi;
+        let engagement_in = product.engagement_mm / INCH;
+        out.trace(format!("规格 {}：公称直径 = {} inch × 25.4 = {} mm；每英寸牙数 = {}，螺距 = 25.4/TPI = {} mm（{} inch）。", input.size, n(d_in), c(d), n(input.tpi), c(p), c(pitch_in)));
+        out.trace(format!(
+            "基本中径 = [D(inch) − 3√3P(inch)/8] × 25.4 = {} mm；基本小径 = D(mm) − 5√3P(mm)/8 = {} mm。",
+            c(d2),
+            c(d1)
+        ));
+        out.trace(format!("系列 {}、等级 {}：旋合长度 Le = {} inch；D、Le、P 均以 inch 代入，基础中径公差 T₂A = [0.0015·∛D + 0.0015·√Le + 0.015·P^(2/3)] inch，乘以 25.4 后为 {} mm。", series.as_deref().unwrap_or("非标"), input.class, c(engagement_in), c(product.base_tolerance_mm)));
+        out.trace(format!("代入 T₂A = [0.0015 × ∛{} + 0.0015 × √{} + 0.015 × {}^(2/3)] × 25.4 = {} mm；等级公差 = T₂A × 等级系数 = {} × {} = {} mm。", n(d_in), c(engagement_in), c(pitch_in), c(product.base_tolerance_mm), c(product.base_tolerance_mm), n(class.tolerance_factor()), c(product.tolerance_mm)));
+        out.trace(format!(
+            "容隙 = 基础公差 × {} = {} mm；{}。",
+            if matches!(input.class, "1A" | "2A") {
+                "0.3"
+            } else {
+                "0"
+            },
+            c(product.allowance_mm),
+            if class.external() {
+                "外螺纹上限 = 基本中径 − 容隙，下限 = 上限 − 等级公差"
+            } else {
+                "内螺纹下限 = 基本中径，上限 = 下限 + 等级公差"
+            }
+        ));
+        out.trace(format!(
+            "所选等级公差 = {} mm；容隙 = {} mm；工件中径上下限 = {}～{} mm。{}",
+            c(product.tolerance_mm),
+            c(product.allowance_mm),
+            c(lo),
+            c(hi),
+            if class.external() {
+                "外螺纹上限 = 基本中径 − 容隙，下限 = 上限 − 公差。"
+            } else {
+                "内螺纹下限 = 基本中径，上限 = 下限 + 公差。"
+            }
+        ));
+    }
+    if class.external() {
+        out.metric("基本外螺纹小径 (mm)", root);
+    }
+    out.parameter("公称直径 (inch)", d_in);
+    out.parameter("TPI (牙/inch)", input.tpi);
+    out.metric("螺纹系列", series.as_deref().unwrap_or("非标"));
+    out.metric("2A 基础中径公差 (mm)", product.base_tolerance_mm);
+    if class.external() {
+        out.metric("工件大径上限 (mm)", major);
+    }
+    // 工作量规中径统一采用 U；补充的顶径/校对公差不反向改变工件或工作量规中径。
+    let u = un_data::manufacturing_tolerance_mm(d_in, input.tpi)?;
+    let x = band(&db["am"]["x"], d_in, input.tpi);
+    let w = band(&db["am"]["w"], d_in, input.tpi);
+    let optional_mm = |row: Option<&serde_json::Value>, key: &str| {
+        row.map(|r| n(r, key))
+            .filter(|v| valid(*v) && *v > 0.)
+            .map(|v| v * INCH)
+            .unwrap_or(f64::NAN)
+    };
+    let ta = optional_mm(x, "顶径公差");
+    let tw = optional_mm(w, "中径公差");
+    {
+        use crate::calculators::common::format_process_computed as c;
+        out.trace(format!("量规中径制造公差 U = {} mm；顶径公差 Ta = {} mm、校对中径公差 = {} mm（未收录时为 —），均按对应规格查表。", c(u), c(ta), c(tw)));
+        out.trace(if class.external() { format!("外螺纹环规：通端中径 = 工件上限 − U～工件上限 = {}～{} mm；止端 = 工件下限～工件下限 + U = {}～{} mm。", c(hi-u), c(hi), c(lo), c(lo+u)) } else { format!("内螺纹塞规：通端中径 = 工件下限～工件下限 + U = {}～{} mm；止端 = 工件上限 − U～工件上限 = {}～{} mm。", c(lo), c(lo+u), c(hi-u), c(hi)) });
+    }
+    out.metric("中径制造公差 U (mm)", u);
+    out.metric("顶径公差 Ta · 参考 (mm)", ta);
+    out.note("工作量规中径按 U 计算；大径、小径及校对尺寸供参考。");
+    if !class.external() {
+        // 模板方向：通端 [工件下限, 下限+U]；止端 [上限-U, 工件上限]。
+        let mut go = Gauge::new("GO", "通端工作塞规", lo + u / 2., u);
+        go.major = [d - ta, d];
+        go.minor_max = d1;
+        let mut ng = Gauge::new("NO GO", "止端工作塞规", hi - u / 2., u);
+        // 止端已采用负公差，其大径参考基准也必须使用当前中径上限。
+        let ng_major = ng.pd[1] + 0.2 * p + u / 2.;
+        ng.major = [ng_major - ta, ng_major];
+        ng.minor_max = d1;
+        super::trace::unified_plugs(&mut out, &go, &ng, d, d1, lo, hi, u, ta, p);
+        out.tables
+            .push(gauge_table("工作塞规 · 检内螺纹", &[go, ng]));
+        out.show_inches();
+        return out.checked();
+    }
+    out.metric("校对中径公差 · 参考 (mm)", tw);
+    // 模板方向：通端 [工件上限-U, 上限]；止端 [工件下限, 下限+U]。
+    let mut rg = Gauge::new("GO", "通端工作环规", hi - u / 2., u);
+    rg.major_min = major;
+    rg.minor = [root, root];
+    let mut rn = Gauge::new("NO GO", "止端工作环规", lo + u / 2., u);
+    rn.major_min = major;
+    rn.minor = [rn.center - 0.2 * p, rn.center - 0.2 * p];
+    out.tables.push(gauge_table(
+        "工作环规 · 检外螺纹",
+        &[rg.clone(), rn.clone()],
+    ));
+    let specs = [
+        ("TT", "校通-通", rg.pd[0], major, u),
+        ("TZ", "校通-止", rg.pd[1], rg.pd[1] + 0.2 * p, u / 2.),
+        ("ZT", "校止-通", rn.pd[0], major, u),
+        ("ZZ", "校止-止", rn.pd[1], lo, u),
+    ];
+    let cal: Vec<_> = specs
+        .into_iter()
+        .map(|(code, name, up, maj, half)| {
+            let mut g = Gauge::new(code, name, up - tw / 2., tw);
+            g.major = [maj - half, maj + half];
+            g.minor_max = root;
+            g
+        })
+        .collect();
+    super::trace::unified_rings(&mut out, &rg, &rn, &cal, lo, hi, major, root, u, tw, p);
+    if !valid(tw) {
+        out.note("该规格未收录校对中径公差，相应界限不计算。");
+    }
+    out.tables.push(gauge_table("校对塞规 · 参考", &cal));
+    out.show_inches();
+    out.checked()
+}
+
+/// UN 未收录独立磨损储备；在报告数据中移除空列，使界面与复制结果保持一致。
+fn gauge_table(title: &str, gauges: &[Gauge]) -> Table {
+    let mut table = thread::gauge_table(title, gauges);
+    if let Some(column) = table.headings.iter().position(|h| h == "磨损极限 (mm)") {
+        table.headings.remove(column);
+        for row in &mut table.rows {
+            row.remove(column);
+        }
+    }
+    table
+}

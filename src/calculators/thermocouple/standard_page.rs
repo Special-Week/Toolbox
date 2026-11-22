@@ -18,7 +18,7 @@ fn fixed_endpoint_process(
     };
     let mut steps = vec![format!("{label}固定点修正： t = {} °C。", shown_t.clone())];
     match adjustment.method {
-        FixedMethod::SLinear => steps.push(format!("S 型低于 400 °C：修正量 = δ₁ × t / t₁ = {} × {} / {} = {} mV。", format_process_computed(adjustment.offsets[0]), shown_t.clone(), format_process_number(model.points[0].0), format_process_computed(adjustment.value))),
+        FixedMethod::SLinear => steps.push(format!("S 型低于 400 °C：修正量 = δ₁t/t₁ = {} × {} / {} = {} mV。", format_process_computed(adjustment.offsets[0]), shown_t.clone(), format_process_number(model.points[0].0), format_process_computed(adjustment.value))),
         FixedMethod::SQuadratic(terms) => {
             steps.push("S 型不低于 400 °C：修正量 = Σ δᵢ × ∏ⱼ≠ᵢ[(t−tⱼ)/(tᵢ−tⱼ)]；固定点和偏差如上。".to_owned());
             for (i, term) in terms.iter().enumerate() {
@@ -34,7 +34,7 @@ fn fixed_endpoint_process(
             steps.push(format!("各插值项相加，修正量 = {} mV。", format_process_computed(adjustment.value)));
         }
         FixedMethod::BZero => steps.push("B 型低于 23 °C：固定点修正量取 0 mV。".to_owned()),
-        FixedMethod::BLinearFrom23 => steps.push(format!("B 型低温过渡：修正量 = δ₁ × (t−23) / (t₁−23) = {} × ({}−23) / ({}−23) = {} mV。", format_process_computed(adjustment.offsets[0]), shown_t.clone(), format_process_number(model.points[0].0), format_process_computed(adjustment.value))),
+        FixedMethod::BLinearFrom23 => steps.push(format!("B 型低温过渡：修正量 = δ₁(t−23)/(t₁−23) = {} × ({}−23) / ({}−23) = {} mV。", format_process_computed(adjustment.offsets[0]), shown_t.clone(), format_process_number(model.points[0].0), format_process_computed(adjustment.value))),
         FixedMethod::BConstant(index) => steps.push(format!("B 型当前温区使用固定点 {} 的偏差，修正量 = {} mV。", index + 1, format_process_computed(adjustment.value))),
         FixedMethod::BTransition { index, fraction } => steps.push(format!("B 型在固定点 {} 与 {} 间过渡：修正量 = δᵢ + (δᵢ₊₁−δᵢ) × (t−tᵢ−30)/40；δᵢ = {} mV，δᵢ₊₁ = {} mV，tᵢ = {} °C，t = {} °C，过渡比例 = {}，修正量 = {} mV。", index + 1, index + 2, format_process_computed(adjustment.offsets[index]), format_process_computed(adjustment.offsets[index + 1]), format_process_number(model.points[index].0), shown_t.clone(), format_process_computed(fraction), format_process_computed(adjustment.value))),
     }

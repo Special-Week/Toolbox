@@ -178,7 +178,7 @@ pub(crate) fn spline_csv(input: &str, offset: usize, limit: usize) -> Result<Str
         let mut text = String::new();
         for j in offset..stop {
             let x = sample_x(start, end, step, total, j);
-            writeln!(text, "{x},{}", m.y_at_x(x)?).map_err(|_| "CSV 文本生成失败")?;
+            write!(text, "{x},{}\r\n", m.y_at_x(x)?).map_err(|_| "CSV 文本生成失败")?;
         }
         Ok(text)
     })
@@ -192,14 +192,14 @@ mod tests {
     fn spline_csv_uses_the_requested_snapshot_across_chunks() {
         let initial = r#"{"points":[[0,0],[2,2]],"step":1}"#;
         let edited = r#"{"points":[[0,2],[2,4]],"step":0}"#;
-        assert_eq!(spline_csv(initial, 0, 1).unwrap(), "0,0\n");
+        assert_eq!(spline_csv(initial, 0, 1).unwrap(), "0,0\r\n");
         let edited_input = Input::new(edited).unwrap();
         assert_eq!(curve_value("bspline_interpolation", &edited_input, 1.).unwrap(), 3.);
         assert!(spline_csv(edited, 0, 1).is_err());
-        assert_eq!(spline_csv(initial, 1, 10).unwrap(), "1,1\n2,2\n");
+        assert_eq!(spline_csv(initial, 1, 10).unwrap(), "1,1\r\n2,2\r\n");
         let edited = r#"{"points":[[0,2],[2,4]],"step":1}"#;
-        assert_eq!(spline_csv(edited, 2, 1).unwrap(), "2,4\n");
-        assert_eq!(spline_csv(initial, 2, 1).unwrap(), "2,2\n");
+        assert_eq!(spline_csv(edited, 2, 1).unwrap(), "2,4\r\n");
+        assert_eq!(spline_csv(initial, 2, 1).unwrap(), "2,2\r\n");
     }
 
     #[test]

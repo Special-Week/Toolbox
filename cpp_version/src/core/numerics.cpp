@@ -159,6 +159,21 @@ static double compensated(const Values &values) {
     }
     return sum + correction;
 }
+static double balancedSum(const Values &values) {
+    Values ordered;
+    ordered.reserve(values.size());
+    double partial = 0;
+    auto positive = values.begin(), negative = values.begin();
+    const auto end = values.end();
+    while (ordered.size() < values.size()) {
+        positive = std::find_if(positive, end, [](double x) { return x >= 0; });
+        negative = std::find_if(negative, end, [](double x) { return x < 0; });
+        auto &next = negative != end && (partial > 0 || positive == end) ? negative : positive;
+        partial += *next;
+        ordered.push_back(*next++);
+    }
+    return compensated(ordered);
+}
 Statistics statistics(const Values &values) {
     require(values.size() >= 2, "至少需要 2 个测量值");
     finite(values);
@@ -167,7 +182,8 @@ Statistics statistics(const Values &values) {
            maximum = *std::max_element(values.begin(), values.end());
     Values differences, residuals;
     const double scale = std::max(std::abs(minimum), std::abs(maximum));
-    bool valid = scale == 0 || scale >= std::numeric_limits<double>::min() * count;
+    bool valid = (minimum >= 0 || maximum <= 0) &&
+                 (scale == 0 || scale >= std::numeric_limits<double>::min() * count);
     for (double v : values) {
         differences.push_back(v - values[0]);
         valid = valid && std::isfinite(differences.back());
@@ -195,12 +211,20 @@ Statistics statistics(const Values &values) {
         standardError = sd / std::sqrt(count);
     } else {
         residuals.clear();
-        Values normalized;
-        for (double v : values) {
-            normalized.push_back((v / scale) / count);
+        double sum = compensated(values);
+        if (!std::isfinite(sum) && minimum < 0 && maximum > 0) {
+            sum = balancedSum(values);
         }
-        double normalizedMean = compensated(normalized);
-        mean = normalizedMean * scale;
+        double normalizedMean;
+        if (std::isfinite(sum)) {
+            mean = sum / count;
+            normalizedMean = (sum / scale) / count;
+        } else {
+            Values normalized;
+            for (double v : values) normalized.push_back((v / scale) / count);
+            normalizedMean = compensated(normalized);
+            mean = normalizedMean * scale;
+        }
         Values scaled;
         for (double v : values) {
             residuals.push_back(v - mean);

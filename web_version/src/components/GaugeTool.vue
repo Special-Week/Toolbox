@@ -39,7 +39,7 @@ interface Page {
 
 const props = defineProps<{ engine: Engine; tool: Tool; state: State }>();
 const emit = defineEmits<{
-  state: [state: State];
+  state: [state: State, edited?: boolean];
   toast: [message: string];
 }>();
 
@@ -49,20 +49,23 @@ const message = ref("");
 let revision = 0;
 let timer: ReturnType<typeof setTimeout>;
 let normalized = "";
+let draft = props.state;
 
-async function calculate(state: State, changed = "") {
+async function calculate(state: State, edited = false) {
+  draft = state;
   const version = ++revision;
   busy.value = true;
   try {
     const value = await props.engine.request<Page>("gaugePage", {
       tool: props.tool.id,
       input: state,
-      changed,
+      changed: "",
     });
     if (version !== revision) return;
     page.value = value;
+    draft = value.state;
     normalized = JSON.stringify(value.state);
-    emit("state", value.state);
+    emit("state", value.state, edited);
   } catch (e) {
     if (version === revision)
       page.value = {
@@ -79,13 +82,22 @@ async function calculate(state: State, changed = "") {
 
 function change(key: string, value: string) {
   message.value = "";
-  const state = { ...props.state, [key]: value };
+  const state = { ...draft, [key]: value };
+  if (props.tool.id === "gauge_unified" && ["size", "series", "tpi"].includes(key)) {
+    state._threadChange = key;
+    if (key === "tpi") state._tpiAtSize = [draft.size ?? "1/4", value];
+    if (key === "series") {
+      state._lastSeries = value;
+      delete state._tpiAtSize;
+    }
+  }
+  draft = state;
   ++revision;
   busy.value = true;
   normalized = JSON.stringify(state);
-  emit("state", state);
+  emit("state", state, true);
   clearTimeout(timer);
-  timer = setTimeout(() => calculate(state, key), 120);
+  timer = setTimeout(() => calculate(state, true), 120);
 }
 
 watch(

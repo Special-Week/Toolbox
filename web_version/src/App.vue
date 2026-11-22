@@ -14,7 +14,7 @@ import {
   ref,
   watch,
 } from "vue";
-import type { Catalog, Result, State, Tool } from "./types";
+import type { Catalog, Field, Result, State, Tool } from "./types";
 import { changePressureUnit, Engine } from "./engine";
 import { schema, initialize, adjust } from "./schema";
 import { decimal, display, download } from "./format";
@@ -23,7 +23,7 @@ import { calculationNote } from "./notes";
 import CalculationProcess from "./components/CalculationProcess.vue";
 import FormulaText from "./components/FormulaText.vue";
 import { version } from "../package.json";
-import { readRememberedInputs, saveChangedInputs } from "./input-history";
+import { readRememberedInputs, recordInputChanges, saveChangedInputs, type InputEdit, type InputVersions } from "./input-history";
 import FieldEditor from "./components/FieldEditor.vue";
 import QuickUncertainty from "./components/QuickUncertainty.vue";
 import ResultantComponents from "./components/ResultantComponents.vue";
@@ -231,6 +231,7 @@ const collapsed = ref(false);
 const expanded = reactive(new Set<string>());
 const states = reactive<Record<string, State>>({});
 const result = ref<Result | null>(null);
+const automaticCoverage = ref(true);
 let resultSnapshot: { tool: string; input: State } | null = null;
 const busy = ref(false);
 const error = ref("");
@@ -277,7 +278,7 @@ const current = computed<State>(() =>
 );
 const sections = computed(() =>
   selected.value && catalog.value
-    ? schema(selected.value, current.value, catalog.value)
+    ? schema(selected.value, current.value, catalog.value, automaticCoverage.value)
     : [],
 );
 const filtered = computed(() => {
@@ -349,7 +350,8 @@ const equation = computed(() => {
 const logo = import.meta.env.BASE_URL + "toolbox.svg";
 let timer: ReturnType<typeof setTimeout> | undefined;
 let saveTimer: ReturnType<typeof setTimeout> | undefined;
-const savedInputs = new Map<string, string>();
+const editedInputs = new Map<string, InputEdit>();
+const inputVersions: InputVersions = new Map();
 let pressureChange = 0;
 let revision = 0;
 const inputGeneration = ref(0);
@@ -364,13 +366,20 @@ function open(tool: Tool | null, hash = true) {
   selected.value = tool;
   inputScroll = null;
   result.value = null;
+  automaticCoverage.value = true;
   resultSnapshot = null;
   error.value = "";
   message.value = "";
   mobileNav.value = false;
   if (tool && catalog.value) {
     if (!tool.rememberInputs) states[tool.id] = {};
-    else states[tool.id] ??= {};
+    else if (!editedInputs.has(tool.id)) {
+      try {
+        states[tool.id] = readRememberedInputs([tool], localStorage, inputVersions)[tool.id] ?? {};
+      } catch {
+        states[tool.id] ??= {};
+      }
+    }
     initialize(tool, states[tool.id], catalog.value);
     expanded.add(tool.group);
     if (!openTabIds.value.includes(tool.id)) {
@@ -404,7 +413,12 @@ function closeTab(id: string) {
 }
 
 function route() {
-  const id = decodeURIComponent(location.hash.replace(/^#tool\//, ""));
+  let id = "";
+  try {
+    id = decodeURIComponent(location.hash.replace(/^#tool\//, ""));
+  } catch {
+    history.replaceState(null, "", location.pathname + location.search);
+  }
   open(catalog.value?.tools.find((t) => t.id === id) ?? null, false);
 }
 function chooseGroup(group: string) {
@@ -412,8 +426,9 @@ function chooseGroup(group: string) {
   open(null);
   mobileNav.value = false;
 }
-async function change(key: string, value: unknown) {
+async function change(key: string, value: unknown, replace = false) {
   if (!selected.value || !catalog.value) return;
+  const before = { ...current.value };
   if (
     key === "pressureUnit" &&
     ["pressure_reference", "transmitter_reference", "transmitter"].includes(
@@ -428,6 +443,7 @@ async function change(key: string, value: unknown) {
     try {
       await changePressureUnit(state, value, transmitter, isCurrent,
         (input) => engine.request<string[]>("convertPressure", input));
+      if (isCurrent()) markInputsEdited(before);
     } catch (e) {
       if (isCurrent()) message.value = e instanceof Error ? e.message : String(e);
     }
@@ -435,8 +451,13 @@ async function change(key: string, value: unknown) {
   }
   current.value[key] = value;
   adjust(selected.value, current.value, key, catalog.value);
+  const field = Array.isArray(value) ? sections.value
+    .flatMap(section => [...section.fields, ...(section.advanced?.fields ?? [])])
+    .find(field => field.key === key) : undefined;
+  markInputsEdited(before, replace ? key : undefined, field);
 }
 function divisionToggle() {
+  const before = { ...current.value };
   current.value.division = !current.value.division;
   if (current.value.division) {
     delete current.value.tableStart;
@@ -444,8 +465,22 @@ function divisionToggle() {
     current.value.tableStep =
       Number(current.value.unit ?? 0) === 2 ? "1.8" : "1";
   }
+  markInputsEdited(before);
 }
-function save() {
+function setGaugeState(state: State, edited = false) {
+  if (selected.value?.kind !== "gauge") return;
+  const before = current.value;
+  states[selected.value.id] = state;
+  if (edited) markInputsEdited(before);
+}
+function markInputsEdited(before?: State, replace?: string | true, field?: Field) {
+  const tool = selected.value;
+  if (!tool?.rememberInputs) return;
+  const edit = editedInputs.get(tool.id) ?? { fields: new Map<string, unknown>() };
+  if (!before) edit.reset = true;
+  else recordInputChanges(edit, before, current.value, inputVersions.get(tool.id), replace, field);
+  if (!edit.reset && !edit.fields.size && !edit.cells?.size) return;
+  editedInputs.set(tool.id, edit);
   clearTimeout(saveTimer);
   saveTimer = setTimeout(saveNow, 500);
 }
@@ -453,7 +488,9 @@ function saveNow() {
   clearTimeout(saveTimer);
   if (!catalog.value) return;
   try {
-    saveChangedInputs(catalog.value.tools, states, savedInputs, localStorage);
+    const conflicts = saveChangedInputs(catalog.value.tools, states, editedInputs, localStorage, inputVersions);
+    if (conflicts.size)
+      showToast("其他窗口的修改与本次保存冲突，冲突的编辑保留在当前标签页。");
   } catch {
     /* 存储不可用时继续保留本次会话输入。 */
   }
@@ -470,7 +507,6 @@ watch(
     clearTimeout(timer);
     const version = ++revision;
     if (!selected.value || ["gauge", "pdf"].includes(selected.value.kind)) {
-      save();
       busy.value = false;
       return;
     }
@@ -480,11 +516,27 @@ watch(
     timer = setTimeout(async () => {
       try {
         const input = JSON.parse(JSON.stringify(current.value));
+        if (tool.kind === "uncertainty") input.allowManualCoverageFallback = true;
         const value = await engine.request<Result>("calculate", {
           tool: tool.id,
           input,
         });
         if (version === revision) {
+          automaticCoverage.value = value.details?.automaticCoverage !== false;
+          if (typeof value.details?.coverageError === "string") {
+            result.value = null;
+            resultSnapshot = null;
+            error.value = value.details.coverageError;
+            return;
+          }
+          if (value.details?.manualCoverageRequired === true) {
+            const before = { ...current.value };
+            current.value.coverageMode = "0";
+            if (editedInputs.has(tool.id)) markInputsEdited(before);
+            result.value = null;
+            resultSnapshot = null;
+            return;
+          }
           resultSnapshot = { tool: tool.id, input };
           result.value = value;
           error.value = "";
@@ -499,7 +551,6 @@ watch(
         if (version === revision) busy.value = false;
       }
     }, 180);
-    save();
   },
   { immediate: true },
 );
@@ -520,10 +571,12 @@ function reset() {
     ++revision;
     ++inputGeneration.value;
     result.value = null;
+    automaticCoverage.value = true;
     resultSnapshot = null;
     error.value = "";
     states[selected.value.id] = {};
     initialize(selected.value, states[selected.value.id], catalog.value);
+    markInputsEdited();
     saveNow();
     message.value = "已恢复示例输入。";
     showToast("已恢复示例输入");
@@ -531,8 +584,10 @@ function reset() {
 }
 function useCalibration(archive: CalibrationArchive) {
   if (!selected.value || !catalog.value) return;
+  const before = { ...current.value };
   applyCalibration(selected.value, current.value, archive);
   initialize(selected.value, current.value, catalog.value);
+  markInputsEdited(before, true);
 }
 function reload() {
   window.location.reload();
@@ -706,16 +761,6 @@ onMounted(async () => {
   try {
     const c = await engine.request<Catalog>("catalog");
     catalog.value = c;
-    try {
-      const saved = readRememberedInputs(c.tools, localStorage);
-      for (const [id, state] of Object.entries(saved)) {
-        savedInputs.set(id, JSON.stringify(state));
-      }
-      Object.assign(states, saved);
-    } catch {
-      /* 损坏或旧版输入不阻碍网站启动。 */
-    }
-    saveNow();
     route();
     window.addEventListener("hashchange", route);
   } catch (e) {
@@ -1112,7 +1157,7 @@ onUnmounted(() => {
           :engine="engine"
           :tool="selected"
           :state="current"
-          @state="states[selected!.id] = $event"
+          @state="setGaugeState"
           @toast="showToast"
         />
 
@@ -1135,8 +1180,8 @@ onUnmounted(() => {
                       v-if="selected.kind === 'resultant' && field.key === 'values'"
                       :values="current.values"
                       :sensitivities="current.sensitivities"
-                      @update:values="change('values', $event)"
-                      @update:sensitivities="change('sensitivities', $event)"
+                      @update:values="(value, replace) => change('values', value, replace)"
+                      @update:sensitivities="(value, replace) => change('sensitivities', value, replace)"
                     />
                     <QuickUncertainty
                       v-else-if="selected.kind === 'uncertainty' && Number(current.mode) === 1 && field.key === 'aValues'"
@@ -1147,7 +1192,7 @@ onUnmounted(() => {
                       v-else-if="(selected.kind !== 'resultant' || field.key !== 'sensitivities') && !(selected.kind === 'uncertainty' && Number(current.mode) === 1 && ['aAverageCount', 'aSensitivity', 'aDigits', 'aRounding', 'bComponents'].includes(field.key))"
                       :class="{
                         'full-width': !['number', 'text', 'select'].includes(field.type) ||
-                          (selected.kind === 'uncertainty' && ['mode', 'combine', 'coverage', 'digits', 'roundingV2'].includes(field.key)),
+                          (selected.kind === 'uncertainty' && ['mode', 'combine', 'coverageMode', 'coverage', 'digits', 'roundingV2'].includes(field.key)),
                       }"
                       :field="field"
                       :model-value="current[field.key]"
@@ -1161,7 +1206,7 @@ onUnmounted(() => {
                               ? budget.slice(1)
                               : []
                       "
-                      @update:model-value="change(field.key, $event)"
+                      @update:model-value="(value, replace) => change(field.key, value, replace)"
                     />
                   </template>
                 </div>
@@ -1181,7 +1226,7 @@ onUnmounted(() => {
                       :field="field"
                       :model-value="current[field.key]"
                       :catalog="catalog"
-                      @update:model-value="change(field.key, $event)"
+                      @update:model-value="(value, replace) => change(field.key, value, replace)"
                     />
                   </div>
                 </details>

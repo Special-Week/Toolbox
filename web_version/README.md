@@ -121,15 +121,14 @@ web_version/
 ├── tsconfig.json                    # TypeScript 配置
 ├── .gitignore                       # 依赖、构建产物和日志的忽略规则
 ├── core/
-│   ├── Cargo.toml / Cargo.lock       # Wasm 依赖与 release 优化配置
+│   ├── Cargo.toml / Cargo.lock       # Wasm 依赖（引用 crates/toolbox-core）与 release 优化配置
 │   └── src/
 │       ├── lib.rs                   # 向浏览器导出目录、计算和采样接口
 │       ├── api.rs                   # 输入校验、结果结构与分度表
 │       ├── sensors.rs               # 温标与传感器校准适配
 │       ├── engineering.rs           # 压力、湿度、辐射和变送器适配
 │       ├── statistics.rs            # 统计误差和不确定度预算适配
-│       ├── curves.rs                # 拟合、样条与分块采样接口
-│       └── calculators/             # 引用仓库中的 Rust 计算模型
+│       └── curves.rs                # 拟合、样条与分块采样接口
 ├── src/
 │   ├── main.ts                      # Vue 应用入口
 │   ├── App.vue                      # 页面状态、导航及计算调度

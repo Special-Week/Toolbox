@@ -257,10 +257,19 @@ void App::refresh() {
         PostMessageW(window_, rebuildMessage, 0, 0);
     }
 }
+void App::recordInputEdit() {
+    if (selected >= 0)
+        inputHistory_.observe(tools().at(std::size_t(selected)), state);
+}
 void App::open(int index) {
-    if (index >= 0 && index != selected && tools().at(std::size_t(index)).kind != Kind::PdfDownload &&
-        !remembersInputs(tools().at(std::size_t(index)))) {
-        clearToolInputs(tools().at(std::size_t(index)));
+    if (index >= 0 && index != selected) {
+        const auto &tool = tools().at(std::size_t(index));
+        if (remembersInputs(tool)) {
+            if (inputHistory_.reloadTool(tool, state))
+                clearGaugeCache(tool.id);
+        } else if (tool.kind != Kind::PdfDownload) {
+            clearToolInputs(tool);
+        }
     }
     selected = index;
     scroll = 0;
@@ -315,7 +324,7 @@ void App::restoreExample() {
     if (tool.kind == Kind::Uncertainty)
         uncertaintyColumns = {};
     calibrationSelection.erase(tool.id);
-    inputHistory_.observe(tool, state);
+    inputHistory_.observe(tool, state, true);
     inputHistory_.flush(true);
     showToast(tool.kind == Kind::PdfDownload ? L"已清空检索条件" : L"已恢复示例输入");
     refresh();
@@ -651,12 +660,24 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
             HWND child = reinterpret_cast<HWND>(l);
             auto it = nativeKeys_.find(child);
             if (it != nativeKeys_.end()) {
+                const auto recordEdit = [&] {
+                    if (selected < 0)
+                        return;
+                    const auto &tool = tools().at(std::size_t(selected));
+                    const auto prefix = tool.id + ".";
+                    if (it->second.compare(0, prefix.size(), prefix) == 0) {
+                        if (tool.kind == Kind::GaugeUnified)
+                            recordUnifiedGaugeEdit(state, it->second);
+                        inputHistory_.observe(tool, state);
+                    }
+                };
                 if (HIWORD(w) == EN_CHANGE) {
                     int length = GetWindowTextLengthW(child);
                     std::wstring text(std::size_t(length) + 1, L'\0');
                     GetWindowTextW(child, text.data(), length + 1);
                     text.resize(length);
                     state.values[it->second] = text;
+                    recordEdit();
                     if (it->second == "__palette.query")
                         paletteHighlight = 0;
                     refresh();
@@ -675,6 +696,7 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
                         }
                         if (!suggestion || (selection >= 0 && state.choices[it->second] != selection)) {
                             state.choices[it->second] = selection;
+                            recordEdit();
                             refresh();
                         }
                     }
@@ -725,13 +747,9 @@ LRESULT App::message(UINT msg, WPARAM w, LPARAM l) {
         }
         return 0;
     case WM_QUERYENDSESSION:
-        if (selected >= 0)
-            inputHistory_.observe(tools().at(std::size_t(selected)), state);
         inputHistory_.flush(true);
         return TRUE;
     case WM_CLOSE:
-        if (selected >= 0)
-            inputHistory_.observe(tools().at(std::size_t(selected)), state);
         inputHistory_.flush(true);
         exportJob.cancel = true;
         DestroyWindow(window_);
@@ -1173,7 +1191,10 @@ void App::rebuild(bool scrolling) {
         page.showProcess();
         page.explain();
         contentHeight_ = page.y + scroll - top + 52;
-        inputHistory_.observe(tool, state);
+        if (inputHistory_.pending(tool))
+            inputHistory_.observe(tool, state);
+        else
+            inputHistory_.snapshot(tool, state);
     }
     if (contentHeight_ > height - top) {
         float track = height - top - 12, thumb = std::max(28.f, track * (height - top) / contentHeight_);

@@ -3,13 +3,12 @@
 
 mod app;
 mod calculators;
-mod catalog;
+pub(crate) use toolbox_core::{catalog, units};
 mod fonts;
 mod icon;
 mod navigation;
 mod pdf_download;
 mod theme;
-mod units;
 
 use crate::app::ToolboxApp;
 use crate::fonts::configure_fonts;

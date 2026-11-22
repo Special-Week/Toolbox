@@ -390,13 +390,19 @@ int Page::count(const std::string &f, const std::wstring &label, int initial, in
             Ink, true);
     ui.button({x + w - btnW * 2 - 6, y, btnW, 32}, L"− 减少", [thisApp = &app, k, minimum] {
         auto &n = thisApp->state.choices[k];
-        n = std::max(minimum, n - 1);
-        thisApp->refresh();
+        if (n > minimum) {
+            --n;
+            thisApp->recordInputEdit();
+            thisApp->refresh();
+        }
     });
     ui.button({x + w - btnW, y, btnW, 32}, L"＋ 添加", [thisApp = &app, k, maximum] {
         auto &n = thisApp->state.choices[k];
-        n = std::min(maximum, n + 1);
-        thisApp->refresh();
+        if (n < maximum) {
+            ++n;
+            thisApp->recordInputEdit();
+            thisApp->refresh();
+        }
     });
     y += 42;
     return n;

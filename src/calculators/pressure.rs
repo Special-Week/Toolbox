@@ -6,14 +6,20 @@ use crate::catalog::ToolDef;
 use crate::theme;
 use eframe::egui::{self, RichText};
 mod composite;
-pub(crate) mod model;
-mod process;
-mod ranges;
 mod selection;
-pub(crate) mod selection_model;
+pub(crate) use toolbox_core::calculators::pressure::{model, ranges, selection_model};
+pub(crate) mod process {
+    use crate::calculators::common::calculation_process;
+    use eframe::egui;
+    pub(crate) use toolbox_core::calculators::pressure::process::*;
+
+    pub(crate) fn show(ui: &mut egui::Ui, id: &str, lines: &[String]) {
+        calculation_process(ui, id, lines);
+    }
+}
 use model::{Range, hydrostatic_difference, select_standard};
 
-use crate::calculators::math::{isa_altitude, isa_temperature};
+use crate::calculators::math::{isa_altitude_from_display, isa_kinetic_temperature, isa_molecular_temperature};
 
 impl ToolboxApp {
     /// 保留独立通道跨度比评定，供用户主动选择；默认使用压力与电测合成模型。
@@ -509,7 +515,7 @@ impl ToolboxApp {
                                 format_process_computed(atmosphere.upper_pressure)
                             ),
                         );
-                        ui.label("由环境绝压在 −1000～86000 m 的标准大气模型中二分反算标准器位势高度，再从海平面逐层正算被检高度处的压力；标准大气使用 g₀ = 9.80665 m/s²、R = 287.05287 J/(kg·K)。");
+                        ui.label("由环境绝压在 −1000～84852 m 的标准大气模型中二分反算标准器位势高度，再从海平面逐层正算被检高度处的压力；标准大气使用 g₀ = 9.80665 m/s²、R = 287.05287 J/(kg·K)。");
                         let _ = crate::calculators::math::isa_pressure_with_steps(
                             atmosphere.altitude + h,
                             |base, end, temperature, lapse, start, result| {
@@ -612,7 +618,7 @@ impl ToolboxApp {
                             input_key,
                             "位势高度 (m)",
                             "0",
-                            "范围 −1000 至 86 000 m",
+                            "范围 −1000 至 84 852 m",
                         );
                     } else {
                         app.input(
@@ -621,7 +627,7 @@ impl ToolboxApp {
                             input_key,
                             "标准气压 (kPa)",
                             "101.325",
-                            "范围对应 −1000 至 86 000 m",
+                            "范围对应 −1000 至 84 852 m",
                         );
                     }
                     (mode, input_key)
@@ -637,11 +643,12 @@ impl ToolboxApp {
                             input_key,
                             if mode == 0 { "0" } else { "101.325" },
                         )?;
-                        let h = if mode == 0 {
-                            input
+                        let (h, reverse_pressure) = if mode == 0 {
+                            (input, None)
                         } else {
-                            isa_altitude(input * 1_000.0)
-                                .ok_or_else(|| "气压应为正值，并对应 −1000 至 86 000 m".to_owned())?
+                            let (height, pressure) = isa_altitude_from_display(input, 1_000.0, format_number)
+                                .ok_or_else(|| "气压应为正值，并对应 −1000 至 84 852 m".to_owned())?;
+                            (height, Some(pressure))
                         };
                         let mut layers = Vec::new();
                         let model_pressure = crate::calculators::math::isa_pressure_with_steps(
@@ -658,13 +665,9 @@ impl ToolboxApp {
                                 ));
                             },
                         )
-                        .ok_or_else(|| "位势高度应在 −1000 至 86 000 m 之间".to_owned())?;
-                        let pressure_pa = if mode == 0 {
-                            model_pressure
-                        } else {
-                            input * 1_000.0
-                        };
-                        let temperature = isa_temperature(h);
+                        .ok_or_else(|| "位势高度应在 −1000 至 84 852 m 之间".to_owned())?;
+                        let pressure_pa = reverse_pressure.unwrap_or(model_pressure);
+                        let temperature = isa_molecular_temperature(h);
                         let density = pressure_pa / (287.052_87 * temperature);
                         let mut steps = vec![
                             if mode == 0 {
@@ -672,9 +675,16 @@ impl ToolboxApp {
                                     "输入位势高度 = {} m；从 0 m、101325 Pa 开始逐层计算。",
                                     format_process_number(input)
                                 )
+                            } else if pressure_pa != input * 1_000.0 {
+                                format!(
+                                    "输入标准气压 = {} kPa，与边界显示值一致，使用完整端点压力 {} Pa，得到位势高度 {} m。",
+                                    format_process_number(input),
+                                    format_process_computed(pressure_pa),
+                                    format_process_computed(h)
+                                )
                             } else {
                                 format!(
-                                    "输入标准气压 = {} kPa = {} Pa；在 −1000～86000 m 的同一分层模型中二分反算，得到位势高度 {} m。",
+                                    "输入标准气压 = {} kPa = {} Pa；在 −1000～84852 m 的同一分层模型中二分反算，得到位势高度 {} m。",
                                     format_process_number(input),
                                     format_process_computed(pressure_pa),
                                     format_process_computed(h)
@@ -686,7 +696,7 @@ impl ToolboxApp {
                         if mode != 0 {
                             steps.push(format!("反算校验：该高度对应模型气压 {} Pa（与输入值的末位可能因数值精度略有差异）。", format_process_computed(model_pressure)));
                         }
-                        steps.push(format!("标准温度 T = {} K；空气密度 ρ = p / (R × T) = {} / (287.05287 × {}) = {} kg/m³。", format_process_computed(temperature), format_process_computed(pressure_pa), format_process_computed(temperature), format_process_computed(density)));
+                        steps.push(format!("动力学温度 T = Tₘ × (M/M₀) = {} K，分子尺度温度 Tₘ = {} K；空气密度 ρ = p / (R × Tₘ) = {} / (287.05287 × {}) = {} kg/m³。", format_process_computed(isa_kinetic_temperature(h)), format_process_computed(temperature), format_process_computed(pressure_pa), format_process_computed(temperature), format_process_computed(density)));
                         steps.push(
                             "使用标准大气模型；位势高度不等同于实际几何海拔，不含当地气象修正。"
                                 .to_owned(),

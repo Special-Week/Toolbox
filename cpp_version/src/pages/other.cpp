@@ -78,15 +78,39 @@ void renderOther(Page &p) {
             p.processSteps.push_back(L"过程量比例 f = (输入 − 下限)/跨度 = (" + inputNumber(input) + L" − " + inputNumber(a) + L") / " + p.processValue(process.span) + L" = " + p.processValue(result.second) + L"。");
             double signalFraction = function ? std::sqrt(result.second) : result.second;
             p.processSteps.push_back(std::wstring(function ? L"开方特性 s = √f = " : L"线性特性 s = f = ") + p.processValue(signalFraction) + L"。");
-            p.processSteps.push_back(signalFraction == 1
+            p.processSteps.push_back(input == b
                 ? L"信号比例为 1，输出直接取上限 " + inputNumber(sh) + L" " + signals[signal] + L"。"
+                : function && transmitterCrossesZero(output)
+                ? L"信号量程跨零，开方正算用有理化保留近零差值。输出 = (输出跨度² × f − 输出下限²) / (输出跨度 × √f − 输出下限) = " + p.processValue(result.first) + L" " + signals[signal] + L"。"
+                : !function && transmitterCrossesZero(output)
+                ? L"输出信号范围跨零，按上下限的加权和计算并补偿近零抵消：输出 = [(过程量上限 − 输入) × 输出下限 + (输入 − 过程量下限) × 输出上限] / 过程量跨度 = " + p.processValue(result.first) + L" " + signals[signal] + L"。"
+                : !function && transmitterUsesMidpoint(result.second)
+                ? L"以量程中点为基准，输出 = 输出中点 + (输入 − 过程量中点) × (输出跨度 / 过程量跨度) = " + p.processValue(result.first) + L" " + signals[signal] + L"。"
+                : input > a && result.second < std::numeric_limits<double>::min()
+                ? std::wstring(L"归一化比例极小，合并二进制指数后计算输出跨度乘以 ") +
+                    (function ? L"√[(输入 − 过程量下限) / 过程量跨度]" : L"(输入 − 过程量下限) / 过程量跨度") +
+                    L"，再加输出下限，得到 " + p.processValue(result.first) + L" " + signals[signal] + L"。"
+                : result.second > 0.5
+                ? std::wstring(L"以上限为基准，输出 = 输出上限 − (过程量上限 − 输入) × (输出跨度 / 过程量跨度)") + (function ? L" / (1 + √f)" : L"") + L" = " + p.processValue(result.first) + L" " + signals[signal] + L"。"
                 : L"输出 = 输出下限 + s × 输出跨度 = " + inputNumber(sl) + L" + " + p.processValue(signalFraction) + L" × " + p.processValue(output.span) + L" = " + p.processValue(result.first) + L" " + signals[signal] + L"。");
         } else {
             double fraction = (input - sl) / output.span;
             p.processSteps.push_back(L"信号比例 s = (输入 − 输出下限)/输出跨度 = (" + inputNumber(input) + L" − " + inputNumber(sl) + L") / " + p.processValue(output.span) + L" = " + p.processValue(fraction) + L"。");
             p.processSteps.push_back(std::wstring(function ? L"开方反算 f = s² = " : L"线性反算 f = s = ") + p.processValue(result.second) + L"。");
-            p.processSteps.push_back(fraction == 1
+            p.processSteps.push_back(input == sh
                 ? L"信号比例为 1，过程量直接取上限 " + inputNumber(b) + L" " + symbol + L"。"
+                : function && transmitterCrossesZero(process)
+                ? L"过程量范围跨零，平方反算合并分子并补偿舍入误差。过程量 = [输出跨度² × 过程量下限 + (输入 − 输出下限)² × 过程量跨度] / 输出跨度² = " + p.processValue(result.first) + L" " + symbol + L"。"
+                : !function && transmitterCrossesZero(process)
+                ? L"过程量范围跨零，按上下限的加权和计算并补偿近零抵消：过程量 = [(输出上限 − 输入) × 过程量下限 + (输入 − 输出下限) × 过程量上限] / 输出跨度 = " + p.processValue(result.first) + L" " + symbol + L"。"
+                : !function && transmitterUsesMidpoint(fraction)
+                ? L"以量程中点为基准，过程量 = 过程量中点 + (输入 − 输出中点) × (过程量跨度 / 输出跨度) = " + p.processValue(result.first) + L" " + symbol + L"。"
+                : input > sl && result.second < std::numeric_limits<double>::min()
+                ? std::wstring(L"归一化比例极小，合并二进制指数后计算过程量跨度乘以 ") +
+                    (function ? L"[(输入 − 输出下限) / 输出跨度]²" : L"(输入 − 输出下限) / 输出跨度") +
+                    L"，再加过程量下限，得到 " + p.processValue(result.first) + L" " + symbol + L"。"
+                : fraction > 0.5
+                ? std::wstring(L"以上限为基准，过程量 = 过程量上限 − (输出上限 − 输入) × (过程量跨度 / 输出跨度)") + (function ? L" × [2 − (输出上限 − 输入) / 输出跨度]" : L"") + L" = " + p.processValue(result.first) + L" " + symbol + L"。"
                 : L"过程量 = 下限 + f × 跨度 = " + inputNumber(a) + L" + " + p.processValue(result.second) + L" × " + p.processValue(process.span) + L" = " + p.processValue(result.first) + L" " + symbol + L"。");
         }
         return;

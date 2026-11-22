@@ -147,6 +147,9 @@ void renderHumidity(Page &p) {
     p.check();
     double delta, result;
     if (model == 0) {
+        if (response == 0) {
+            require(wavelength >= 0.1 && wavelength <= 100.0, "有效波长须在 0.1～100 µm 内");
+        }
         wavelength = effectiveWavelength(response, wavelength, t);
         auto c = [&](double v) { return p.processValue(v); };
         p.processSteps.push_back(response == 0 ? L"单一有效波长 λ = " + c(wavelength) + L" μm。" : response == 1 ? L"8～14 μm 波段：λ = 9.6 + 221/(t+273.15) = " + c(wavelength) + L" μm。" : L"7～18 μm 波段：λ = 8.7 + 525/(t+273.15) = " + c(wavelength) + L" μm。");
@@ -180,16 +183,23 @@ void renderHumidity(Page &p) {
             correction ? spectrum.corrected(t, bg, instrument, source) : spectrum.apparent(t, bg, source);
         delta = result - t;
         auto c = [&](double v) { return p.processValue(v); };
-        double weight = correction ? instrument/source : source;
-        p.processSteps = {L"Planck 辐射平衡：Bλ(T) = λ⁻⁵/[exp(c₂/(λT))−1]，c₂ = hc/k；温度使用 K。", upper == 0 ? L"单一波长 λ = " + c(wavelength) + L" μm。" : L"平坦波段 " + c(wavelength) + L"～" + c(upper) + L" μm；使用 256 等分复合辛普森积分。", L"程序在对数域求辐射量和加权和，避免指数溢出。", L"", correction ? L"ε源B(T真)+(1−ε源)B(T背景) = ε表B(T示)+(1−ε表)B(T背景)；权重 w = ε表/ε源 = " + c(weight) + L"。" : L"B(T亮) = ε源B(T真)+(1−ε源)B(T背景)；权重 w = ε源 = " + c(weight) + L"。"};
-        if (weight == 1) {
+        const double numerator = correction ? instrument : source, denominator = correction ? source : 1.;
+        const double weight = numerator / denominator;
+        const auto weightDetail = std::isfinite(weight) ? L" = " + c(weight)
+            : L"，ln(w) = " + c(std::log(numerator) - std::log(denominator));
+        p.processSteps = {L"Planck 辐射平衡：Bλ(T) = λ⁻⁵/[exp(c₂/(λT))−1]，c₂ = hc/k；温度使用 K。", upper == 0 ? L"单一波长 λ = " + c(wavelength) + L" μm。" : L"平坦波段 " + c(wavelength) + L"～" + c(upper) + L" μm；使用 256 等分复合辛普森积分。", L"程序在对数域求辐射量和加权和，避免指数溢出。", L"", correction ? L"ε源B(T真)+(1−ε源)B(T背景) = ε表B(T示)+(1−ε表)B(T背景)；权重 w = ε表/ε源" + weightDetail + L"。" : L"B(T亮) = ε源B(T真)+(1−ε源)B(T背景)；权重 w = ε源" + weightDetail + L"。"};
+        if (t == bg) {
+            p.processSteps.push_back(L"输入温度与背景等温，辐射差为零，计算温度等于输入温度。");
+        } else if (numerator == denominator) {
             p.processSteps.push_back(L"w = 1，背景辐射项的系数为零，计算温度等于输入温度。");
         } else {
-            double lt = spectrum.logRadiance(t + 273.15), lb = spectrum.logRadiance(bg + 273.15);
-            double scale = std::max(lt, lb);
-            double signal = std::fma(weight, std::exp(lt - scale), (1 - weight) * std::exp(lb - scale));
-            p.processSteps.push_back(L"ln(B输入) = " + c(lt) + L"，ln(B背景) = " + c(lb) + L"，S = max(两者) = " + c(scale) + L"。");
-            p.processSteps.push_back(L"Q = w·exp(ln(B输入)−S)+(1−w)·exp(ln(B背景)−S) = " + c(signal) + L"；目标 ln(B) = S+ln(Q) = " + c(scale + std::log(signal)) + L"。");
+            const double lt = spectrum.logRadiance(t + 273.15), lb = spectrum.logRadiance(bg + 273.15);
+            const double target = spectrum.logBalance(t, bg, numerator, denominator);
+            p.processSteps.push_back(L"ln(B输入) = " + c(lt) + L"，ln(B背景) = " + c(lb) + L"。");
+            const auto balance = numerator > denominator
+                ? L"逐波长计算辐射差，以 expm1 保留近等温的差值。按 B目标 = B背景 + w × (B输入 − B背景) 合成"
+                : L"在对数域合成 B目标 = w × B输入 + (1−w) × B背景";
+            p.processSteps.push_back(std::wstring(balance) + L"，目标 ln(B) = " + c(target) + L"。");
             p.processSteps.push_back(L"从 0～512 K 开始，必要时将上限加倍，再二分 85 次反算温度。");
         }
         p.processSteps.push_back(L"反算温度 = " + c(result) + L" °C；与输入温度之差 = " + c(delta) + L" °C。");

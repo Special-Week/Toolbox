@@ -1,7 +1,5 @@
 //! 工业热电阻页面；统一左输右显双栏布局，按分度号隔离 R₀ 与电阻输入。
-mod curves;
-pub(super) mod model;
-mod tolerance;
+pub(super) use toolbox_core::calculators::rtd::{model, tolerance};
 
 use crate::app::ToolboxApp;
 use crate::calculators::common::*;

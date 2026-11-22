@@ -226,6 +226,26 @@ void App::captureCalibration(Page &page, std::size_t first) {
     }
 }
 
+static bool isCalibrationKey(const std::string &tool, const std::string &fullKey) {
+    const std::string prefix = tool + ".";
+    if (fullKey.rfind(prefix, 0) != 0)
+        return false;
+    const std::string key = fullKey.substr(prefix.size());
+    if (tool == couple) {
+        return key == "type" || key == "calibration" || key == "source" || key == "fit.count" ||
+               key == "S.zone" || key == "B.zone" || key.rfind("S.cal.", 0) == 0 ||
+               key.rfind("B.cal.", 0) == 0 || key.rfind("fit.", 0) == 0 ||
+               ((key.rfind("S.", 0) == 0 || key.rfind("B.", 0) == 0) &&
+                key.find(".c.") != std::string::npos);
+    }
+    if (tool == platinum) {
+        return key == "model" || key == "hr" || key == "lr" || key == "deviation" || key == "source" ||
+               key == "rtp" || key == "cvd.r0" || key.rfind("cvd.point.", 0) == 0 ||
+               key.rfind("coefficient.", 0) == 0 || key.rfind("fixed.", 0) == 0;
+    }
+    return false;
+}
+
 void App::selectCalibration(int index) {
     if (selected < 0)
         return;
@@ -240,11 +260,16 @@ void App::selectCalibration(int index) {
     int current = 0;
     for (const auto &item : all)
         if (item.tool == tool.id && ++current == index) {
+            for (auto it = state.values.begin(); it != state.values.end();)
+                it = isCalibrationKey(tool.id, it->first) ? state.values.erase(it) : std::next(it);
+            for (auto it = state.choices.begin(); it != state.choices.end();)
+                it = isCalibrationKey(tool.id, it->first) ? state.choices.erase(it) : std::next(it);
             for (const auto &value : item.fields.values)
                 state.values[value.first] = value.second;
             for (const auto &choice : item.fields.choices)
                 state.choices[choice.first] = choice.second;
             calibrationSelection[tool.id] = item.name;
+            inputHistory_.observe(tool, state);
             break;
         }
     refresh();

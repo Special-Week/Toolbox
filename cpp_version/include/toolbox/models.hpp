@@ -140,6 +140,8 @@ double gasDifference(double height, double normalDensity, double gravity, double
                      double ambient, bool gauge);
 std::pair<double, double> transmitterForward(Range process, Range output, bool root, double value);
 std::pair<double, double> transmitterInverse(Range process, Range output, bool root, double value);
+bool transmitterUsesMidpoint(double fraction);
+bool transmitterCrossesZero(Range range);
 
 struct Humidity {
     double rh, saturated, vapor, rawVapor, volumeFraction, ppm, absolute, mass, specific, mixing, normal;
@@ -157,19 +159,29 @@ double earBlackbody(double t, double emissivity, double probe, double probeEmiss
 class Spectrum {
     std::vector<std::pair<double, double>> nodes_;
     double invert(double logarithm) const;
-    double transform(double t, double background, double weight) const;
+    double transform(double t, double background, double numerator, double denominator) const;
 
   public:
     Spectrum(double wavelength, double upper = 0);
     double logRadiance(double kelvin) const;
+    double logBalance(double t, double background, double numerator, double denominator) const;
     double apparent(double t, double background, double emissivity) const;
     double corrected(double indicated, double background, double instrument, double source) const;
 };
 
 // 分量树先计算各子项贡献，再合成并应用父项灵敏系数，防止重复乘系数。
+enum class DofKind { Infinite, Finite, NotApplicable };
+struct DegreesOfFreedom {
+    DofKind kind = DofKind::Infinite;
+    double value = 0;
+    static DegreesOfFreedom infinite() { return {DofKind::Infinite, 0}; }
+    static DegreesOfFreedom finite(double v) { return {DofKind::Finite, v}; }
+    static DegreesOfFreedom notApplicable() { return {DofKind::NotApplicable, 0}; }
+};
 struct UncertaintyDetail {
     std::wstring name;
     double rawStandard, standard, sensitivity, contribution;
+    DegreesOfFreedom dof = DegreesOfFreedom::infinite();
     std::vector<UncertaintyDetail> children;
     std::optional<int> digits;
 };
@@ -183,6 +195,7 @@ struct Component {
     int kind = 1, distribution = 0;
     bool useRange = false, maximum = false;
     std::optional<std::size_t> averageCount;
+    std::optional<double> dof;
     UncertaintyRounding rounding;
     Values values;
     std::vector<Component> children;
@@ -190,6 +203,12 @@ struct Component {
 };
 std::optional<std::size_t> parseAverageCount(const std::wstring &text);
 std::optional<int> parseSignificantDigits(const std::wstring &text);
+std::optional<double> parseDegreesOfFreedom(const std::wstring &text);
+double rangeDegreesOfFreedom(std::size_t n);
+std::wstring formatDegreesOfFreedom(DegreesOfFreedom dof);
+DegreesOfFreedom combineDegreesOfFreedom(const std::vector<std::pair<double, DegreesOfFreedom>> &terms, bool maximum);
+double studentTQuantile(DegreesOfFreedom dof, double confidence);
+double coverageFactor(int mode, double manualK, DegreesOfFreedom dof);
 int uncertaintyExponent(double value);
 double roundSignificant(double value, UncertaintyRounding rounding);
 std::wstring formatRoundedUncertainty(double value, std::optional<int> digits);

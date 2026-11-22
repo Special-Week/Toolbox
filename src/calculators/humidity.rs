@@ -2,8 +2,7 @@
 use crate::calculators::{calibration::TemperatureUnit, common::*};
 use crate::{app::ToolboxApp, catalog::ToolDef, theme};
 use eframe::egui::{self, RichText};
-mod process;
-pub(crate) mod website;
+pub(crate) use toolbox_core::calculators::humidity::{process, website};
 
 impl ToolboxApp {
     pub(crate) fn render_humidity(&mut self, ui: &mut egui::Ui, tool: &ToolDef) {

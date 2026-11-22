@@ -224,21 +224,35 @@ void renderPressure(Page &p) {
                                 mode == 0 ? L"位势高度 (m)" : L"标准气压 (kPa)", mode == 0 ? 0 : 101.325);
         p.rightColumn();
         p.check();
-        double h = mode == 0 ? input : atmosphereAltitude(input * 1000),
-               pressure = mode == 0 ? atmospherePressure(h) : input * 1000;
+        double h = input, pressure;
+        if (mode == 0) {
+            pressure = atmospherePressure(h);
+        } else {
+            pressure = input * 1000;
+            for (const double endpoint : {-1000., 84852.}) {
+                const double endpointPressure = atmospherePressure(endpoint);
+                if (input == parse(utf8(format(endpointPressure / 1000)))) {
+                    pressure = endpointPressure;
+                    break;
+                }
+            }
+            h = atmosphereAltitude(pressure);
+        }
         p.metrics(L"换算结果",
                   {{L"气压高度", format(h) + L" m"},
                    {L"标准气压", format(pressure / 1000) + L" kPa"},
-                   {L"空气密度", format(pressure / (287.05287 * atmosphereTemperature(h))) + L" kg/m³"}});
+                   {L"空气密度", format(pressure / (287.05287 * atmosphereMolecularTemperature(h))) + L" kg/m³"}});
         p.endSplit();
-        p.processSteps.push_back(mode == 0 ? L"输入位势高度 = " + inputNumber(h) + L" m；从 0 m、101325 Pa 开始逐层计算。" : L"输入气压 = " + inputNumber(input) + L" kPa；在 −1000～86000 m 的分层模型中二分 90 次，得到高度 " + p.processValue(h) + L" m。");
+        p.processSteps.push_back(mode == 0 ? L"输入位势高度 = " + inputNumber(h) + L" m；从 0 m、101325 Pa 开始逐层计算。" : L"输入气压 = " + inputNumber(input) + L" kPa；在 −1000～84852 m 的分层模型中二分 90 次，得到高度 " + p.processValue(h) + L" m。");
+        if (mode != 0 && pressure != input * 1000)
+            p.processSteps.push_back(L"输入气压与边界显示值一致，按该端点的完整压力计算。");
         double base = 0, modelPressure = 101325;
-        const double layers[][2] = {{11000, -.0065}, {20000, 0}, {32000, .001}, {47000, .0028}, {51000, 0}, {71000, -.0028}, {86000, -.002}};
+        const double layers[][2] = {{11000, -.0065}, {20000, 0}, {32000, .001}, {47000, .0028}, {51000, 0}, {71000, -.0028}, {84852, -.002}};
         for (const auto &layer : layers) {
-            double end = std::min(h, layer[0]), temperature = atmosphereTemperature(base), lapse = layer[1], startPressure = modelPressure;
+            double end = std::min(h, layer[0]), temperature = atmosphereMolecularTemperature(base), lapse = layer[1], startPressure = modelPressure;
             modelPressure *= lapse == 0 ? std::exp(-9.80665 * (end - base) / (287.05287 * temperature)) : std::pow((temperature + lapse * (end - base)) / temperature, -9.80665 / (287.05287 * lapse));
             p.processSteps.push_back(L"");
-            p.processSteps.push_back(L"层内高度 " + inputNumber(base) + L"～" + p.processValue(end) + L" m，起始温度 T₀ = " + p.processValue(temperature) + L" K，温度梯度 L = " + inputNumber(lapse) + L" K/m，起始气压 p₀ = " + p.processValue(startPressure) + L" Pa。");
+            p.processSteps.push_back(L"层内高度 " + inputNumber(base) + L"～" + p.processValue(end) + L" m，分子尺度温度 T₀ = " + p.processValue(temperature) + L" K，温度梯度 L = " + inputNumber(lapse) + L" K/m，起始气压 p₀ = " + p.processValue(startPressure) + L" Pa。");
             if (lapse == 0) {
                 p.processSteps.push_back(L"恒温层 p = p₀ × exp[−g(h−h₀)/(R T₀)] = " + p.processValue(startPressure) + L" × exp[−9.80665 × (" + p.processValue(end) + L"−" + inputNumber(base) + L") / (287.05287 × " + p.processValue(temperature) + L")] = " + p.processValue(modelPressure) + L" Pa；g = 9.80665，R = 287.05287。");
             } else {
@@ -247,8 +261,8 @@ void renderPressure(Page &p) {
             if (h <= layer[0]) break;
             base = layer[0];
         }
-        double temperature = atmosphereTemperature(h);
-        p.processSteps.push_back(L"标准温度 T = " + p.processValue(temperature) + L" K；空气密度 ρ = p/(R T) = " + p.processValue(pressure) + L" / (287.05287 × " + p.processValue(temperature) + L") = " + p.processValue(pressure / (287.05287 * temperature)) + L" kg/m³。");
+        double temperature = atmosphereMolecularTemperature(h);
+        p.processSteps.push_back(L"动力学温度 T = Tₘ × (M/M₀) = " + p.processValue(atmosphereKineticTemperature(h)) + L" K，分子尺度温度 Tₘ = " + p.processValue(temperature) + L" K；空气密度 ρ = p/(R Tₘ) = " + p.processValue(pressure) + L" / (287.05287 × " + p.processValue(temperature) + L") = " + p.processValue(pressure / (287.05287 * temperature)) + L" kg/m³。");
         return;
     }
     p.beginSplit(0.42f);

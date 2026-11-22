@@ -415,7 +415,15 @@ double PolynomialThermistor::resistance(double t) const {
 double PolynomialThermistor::slope(double t) const {
     double r = resistance(t), kelvin = t + 273.15;
     // ln R = B(1/T)，链式法则 dR/dt = −R·B'(1/T)/T²；无需越过校准温区取差分点。
-    double derivative = -r * polynomialSlope(b, 1 / kelvin).second / (kelvin * kelvin);
+    const double coefficient = polynomialSlope(b, 1 / kelvin).second;
+    finite({coefficient});
+    if (coefficient == 0) return 0;
+    const double left = r / kelvin, right = coefficient / kelvin;
+    double derivative = -left * right;
+    if (!std::isnormal(left) || !std::isnormal(right) || !std::isfinite(derivative)) {
+        const double logMagnitude = std::log(r) + std::log(std::abs(coefficient)) - 2 * std::log(kelvin);
+        derivative = std::copysign(std::exp(logMagnitude), -coefficient);
+    }
     finite({derivative});
     return derivative;
 }

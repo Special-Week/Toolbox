@@ -63,9 +63,9 @@ std::array<double, 3> fitCvd(double r0, const std::array<std::pair<double, doubl
     finite({result[0], result[1], result[2]});
     return result;
 }
-double atmosphereTemperature(double h) {
+double atmosphereMolecularTemperature(double h) {
     finite({h});
-    require(h >= -1000 && h <= 86000, "位势高度应在 −1000 至 86 000 m 之间");
+    require(h >= -1000 && h <= 84852, "位势高度应在 −1000 至 84 852 m 之间");
     static const double layers[][3] = {{0, 288.15, -.0065},    {11000, 216.65, 0}, {20000, 216.65, .001},
                                        {32000, 228.65, .0028}, {47000, 270.65, 0}, {51000, 270.65, -.0028},
                                        {71000, 214.65, -.002}};
@@ -77,13 +77,34 @@ double atmosphereTemperature(double h) {
     }
     return layers[index][1] + layers[index][2] * (h - layers[index][0]);
 }
+double atmosphereKineticTemperature(double h) {
+    // 1976 标准大气表 8，在位势高度节点之间线性插值 M/M₀。
+    constexpr double ratios[][2] = {
+        {79005.7, 1.0}, {79493.3, 0.999996}, {79980.8, 0.999989},
+        {80468.2, 0.999971}, {80955.7, 0.999941}, {81443.0, 0.999909},
+        {81930.2, 0.999870}, {82417.3, 0.999829}, {82904.4, 0.999786},
+        {83391.4, 0.999741}, {83878.4, 0.999694}, {84365.2, 0.999641},
+        {84852.0, 0.9995788},
+    };
+    const double molecular = atmosphereMolecularTemperature(h);
+    for (std::size_t i = 1; i < std::size(ratios); ++i) {
+        const auto &[lo, lowRatio] = ratios[i - 1];
+        const auto &[hi, highRatio] = ratios[i];
+        if (h <= hi) {
+            const double fraction = std::clamp((h - lo) / (hi - lo), 0.0, 1.0);
+            return molecular * std::fma(highRatio - lowRatio, fraction, lowRatio);
+        }
+    }
+    return molecular * ratios[std::size(ratios) - 1][1];
+}
+
 double atmospherePressure(double h) {
-    require(h >= -1000 && h <= 86000, "位势高度应在 −1000 至 86 000 m 之间");
+    require(h >= -1000 && h <= 84852, "位势高度应在 −1000 至 84 852 m 之间");
     double p = 101325, base = 0;
     static const double layers[][2] = {{11000, -.0065}, {20000, 0},      {32000, .001}, {47000, .0028},
-                                       {51000, 0},      {71000, -.0028}, {86000, -.002}};
+                                       {51000, 0},      {71000, -.0028}, {84852, -.002}};
     for (auto &layer : layers) {
-        double end = std::min(h, layer[0]), t = atmosphereTemperature(base), lapse = layer[1];
+        double end = std::min(h, layer[0]), t = atmosphereMolecularTemperature(base), lapse = layer[1];
         p *= lapse == 0 ? std::exp(-9.80665 * (end - base) / (287.05287 * t))
                         : std::pow((t + lapse * (end - base)) / t, -9.80665 / (287.05287 * lapse));
         if (h <= layer[0]) {
@@ -94,9 +115,9 @@ double atmospherePressure(double h) {
     return p;
 }
 double atmosphereAltitude(double p) {
-    require(std::isfinite(p) && p >= atmospherePressure(86000) && p <= atmospherePressure(-1000),
-            "气压应为正值，并对应 −1000 至 86 000 m");
-    double low = -1000, high = 86000;
+    require(std::isfinite(p) && p >= atmospherePressure(84852) && p <= atmospherePressure(-1000),
+            "气压应为正值，并对应 −1000 至 84 852 m");
+    double low = -1000, high = 84852;
     for (int i = 0; i < 90; ++i) {
         double mid = (low + high) / 2;
         if (atmospherePressure(mid) > p) {

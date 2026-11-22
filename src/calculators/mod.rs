@@ -1,23 +1,16 @@
-//! 计算页面与纯数值模型；模型层不依赖 UI，供各工具页面复用。
+//! 计算页面与桌面专用绘制组件；纯数值模型统一来自 toolbox-core crate。
 mod axis;
-mod calibration;
 pub(crate) mod common;
 mod curve_fit;
 mod division_table;
-mod error_process;
 mod errors;
-pub(crate) mod explanations;
-mod format;
 pub(crate) mod formula_layout;
 mod gauges;
 mod humidity;
 mod its90;
-mod math;
 mod math_notation;
-mod numerics;
 pub(crate) mod pressure;
 mod radiation;
-mod range_method;
 #[cfg(test)]
 mod regression;
 mod rtd;
@@ -27,3 +20,7 @@ mod thermistor;
 pub(crate) mod thermocouple;
 mod transmitter;
 mod uncertainty;
+
+pub(crate) use toolbox_core::calculators::{
+    calibration, error_process, explanations, format, math, numerics, range_method,
+};

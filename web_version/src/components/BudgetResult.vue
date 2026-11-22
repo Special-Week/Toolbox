@@ -8,6 +8,7 @@ export interface Detail {
   formattedStandard: string;
   sensitivity: number;
   contribution: number;
+  dof?: string;
   children: Detail[];
 }
 defineProps<{ nodes: Detail[] }>();
@@ -25,6 +26,8 @@ defineProps<{ nodes: Detail[] }>();
           >灵敏系数 <b>{{ display(node.sensitivity) }}</b></span
         ><span
           >贡献 <b>{{ display(node.contribution) }}</b></span
+        ><span v-if="node.dof"
+          >自由度 ν <b>{{ node.dof }}</b></span
         >
       </div>
       <BudgetResult v-if="node.children.length" :nodes="node.children" />

@@ -168,6 +168,14 @@ function child(j: number, value: Budget) {
               换算为标准不确定度。</small
             ></label
           >
+          <label class="field"
+            ><span class="field-label">自由度 ν（选填）</span>
+            <NumericInput
+              :model-value="modelValue.dof ?? ''"
+              @update:model-value="change('dof', $event)"
+            />
+            <small>留空表示 ∞（完全可靠），支持输入正实数。</small>
+          </label>
         </template>
         <label v-else class="field"
           ><span class="field-label">{{
